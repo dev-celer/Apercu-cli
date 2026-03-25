@@ -3,29 +3,150 @@ package database
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 
 	neon "github.com/kislerdm/neon-sdk-go"
 )
 
 type NeonBranchHandler struct {
-	projectId     string
-	apiKey        string
-	parentBranch  string
-	client        *neon.Client
-	previewBranch string
-	databaseUrl   string
+	projectId      string
+	apiKey         string
+	parentBranch   string
+	parentBranchId string
+	client         *neon.Client
+	previewBranch  string
+	databaseUrl    string
 }
 
-func NewNeonBranchHandler(projectId string, apiKey string, parentBranch string) (*NeonBranchHandler, error) {
+func NewNeonBranchHandler(projectId string, apiKey string, parentBranch string, previewBranch string) (*NeonBranchHandler, error) {
 	client, err := neon.NewClient(neon.Config{Key: apiKey})
 	if err != nil {
 		return nil, errors.New(fmt.Sprintf("Failed to connect to Neon API: %v", err))
 	}
 
 	return &NeonBranchHandler{
-		projectId:    projectId,
-		apiKey:       apiKey,
-		parentBranch: parentBranch,
-		client:       client,
+		projectId:     projectId,
+		apiKey:        apiKey,
+		parentBranch:  parentBranch,
+		previewBranch: previewBranch,
+		client:        client,
 	}, nil
+}
+
+func (h *NeonBranchHandler) getBranchByName(branchName string) (*neon.Branch, error) {
+	slog.Debug("Getting branch by name", "branch_name", branchName)
+	resp, err := h.client.ListProjectBranches(h.projectId, &branchName, nil, nil, nil, nil)
+	if err != nil {
+		return nil, errors.New(fmt.Sprintf("Failed to list project branches: %v", err))
+	}
+
+	var previewBranch *neon.Branch
+	for _, branch := range resp.Branches {
+		if branch.Name == branchName {
+			previewBranch = &branch
+		}
+	}
+
+	if previewBranch != nil {
+		slog.Debug("Found branch with id", "branch_id", previewBranch.ID)
+	} else {
+		slog.Debug("No branch with name", "branch_name", branchName)
+	}
+
+	return previewBranch, nil
+}
+
+func (h *NeonBranchHandler) Apply() error {
+	// Find parent branch id from name
+	if h.parentBranchId == "" {
+		parentBranch, err := h.getBranchByName(h.parentBranch)
+		if err != nil {
+			return err
+		}
+		if parentBranch == nil {
+			return errors.New(fmt.Sprintf("Failed to find parent branch with name: %v", h.parentBranch))
+		}
+		h.parentBranchId = parentBranch.ID
+	}
+
+	// Check if preview branch exist
+	previewBranch, err := h.getBranchByName(h.previewBranch)
+	if err != nil {
+		return err
+	}
+	if previewBranch != nil {
+		// Preview branch already exist, populate database_url
+		slog.Debug("Preview branch already exist, populating database_url")
+		slog.Debug("Getting database from project branch")
+		database, err := h.client.ListProjectBranchDatabases(h.projectId, previewBranch.ID)
+		if err != nil {
+			return errors.New(fmt.Sprintf("Failed to list project branch databases: %v", err))
+		}
+		if len(database.Databases) == 0 {
+			return errors.New(fmt.Sprintf("No database found in branch: %v", h.previewBranch))
+		}
+		slog.Debug("Found database with name", "database_name", database.Databases[0].Name)
+
+		slog.Debug("Getting role from project branch")
+		roles, err := h.client.ListProjectBranchRoles(h.projectId, previewBranch.ID)
+		if err != nil {
+			return errors.New(fmt.Sprintf("Failed to list project branch roles: %v", err))
+		}
+		if len(roles.Roles) == 0 {
+			return errors.New(fmt.Sprintf("No role found in branch: %v", h.previewBranch))
+		}
+		slog.Debug("Found role with name", "role_name", roles.Roles[0].Name)
+
+		slog.Debug("Getting database url")
+		resp, err := h.client.GetConnectionURI(h.projectId, &previewBranch.ID, nil, database.Databases[0].Name, roles.Roles[0].Name, nil)
+		if err != nil {
+			return errors.New(fmt.Sprintf("Failed to get branch connection uri: %v", err))
+		}
+		slog.Debug("Database url found", "database_url", resp.URI)
+		h.databaseUrl = resp.URI
+
+		return nil
+	}
+
+	slog.Debug("Preview branch does not exist, creating new one")
+
+	// Create preview branch
+	resp, err := h.client.CreateProjectBranch(h.projectId, &neon.CreateProjectBranchReqObj{
+		BranchCreateRequest: neon.BranchCreateRequest{
+			Branch: &neon.BranchCreateRequestBranch{
+				Name:     &h.previewBranch,
+				ParentID: &h.parentBranchId,
+			},
+			Endpoints: &[]neon.BranchCreateRequestEndpointOptions{
+				{Type: neon.EndpointTypeReadWrite},
+			},
+		},
+	})
+	if err != nil {
+		return errors.New(fmt.Sprintf("Failed to create project branch: %v", err))
+	}
+	slog.Debug("Preview branch created, id", "branch_id", resp.Branch.ID)
+
+	// Retrieve database_url
+	if resp.ConnectionURIs != nil && len(*resp.ConnectionURIs) > 0 {
+		h.databaseUrl = (*resp.ConnectionURIs)[0].ConnectionURI
+		slog.Debug("Preview branch database_url found", "database_url", h.databaseUrl)
+	} else {
+		slog.Debug("Preview branch database_url not found")
+	}
+	return nil
+}
+
+func (h *NeonBranchHandler) Cleanup() error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (h *NeonBranchHandler) Reset() error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (h *NeonBranchHandler) GetDatabaseUrl() string {
+	return h.databaseUrl
 }

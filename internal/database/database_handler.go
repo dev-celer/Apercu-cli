@@ -1,8 +1,8 @@
 package database
 
 type HandlerInterface interface {
-	Create() error
-	Drop() error
+	Apply() error
+	Cleanup() error
 	Reset() error
 	GetDatabaseUrl() string
 }
