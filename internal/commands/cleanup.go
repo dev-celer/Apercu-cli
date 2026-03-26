@@ -8,18 +8,18 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var previewCmd = &cobra.Command{
-	Use:   "preview <name>",
-	Short: "Create or update the preview database for this preview name",
+var cleanupCmd = &cobra.Command{
+	Use:   "cleanup <name>",
+	Short: "Cleanup the preview database for this preview name",
 	Args:  cobra.ExactArgs(1),
-	RunE:  preview,
+	RunE:  cleanup,
 }
 
 func init() {
-	rootCmd.AddCommand(previewCmd)
+	rootCmd.AddCommand(cleanupCmd)
 }
 
-func preview(cmd *cobra.Command, args []string) error {
+func cleanup(cmd *cobra.Command, args []string) error {
 	previewName := args[0]
 	apiKey := os.Getenv("API_KEY")
 	projectId := os.Getenv("PROJECT_ID")
@@ -30,11 +30,10 @@ func preview(cmd *cobra.Command, args []string) error {
 		os.Exit(1)
 	}
 
-	if err := handler.Apply(); err != nil {
+	if err := handler.Cleanup(); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
 
-	fmt.Println(fmt.Sprintf("DATABASE_URL: %s", handler.GetDatabaseUrl()))
 	return nil
 }

@@ -138,13 +138,32 @@ func (h *NeonBranchHandler) Apply() error {
 }
 
 func (h *NeonBranchHandler) Cleanup() error {
-	//TODO implement me
-	panic("implement me")
+	// Find branch id by name
+	previewBranch, err := h.getBranchByName(h.previewBranch)
+	if err != nil {
+		return err
+	}
+	if previewBranch == nil {
+		slog.Debug("Preview branch not found, nothing to cleanup")
+		return nil
+	}
+
+	// Delete branch
+	if _, err := h.client.DeleteProjectBranch(h.projectId, previewBranch.ID); err != nil {
+		return errors.New(fmt.Sprintf("Failed to delete project branch: %v", err))
+	}
+
+	return nil
 }
 
 func (h *NeonBranchHandler) Reset() error {
-	//TODO implement me
-	panic("implement me")
+	if err := h.Cleanup(); err != nil {
+		return err
+	}
+	if err := h.Apply(); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (h *NeonBranchHandler) GetDatabaseUrl() string {
