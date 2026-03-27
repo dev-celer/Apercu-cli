@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"apercu-cli/config"
 	"apercu-cli/internal/database"
 	"fmt"
 	"os"
@@ -9,9 +10,9 @@ import (
 )
 
 var resetCmd = &cobra.Command{
-	Use:   "reset <name>",
+	Use:   "reset",
 	Short: "Reset the preview database for this preview name",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.NoArgs,
 	RunE:  reset,
 }
 
@@ -20,11 +21,18 @@ func init() {
 }
 
 func reset(cmd *cobra.Command, args []string) error {
-	previewName := args[0]
-	apiKey := os.Getenv("API_KEY")
-	projectId := os.Getenv("PROJECT_ID")
+	configFile, err := config.LoadConfig(".")
+	if err != nil {
+		return err
+	}
 
-	handler, err := database.NewNeonBranchHandler(projectId, apiKey, "production", previewName)
+	var dbConfig config.Database
+	for _, db := range configFile.Databases {
+		dbConfig = db
+		break
+	}
+
+	handler, err := database.GetSourceDatabaseHandler(dbConfig)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
