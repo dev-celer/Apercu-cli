@@ -53,7 +53,8 @@ type Config struct {
 }
 
 type Database struct {
-	Source *DatabaseSource `yaml:"source"`
+	Source    *DatabaseSource    `yaml:"source"`
+	Migration *DatabaseMigration `yaml:"migration"`
 }
 
 type DatabaseSource struct {
@@ -72,4 +73,10 @@ type DatabaseNeonSource struct {
 	ApiKey        string `yaml:"api_key"`
 	ParentBranch  string `yaml:"parent_branch"`
 	PreviewBranch string `yaml:"preview_branch"`
+}
+
+type DatabaseMigration struct {
+	Runner  string            `yaml:"runner"`
+	Command []string          `yaml:"command"`
+	Env     map[string]string `yaml:"env"`
 }
