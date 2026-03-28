@@ -4,18 +4,20 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
+	"strconv"
 
 	neon "github.com/kislerdm/neon-sdk-go"
 )
 
 type NeonBranchHandler struct {
-	projectId      string
-	apiKey         string
-	parentBranch   string
-	parentBranchId string
-	client         *neon.Client
-	previewBranch  string
-	databaseUrl    string
+	projectId        string
+	apiKey           string
+	parentBranch     string
+	parentBranchId   string
+	client           *neon.Client
+	previewBranch    string
+	connectionFields ConnectionFields
 }
 
 func NewNeonBranchHandler(projectId string, apiKey string, parentBranch string, previewBranch string) (*NeonBranchHandler, error) {
@@ -30,6 +32,29 @@ func NewNeonBranchHandler(projectId string, apiKey string, parentBranch string, 
 		parentBranch:  parentBranch,
 		previewBranch: previewBranch,
 		client:        client,
+	}, nil
+}
+
+func (h *NeonBranchHandler) extractConnectionFieldsFromUrl(databaseUrl string) (ConnectionFields, error) {
+	reg := regexp.MustCompile(`postgresql:\/\/(.+?):(.+?)@(.+?)[\/:](\d*)\/?(.+?)\?`)
+	matches := reg.FindStringSubmatch(databaseUrl)
+
+	portStr := matches[4]
+	if portStr == "" {
+		portStr = "5432"
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return ConnectionFields{}, errors.New(fmt.Sprintf("Failed to parse port from database url: %v", err))
+	}
+
+	return ConnectionFields{
+		Host:     matches[3],
+		Port:     port,
+		User:     matches[1],
+		Password: matches[2],
+		Database: matches[5],
+		Url:      databaseUrl,
 	}, nil
 }
 
@@ -75,7 +100,7 @@ func (h *NeonBranchHandler) Apply() error {
 		return err
 	}
 	if previewBranch != nil {
-		// Preview branch already exist, populate database_url
+		// Preview branch already exist, populate connection fields
 		slog.Debug("Preview branch already exist, populating database_url")
 		slog.Debug("Getting database from project branch")
 		database, err := h.client.ListProjectBranchDatabases(h.projectId, previewBranch.ID)
@@ -103,8 +128,14 @@ func (h *NeonBranchHandler) Apply() error {
 			return errors.New(fmt.Sprintf("Failed to get branch connection uri: %v", err))
 		}
 		slog.Debug("Database url found", "database_url", resp.URI)
-		h.databaseUrl = resp.URI
 
+		// Extract values from database url
+		connection, err := h.extractConnectionFieldsFromUrl(resp.URI)
+		if err != nil {
+			return err
+		}
+
+		h.connectionFields = connection
 		return nil
 	}
 
@@ -129,8 +160,14 @@ func (h *NeonBranchHandler) Apply() error {
 
 	// Retrieve database_url
 	if resp.ConnectionURIs != nil && len(*resp.ConnectionURIs) > 0 {
-		h.databaseUrl = (*resp.ConnectionURIs)[0].ConnectionURI
-		slog.Debug("Preview branch database_url found", "database_url", h.databaseUrl)
+		// Extract values from database url
+		connection, err := h.extractConnectionFieldsFromUrl((*resp.ConnectionURIs)[0].ConnectionURI)
+		if err != nil {
+			return err
+		}
+
+		h.connectionFields = connection
+		slog.Debug("Preview branch database_url found", "database_url", h.connectionFields.Url)
 	} else {
 		slog.Debug("Preview branch database_url not found")
 	}
@@ -178,6 +215,6 @@ func (h *NeonBranchHandler) Reset() error {
 	return nil
 }
 
-func (h *NeonBranchHandler) GetDatabaseUrl() string {
-	return h.databaseUrl
+func (h *NeonBranchHandler) GetConnectionFields() ConnectionFields {
+	return h.connectionFields
 }

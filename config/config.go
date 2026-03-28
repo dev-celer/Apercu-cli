@@ -32,7 +32,6 @@ func ReplaceVariables(data string, internalVariables map[string]string) string {
 	var reg = regexp.MustCompile(`\${{\s*(\w+)\s*}}`)
 
 	return reg.ReplaceAllStringFunc(data, func(match string) string {
-		slog.Debug("Replacing variable in regex", "variable", match)
 		submatches := reg.FindStringSubmatch(match)
 		varName := submatches[1]
 		envValue := internalVariables[varName]

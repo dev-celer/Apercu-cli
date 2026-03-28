@@ -7,11 +7,20 @@ import (
 	"log/slog"
 )
 
+type ConnectionFields struct {
+	Host     string
+	Port     int
+	User     string
+	Password string
+	Database string
+	Url      string
+}
+
 type HandlerInterface interface {
 	Apply() error
 	Cleanup() error
 	Reset() error
-	GetDatabaseUrl() string
+	GetConnectionFields() ConnectionFields
 }
 
 func GetSourceDatabaseHandler(dbConfig config.Database) (HandlerInterface, error) {

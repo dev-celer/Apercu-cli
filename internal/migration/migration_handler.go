@@ -2,8 +2,10 @@ package migration
 
 import (
 	"apercu-cli/config"
+	"apercu-cli/internal/database"
 	"context"
 	"log/slog"
+	"strconv"
 	"time"
 )
 
@@ -14,14 +16,19 @@ type HandlerInterface interface {
 	GetOutput() string
 }
 
-func GetMigrationHandler(dbConfig config.Database, databaseUrl string) HandlerInterface {
+func GetMigrationHandler(dbConfig config.Database, connection database.ConnectionFields) HandlerInterface {
 	if dbConfig.Migration == nil {
 		slog.Debug("No migration specified")
 		return nil
 	}
 
 	internalEnv := map[string]string{
-		"PREVIEW_DATABASE_URL": databaseUrl,
+		"PREVIEW_DATABASE_URL": connection.Url,
+		"PREVIEW_USER":         connection.User,
+		"PREVIEW_PASSWORD":     connection.Password,
+		"PREVIEW_HOST":         connection.Host,
+		"PREVIEW_DATABASE":     connection.Database,
+		"PREVIEW_PORT":         strconv.Itoa(connection.Port),
 	}
 
 	commands := make([]string, len(dbConfig.Migration.Command))

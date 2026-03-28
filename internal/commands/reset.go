@@ -5,7 +5,6 @@ import (
 	"apercu-cli/internal/database"
 	"apercu-cli/internal/migration"
 	"fmt"
-	"log/slog"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -48,18 +47,26 @@ func reset(cmd *cobra.Command, args []string) error {
 
 	// Apply the migrations
 	ctx := cmd.Context()
-	migrationHandler := migration.GetMigrationHandler(dbConfig, dbHandler.GetDatabaseUrl())
+	migrationHandler := migration.GetMigrationHandler(dbConfig, dbHandler.GetConnectionFields())
 	if migrationHandler != nil {
 		if err := migrationHandler.Apply(ctx); err != nil {
 			fmt.Println("Migration failed")
-			fmt.Println(migrationHandler.GetOutput())
+			if output := migrationHandler.GetOutput(); output != "" {
+				fmt.Println(migrationHandler.GetOutput())
+			}
 			fmt.Println(err)
 			os.Exit(1)
 		}
-		slog.Debug(migrationHandler.GetOutput())
-		fmt.Println(fmt.Sprintf("Migration completed successfully, completed in %s", migrationHandler.GetDuration().String()))
+		if output := migrationHandler.GetOutput(); output != "" {
+			fmt.Println(migrationHandler.GetOutput())
+		}
+		if duration := migrationHandler.GetDuration(); duration != nil {
+			fmt.Println(fmt.Sprintf("Migration completed successfully, completed in %s", duration.String()))
+		} else {
+			fmt.Println("Migration completed successfully")
+		}
 	}
 
-	fmt.Println(fmt.Sprintf("DATABASE_URL: %s", dbHandler.GetDatabaseUrl()))
+	fmt.Println(fmt.Sprintf("DATABASE_URL: %s", dbHandler.GetConnectionFields().Url))
 	return nil
 }
