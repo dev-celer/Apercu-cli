@@ -121,6 +121,7 @@ func (h *DockerHandler) Apply(ctx context.Context) error {
 		return errors.New(fmt.Sprintf("Failed to wait for docker container: %v", err))
 	case status := <-statusCh:
 		if status.StatusCode != 0 {
+			h.output = buffer.String()
 			return errors.New(fmt.Sprintf("Docker container exited with status code: %d", status.StatusCode))
 		}
 	}
