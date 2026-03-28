@@ -123,6 +123,7 @@ func (h *DockerHandler) Apply(ctx context.Context) error {
 	// Set end time
 	h.endTime = new(time.Now())
 	slog.Debug("Docker container finished")
+	h.output = buffer.String()
 
 	// Cleanup container
 	slog.Debug("Cleanup docker container")
