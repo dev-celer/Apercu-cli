@@ -11,7 +11,7 @@ import (
 
 var cleanupCmd = &cobra.Command{
 	Use:   "cleanup",
-	Short: "Cleanup the preview database for this preview name",
+	Short: "Cleanup the preview database",
 	Args:  cobra.NoArgs,
 	RunE:  cleanup,
 }

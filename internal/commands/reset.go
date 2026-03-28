@@ -13,7 +13,7 @@ import (
 
 var resetCmd = &cobra.Command{
 	Use:   "reset",
-	Short: "Reset the preview database for this preview name",
+	Short: "Reset the preview database",
 	Args:  cobra.NoArgs,
 	RunE:  reset,
 }

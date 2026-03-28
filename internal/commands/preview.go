@@ -13,7 +13,7 @@ import (
 
 var previewCmd = &cobra.Command{
 	Use:   "preview",
-	Short: "Create or update the preview database for this preview name",
+	Short: "Create or update the preview database",
 	Args:  cobra.NoArgs,
 	RunE:  preview,
 }
