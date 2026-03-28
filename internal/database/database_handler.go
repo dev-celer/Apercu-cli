@@ -26,10 +26,10 @@ func GetSourceDatabaseHandler(dbConfig config.Database) (HandlerInterface, error
 			return nil, errors.New("missing neon source database configuration")
 		}
 		return NewNeonBranchHandler(
-			dbConfig.Source.Neon.ProjectId,
-			dbConfig.Source.Neon.ApiKey,
-			dbConfig.Source.Neon.ParentBranch,
-			dbConfig.Source.Neon.PreviewBranch,
+			config.ReplaceVariables(dbConfig.Source.Neon.ProjectId, map[string]string{}),
+			config.ReplaceVariables(dbConfig.Source.Neon.ApiKey, map[string]string{}),
+			config.ReplaceVariables(dbConfig.Source.Neon.ParentBranch, map[string]string{}),
+			config.ReplaceVariables(dbConfig.Source.Neon.PreviewBranch, map[string]string{}),
 		)
 	}
 

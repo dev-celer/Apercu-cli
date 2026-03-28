@@ -20,8 +20,6 @@ func LoadConfig(path string) (Config, error) {
 		return Config{}, errors.New(fmt.Sprintf("Failed to read config file: %v", err))
 	}
 
-	data = []byte(replaceVariables(string(data)))
-
 	var config Config
 	err = yaml.Unmarshal(data, &config)
 	if err != nil {
@@ -30,14 +28,17 @@ func LoadConfig(path string) (Config, error) {
 	return config, nil
 }
 
-func replaceVariables(data string) string {
+func ReplaceVariables(data string, internalVariables map[string]string) string {
 	var reg = regexp.MustCompile(`\${{\s*(\w+)\s*}}`)
 
 	return reg.ReplaceAllStringFunc(data, func(match string) string {
 		slog.Debug("Replacing variable in regex", "variable", match)
 		submatches := reg.FindStringSubmatch(match)
 		varName := submatches[1]
-		envValue := os.Getenv(varName)
+		envValue := internalVariables[varName]
+		if envValue == "" {
+			envValue = os.Getenv(varName)
+		}
 		if envValue == "" {
 			fmt.Println(fmt.Sprintf("WARNING: Variable %s not set", varName))
 		}
