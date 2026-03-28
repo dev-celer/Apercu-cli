@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
@@ -16,19 +17,23 @@ import (
 )
 
 type DockerHandler struct {
-	image     string
-	command   []string
-	env       map[string]string
-	startTime *time.Time
-	endTime   *time.Time
-	output    string
+	image       string
+	command     []string
+	env         map[string]string
+	workDir     string
+	localFolder string
+	startTime   *time.Time
+	endTime     *time.Time
+	output      string
 }
 
-func NewDockerHandler(image string, command []string, env map[string]string) *DockerHandler {
+func NewDockerHandler(image string, command []string, env map[string]string, workDir string, localFolder string) *DockerHandler {
 	return &DockerHandler{
-		image:   image,
-		command: command,
-		env:     env,
+		image:       image,
+		command:     command,
+		env:         env,
+		workDir:     workDir,
+		localFolder: localFolder,
 	}
 }
 
@@ -61,12 +66,13 @@ func (h *DockerHandler) Apply(ctx context.Context) error {
 	containerConfig := container.Config{
 		Image:      h.image,
 		Cmd:        h.command,
-		WorkingDir: "/data",
+		WorkingDir: h.workDir,
 		Env:        env,
 	}
 	cwd, _ := os.Getwd()
+	path := filepath.Join(cwd, h.localFolder)
 	hostConfig := container.HostConfig{
-		Binds:         []string{cwd + ":/data"},
+		Binds:         []string{path + ":" + h.workDir},
 		RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyDisabled},
 	}
 

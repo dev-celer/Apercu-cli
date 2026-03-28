@@ -75,7 +75,9 @@ type DatabaseNeonSource struct {
 }
 
 type DatabaseMigration struct {
-	Runner  string            `yaml:"runner"`
-	Command []string          `yaml:"command"`
-	Env     map[string]string `yaml:"env"`
+	Runner      string            `yaml:"runner"`
+	Command     []string          `yaml:"command"`
+	Env         map[string]string `yaml:"env"`
+	LocalFolder string            `yaml:"local_folder,omitempty"`
+	WorkDir     *string           `yaml:"work_dir"`
 }

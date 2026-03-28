@@ -41,9 +41,16 @@ func GetMigrationHandler(dbConfig config.Database, connection database.Connectio
 		env[k] = config.ReplaceVariables(v, internalEnv)
 	}
 
+	workDir := "/data"
+	if dbConfig.Migration.WorkDir != nil {
+		workDir = config.ReplaceVariables(*dbConfig.Migration.WorkDir, internalEnv)
+	}
+
 	return NewDockerHandler(
 		config.ReplaceVariables(dbConfig.Migration.Runner, internalEnv),
 		commands,
 		env,
+		workDir,
+		config.ReplaceVariables(dbConfig.Migration.LocalFolder, internalEnv),
 	)
 }
