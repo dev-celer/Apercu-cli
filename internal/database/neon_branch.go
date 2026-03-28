@@ -157,12 +157,24 @@ func (h *NeonBranchHandler) Cleanup() error {
 }
 
 func (h *NeonBranchHandler) Reset() error {
-	if err := h.Cleanup(); err != nil {
+	// Find branch id by name
+	previewBranch, err := h.getBranchByName(h.previewBranch)
+	if err != nil {
 		return err
 	}
-	if err := h.Apply(); err != nil {
-		return err
+	if previewBranch == nil {
+		slog.Debug("Preview branch not found, creating")
+		return h.Apply()
 	}
+
+	// Reset branch to parent state
+	_, err = h.client.RestoreProjectBranch(h.projectId, previewBranch.ID, neon.BranchRestoreRequest{
+		SourceBranchID: *previewBranch.ParentID,
+	})
+	if err != nil {
+		return errors.New(fmt.Sprintf("Failed to restore project branch: %v", err))
+	}
+
 	return nil
 }
 
