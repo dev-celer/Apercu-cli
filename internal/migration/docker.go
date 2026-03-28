@@ -60,7 +60,7 @@ func (h DockerHandler) Apply(ctx context.Context) error {
 
 	containerConfig := container.Config{
 		Image:      h.image,
-		Entrypoint: h.command,
+		Cmd:        h.command,
 		WorkingDir: "/data",
 		Env:        env,
 	}
