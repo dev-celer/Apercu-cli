@@ -76,9 +76,6 @@ func (h *DockerHandler) Apply(ctx context.Context) error {
 		RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyDisabled},
 	}
 
-	// Initialize start time
-	slog.Debug("Starting docker container")
-	h.startTime = new(time.Now())
 	// Create container
 	resp, err := cli.ContainerCreate(
 		ctx,
@@ -92,6 +89,14 @@ func (h *DockerHandler) Apply(ctx context.Context) error {
 		return errors.New(fmt.Sprintf("Failed to create docker container: %v", err))
 	}
 	slog.Debug("Docker container created", "container_id", resp.ID)
+
+	// Initialize start time
+	slog.Debug("Starting docker container")
+	h.startTime = new(time.Now())
+	// Start container
+	if err := cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+		return errors.New(fmt.Sprintf("Failed to start docker container: %v", err))
+	}
 
 	// Read logs until completion
 	slog.Debug("Reading docker container logs")
