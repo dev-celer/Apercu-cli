@@ -32,12 +32,12 @@ func NewDockerHandler(image string, command []string, env map[string]string) *Do
 	}
 }
 
-func (h DockerHandler) GetCount() (int, error) {
+func (h *DockerHandler) GetCount() (int, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (h DockerHandler) Apply(ctx context.Context) error {
+func (h *DockerHandler) Apply(ctx context.Context) error {
 	cli, err := client.NewClientWithOpts(client.FromEnv)
 	if err != nil {
 		return errors.New(fmt.Sprintf("Failed to connect to Docker: %v", err))
@@ -127,7 +127,7 @@ func (h DockerHandler) Apply(ctx context.Context) error {
 	return nil
 }
 
-func (h DockerHandler) GetDuration() *time.Duration {
+func (h *DockerHandler) GetDuration() *time.Duration {
 	if h.startTime == nil || h.endTime == nil {
 		return nil
 	}
@@ -135,6 +135,6 @@ func (h DockerHandler) GetDuration() *time.Duration {
 	return new(h.endTime.Sub(*h.startTime))
 }
 
-func (h DockerHandler) GetOutput() string {
+func (h *DockerHandler) GetOutput() string {
 	return h.output
 }
