@@ -9,6 +9,7 @@ import (
 )
 
 var debug bool
+var runnerOutput bool
 
 var rootCmd = &cobra.Command{
 	Use:   "apercu",
@@ -17,12 +18,14 @@ var rootCmd = &cobra.Command{
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		if debug {
 			slog.SetLogLoggerLevel(slog.LevelDebug)
+			runnerOutput = true
 		}
 	},
 }
 
 func init() {
 	rootCmd.PersistentFlags().BoolVarP(&debug, "debug", "d", false, "enable debug output")
+	rootCmd.PersistentFlags().BoolVarP(&runnerOutput, "runner-output", "o", false, "enable runner output")
 }
 
 func Execute() {

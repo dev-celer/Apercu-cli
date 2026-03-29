@@ -30,8 +30,10 @@ func ApplyMigration(ctx context.Context, dbConfig config.Database, connectionFie
 			fmt.Println(err)
 			os.Exit(1)
 		}
-		if output := migrationHandler.GetOutput(); output != "" {
-			fmt.Println(migrationHandler.GetOutput())
+		if runnerOutput {
+			if output := migrationHandler.GetOutput(); output != "" {
+				fmt.Println(migrationHandler.GetOutput())
+			}
 		}
 
 		// Get the new migration count
