@@ -53,8 +53,8 @@ func preview(cmd *cobra.Command, args []string) error {
 	migrationMessage := ApplyMigration(ctx, dbConfig, conn)
 
 	if migrationMessage != "" {
-		fmt.Println(migrationMessage)
+		fmt.Println("\n" + migrationMessage)
 	}
-	fmt.Println(fmt.Sprintf("DATABASE_URL: %s", conn.Url))
+	fmt.Println(fmt.Sprintf("\nDATABASE_URL: %s", conn.Url))
 	return nil
 }

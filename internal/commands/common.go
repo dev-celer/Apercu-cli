@@ -32,7 +32,9 @@ func ApplyMigration(ctx context.Context, dbConfig config.Database, connectionFie
 		}
 		if runnerOutput {
 			if output := migrationHandler.GetOutput(); output != "" {
+				fmt.Println("\n-----Migration runner output-----")
 				fmt.Println(migrationHandler.GetOutput())
+				fmt.Println("---------------------------------")
 			}
 		}
 

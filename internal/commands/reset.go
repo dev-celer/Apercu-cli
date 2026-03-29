@@ -55,6 +55,6 @@ func reset(cmd *cobra.Command, args []string) error {
 	if migrationMessage != "" {
 		fmt.Println(migrationMessage)
 	}
-	fmt.Println(fmt.Sprintf("DATABASE_URL: %s", conn.Url))
+	fmt.Println(fmt.Sprintf("\nDATABASE_URL: %s", conn.Url))
 	return nil
 }
