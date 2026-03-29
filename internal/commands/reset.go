@@ -3,7 +3,6 @@ package commands
 import (
 	"apercu-cli/config"
 	"apercu-cli/internal/database"
-	"apercu-cli/internal/migration"
 	"fmt"
 	"os"
 
@@ -51,24 +50,10 @@ func reset(cmd *cobra.Command, args []string) error {
 
 	// Apply the migrations
 	ctx := cmd.Context()
-	migrationHandler := migration.GetMigrationHandler(dbConfig, dbHandler.GetConnectionFields())
-	if migrationHandler != nil {
-		if err := migrationHandler.Apply(ctx); err != nil {
-			fmt.Println("Migration failed")
-			if output := migrationHandler.GetOutput(); output != "" {
-				fmt.Println(migrationHandler.GetOutput())
-			}
-			fmt.Println(err)
-			os.Exit(1)
-		}
-		if output := migrationHandler.GetOutput(); output != "" {
-			fmt.Println(migrationHandler.GetOutput())
-		}
-		if duration := migrationHandler.GetDuration(); duration != nil {
-			fmt.Println(fmt.Sprintf("Migration completed successfully, completed in %s", duration.String()))
-		} else {
-			fmt.Println("Migration completed successfully")
-		}
+	migrationMessage := ApplyMigration(ctx, dbConfig, conn)
+
+	if migrationMessage != "" {
+		fmt.Println(migrationMessage)
 	}
 	fmt.Println(fmt.Sprintf("DATABASE_URL: %s", conn.Url))
 	return nil

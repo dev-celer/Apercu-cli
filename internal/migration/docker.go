@@ -3,6 +3,7 @@ package migration
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -14,6 +15,7 @@ import (
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
+	_ "github.com/lib/pq"
 )
 
 type DockerHandler struct {
@@ -22,27 +24,86 @@ type DockerHandler struct {
 	env         map[string]string
 	workDir     string
 	localFolder string
+	databaseUrl string
 	startTime   *time.Time
 	endTime     *time.Time
 	output      string
 }
 
-func NewDockerHandler(image string, command []string, env map[string]string, workDir string, localFolder string) *DockerHandler {
+func NewDockerHandler(image string, command []string, env map[string]string, workDir string, localFolder string, databaseUrl string) *DockerHandler {
 	return &DockerHandler{
 		image:       image,
 		command:     command,
 		env:         env,
 		workDir:     workDir,
 		localFolder: localFolder,
+		databaseUrl: databaseUrl,
 	}
 }
 
+var (
+	ErrMigrationTableNotFound = errors.New("migration table not found")
+)
+
+func (h *DockerHandler) getMigrationTableName(db *sql.DB) (string, error) {
+	slog.Debug("Getting migration table name")
+	res, err := db.Query("SELECT table_name FROM information_schema.tables WHERE table_name IN " +
+		"('flyway_schema_history', 'schema_migrations', '_prisma_migrations', 'django_migrations', 'alembic_version', 'knex_migrations', 'typeorm_migrations', 'sequelize_meta')")
+	if err != nil {
+		return "", errors.New(fmt.Sprintf("Failed to query database: %v", err))
+	}
+	defer func() { _ = res.Close() }()
+
+	var tableName string
+	if res.Next() {
+		if err := res.Scan(&tableName); err != nil {
+			return "", errors.New(fmt.Sprintf("Failed to get database result: %v", err))
+		}
+		slog.Debug("Migration table name found", "table_name", tableName)
+	} else {
+		slog.Debug("Migration table name not found")
+	}
+	return tableName, nil
+}
+
 func (h *DockerHandler) GetCount() (int, error) {
-	//TODO implement me
-	panic("implement me")
+	slog.Debug("Connect to database")
+	db, err := sql.Open("postgres", h.databaseUrl)
+	if err != nil {
+		return 0, errors.New(fmt.Sprintf("Failed to connect to database: %v", err))
+	}
+	defer func() { _ = db.Close() }()
+
+	tableName, err := h.getMigrationTableName(db)
+	if err != nil {
+		return 0, err
+	}
+
+	if tableName == "" {
+		return 0, ErrMigrationTableNotFound
+	}
+
+	slog.Debug("Query number of rows in migration table")
+	res, err := db.Query("SELECT COUNT(*) FROM " + tableName)
+	if err != nil {
+		return 0, errors.New(fmt.Sprintf("Failed to query database: %v", err))
+	}
+	defer func() { _ = res.Close() }()
+
+	var count int
+	if res.Next() {
+		if err := res.Scan(&count); err != nil {
+			return 0, errors.New(fmt.Sprintf("Failed to get database result: %v", err))
+		}
+	}
+	slog.Debug("Number of rows in migration table", "count", count)
+
+	return count, nil
 }
 
 func (h *DockerHandler) Apply(ctx context.Context) error {
+	fmt.Println("Applying migrations...")
+
 	cli, err := client.NewClientWithOpts(client.FromEnv)
 	if err != nil {
 		return errors.New(fmt.Sprintf("Failed to connect to Docker: %v", err))

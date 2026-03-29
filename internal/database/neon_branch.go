@@ -82,6 +82,8 @@ func (h *NeonBranchHandler) getBranchByName(branchName string) (*neon.Branch, er
 }
 
 func (h *NeonBranchHandler) Apply() error {
+	fmt.Println("Branching from parent branch", h.parentBranch+"...")
+
 	// Find parent branch id from name
 	if h.parentBranchId == "" {
 		parentBranch, err := h.getBranchByName(h.parentBranch)
@@ -141,6 +143,8 @@ func (h *NeonBranchHandler) Apply() error {
 }
 
 func (h *NeonBranchHandler) Cleanup() error {
+	fmt.Println("Cleaning up preview branch", h.previewBranch+"...")
+
 	// Find branch id by name
 	previewBranch, err := h.getBranchByName(h.previewBranch)
 	if err != nil {
@@ -160,6 +164,8 @@ func (h *NeonBranchHandler) Cleanup() error {
 }
 
 func (h *NeonBranchHandler) Reset() error {
+	fmt.Println("Resetting preview branch", h.previewBranch, "to it's parent state...")
+
 	// Find branch id by name
 	previewBranch, err := h.getBranchByName(h.previewBranch)
 	if err != nil {

@@ -52,5 +52,6 @@ func GetMigrationHandler(dbConfig config.Database, connection database.Connectio
 		env,
 		workDir,
 		config.ReplaceVariables(dbConfig.Migration.LocalFolder, internalEnv),
+		connection.Url,
 	)
 }
