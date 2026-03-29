@@ -4,11 +4,43 @@ import (
 	"apercu-cli/config"
 	"apercu-cli/internal/database"
 	"apercu-cli/internal/migration"
+	"apercu-cli/internal/seeding"
 	"context"
 	"errors"
 	"fmt"
 	"os"
 )
+
+func ApplySeeding(dbConfig config.Database, connectionFields database.ConnectionFields) string {
+	var seedingMessage string
+	seedHandler, err := seeding.GetSeedingHandler(dbConfig, connectionFields)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	if seedHandler != nil {
+		seedHandler.Apply()
+
+		if runnerOutput {
+			fmt.Println("\n-----Seeding output-----")
+			fmt.Println(seedHandler.GetOutput())
+			fmt.Println("---------------------")
+		}
+
+		if errCount := seedHandler.GetFailedCount(); errCount > 0 {
+			seedingMessage = fmt.Sprintf("Seeding completed with %d errors", errCount)
+		} else {
+			seedingMessage = "Seeding completed successfully"
+		}
+
+		if duration := seedHandler.GetDuration(); duration != nil {
+			seedingMessage += fmt.Sprintf(", completed in %s", duration.String())
+		}
+		seedingMessage += fmt.Sprintf(", %d files applied successfully", seedHandler.GetAppliedCount())
+	}
+
+	return seedingMessage
+}
 
 func ApplyMigration(ctx context.Context, dbConfig config.Database, connectionFields database.ConnectionFields) string {
 	var migrationMessage string

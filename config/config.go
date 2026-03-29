@@ -54,6 +54,7 @@ type Config struct {
 type Database struct {
 	Source    *DatabaseSource    `yaml:"source"`
 	Migration *DatabaseMigration `yaml:"migration"`
+	Seed      []string           `yaml:"seed,omitempty"`
 }
 
 type DatabaseSource struct {

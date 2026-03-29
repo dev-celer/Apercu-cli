@@ -52,8 +52,14 @@ func preview(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	migrationMessage := ApplyMigration(ctx, dbConfig, conn)
 
+	// Apply the seeding
+	seedingMessage := ApplySeeding(dbConfig, conn)
+
 	if migrationMessage != "" {
 		fmt.Println("\n" + migrationMessage)
+	}
+	if seedingMessage != "" {
+		fmt.Println(seedingMessage)
 	}
 	fmt.Println(fmt.Sprintf("\nDATABASE_URL: %s", conn.Url))
 	return nil
