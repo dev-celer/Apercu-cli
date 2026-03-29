@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"regexp"
 	"strconv"
+	"time"
 
 	neon "github.com/kislerdm/neon-sdk-go"
 )
@@ -139,7 +140,9 @@ func (h *NeonBranchHandler) Apply() error {
 	} else {
 		slog.Debug("Preview branch database_url not found")
 	}
-	return nil
+
+	// Wait for the branch to finish resetting before proceeding
+	return h.waitForReady(resp.Branch.ID)
 }
 
 func (h *NeonBranchHandler) Cleanup() error {
@@ -163,6 +166,28 @@ func (h *NeonBranchHandler) Cleanup() error {
 	return nil
 }
 
+func (h *NeonBranchHandler) waitForReady(branchID string) error {
+	slog.Debug("Waiting for branch to be ready", "branch_id", branchID)
+	timeout := time.After(2 * time.Minute)
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-timeout:
+			return errors.New("timed out waiting for branch to be ready")
+		case <-ticker.C:
+			resp, err := h.client.GetProjectBranch(h.projectId, branchID)
+			if err != nil {
+				return errors.New(fmt.Sprintf("Failed to get branch state: %v", err))
+			}
+			slog.Debug("Branch state", "state", resp.Branch.CurrentState)
+			if resp.Branch.CurrentState == "ready" {
+				return nil
+			}
+		}
+	}
+}
+
 func (h *NeonBranchHandler) Reset() error {
 	fmt.Println("Resetting preview branch", h.previewBranch, "to it's parent state...")
 
@@ -184,7 +209,8 @@ func (h *NeonBranchHandler) Reset() error {
 		return errors.New(fmt.Sprintf("Failed to restore project branch: %v", err))
 	}
 
-	return nil
+	// Wait for the branch to finish resetting before proceeding
+	return h.waitForReady(previewBranch.ID)
 }
 
 func (h *NeonBranchHandler) GetConnectionFields() (ConnectionFields, error) {
