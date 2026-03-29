@@ -96,7 +96,7 @@ func (h *NeonBranchHandler) Apply() error {
 		h.parentBranchId = parentBranch.ID
 	}
 
-	// Check if preview branch exist
+	// Check if preview branch exists
 	previewBranch, err := h.getBranchByName(h.previewBranch)
 	if err != nil {
 		return err
