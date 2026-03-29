@@ -100,42 +100,8 @@ func (h *NeonBranchHandler) Apply() error {
 		return err
 	}
 	if previewBranch != nil {
-		// Preview branch already exist, populate connection fields
-		slog.Debug("Preview branch already exist, populating database_url")
-		slog.Debug("Getting database from project branch")
-		database, err := h.client.ListProjectBranchDatabases(h.projectId, previewBranch.ID)
-		if err != nil {
-			return errors.New(fmt.Sprintf("Failed to list project branch databases: %v", err))
-		}
-		if len(database.Databases) == 0 {
-			return errors.New(fmt.Sprintf("No database found in branch: %v", h.previewBranch))
-		}
-		slog.Debug("Found database with name", "database_name", database.Databases[0].Name)
-
-		slog.Debug("Getting role from project branch")
-		roles, err := h.client.ListProjectBranchRoles(h.projectId, previewBranch.ID)
-		if err != nil {
-			return errors.New(fmt.Sprintf("Failed to list project branch roles: %v", err))
-		}
-		if len(roles.Roles) == 0 {
-			return errors.New(fmt.Sprintf("No role found in branch: %v", h.previewBranch))
-		}
-		slog.Debug("Found role with name", "role_name", roles.Roles[0].Name)
-
-		slog.Debug("Getting database url")
-		resp, err := h.client.GetConnectionURI(h.projectId, &previewBranch.ID, nil, database.Databases[0].Name, roles.Roles[0].Name, nil)
-		if err != nil {
-			return errors.New(fmt.Sprintf("Failed to get branch connection uri: %v", err))
-		}
-		slog.Debug("Database url found", "database_url", resp.URI)
-
-		// Extract values from database url
-		connection, err := h.extractConnectionFieldsFromUrl(resp.URI)
-		if err != nil {
-			return err
-		}
-
-		h.connectionFields = connection
+		// Preview branch already exist
+		slog.Debug("Preview branch already exist, nothing to do")
 		return nil
 	}
 
@@ -215,6 +181,52 @@ func (h *NeonBranchHandler) Reset() error {
 	return nil
 }
 
-func (h *NeonBranchHandler) GetConnectionFields() ConnectionFields {
-	return h.connectionFields
+func (h *NeonBranchHandler) GetConnectionFields() (ConnectionFields, error) {
+	if h.connectionFields.Url == "" {
+		slog.Debug("Connection fields not found, retrieving from database")
+		previewBranch, err := h.getBranchByName(h.previewBranch)
+		if err != nil {
+			return ConnectionFields{}, err
+		}
+		if previewBranch == nil {
+			return ConnectionFields{}, errors.New(fmt.Sprintf("Failed to find preview branch with name: %v", h.previewBranch))
+		}
+
+		slog.Debug("Getting database from project branch")
+		database, err := h.client.ListProjectBranchDatabases(h.projectId, previewBranch.ID)
+		if err != nil {
+			return ConnectionFields{}, errors.New(fmt.Sprintf("Failed to list project branch databases: %v", err))
+		}
+		if len(database.Databases) == 0 {
+			return ConnectionFields{}, errors.New(fmt.Sprintf("No database found in branch: %v", h.previewBranch))
+		}
+		slog.Debug("Found database with name", "database_name", database.Databases[0].Name)
+
+		slog.Debug("Getting role from project branch")
+		roles, err := h.client.ListProjectBranchRoles(h.projectId, previewBranch.ID)
+		if err != nil {
+			return ConnectionFields{}, errors.New(fmt.Sprintf("Failed to list project branch roles: %v", err))
+		}
+		if len(roles.Roles) == 0 {
+			return ConnectionFields{}, errors.New(fmt.Sprintf("No role found in branch: %v", h.previewBranch))
+		}
+		slog.Debug("Found role with name", "role_name", roles.Roles[0].Name)
+
+		slog.Debug("Getting database url")
+		resp, err := h.client.GetConnectionURI(h.projectId, &previewBranch.ID, nil, database.Databases[0].Name, roles.Roles[0].Name, nil)
+		if err != nil {
+			return ConnectionFields{}, errors.New(fmt.Sprintf("Failed to get branch connection uri: %v", err))
+		}
+		slog.Debug("Database url found", "database_url", resp.URI)
+
+		// Extract values from database url
+		connection, err := h.extractConnectionFieldsFromUrl(resp.URI)
+		if err != nil {
+			return ConnectionFields{}, err
+		}
+
+		h.connectionFields = connection
+	}
+
+	return h.connectionFields, nil
 }

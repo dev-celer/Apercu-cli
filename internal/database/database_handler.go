@@ -20,7 +20,7 @@ type HandlerInterface interface {
 	Apply() error
 	Cleanup() error
 	Reset() error
-	GetConnectionFields() ConnectionFields
+	GetConnectionFields() (ConnectionFields, error)
 }
 
 func GetSourceDatabaseHandler(dbConfig config.Database) (HandlerInterface, error) {

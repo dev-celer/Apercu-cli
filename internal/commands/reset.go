@@ -39,8 +39,12 @@ func reset(cmd *cobra.Command, args []string) error {
 		fmt.Println(err)
 		os.Exit(1)
 	}
-
 	if err := dbHandler.Reset(); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	conn, err := dbHandler.GetConnectionFields()
+	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
@@ -66,7 +70,6 @@ func reset(cmd *cobra.Command, args []string) error {
 			fmt.Println("Migration completed successfully")
 		}
 	}
-
-	fmt.Println(fmt.Sprintf("DATABASE_URL: %s", dbHandler.GetConnectionFields().Url))
+	fmt.Println(fmt.Sprintf("DATABASE_URL: %s", conn.Url))
 	return nil
 }
