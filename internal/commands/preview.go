@@ -4,6 +4,7 @@ import (
 	"apercu-cli/config"
 	"apercu-cli/internal/database"
 	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -21,15 +22,33 @@ func init() {
 }
 
 func preview(cmd *cobra.Command, args []string) error {
+	// Get config
 	configFile, err := config.LoadConfig(".")
 	if err != nil {
 		return err
 	}
 
 	var dbConfig config.Database
-	for _, db := range configFile.Databases {
+	var dbName string
+	for name, db := range configFile.Databases {
 		dbConfig = db
+		dbName = name
 		break
+	}
+
+	// Get state
+	var state config.State
+	if statePath != "" {
+		state, err = config.GetState(statePath)
+		if err != nil {
+			return err
+		}
+	}
+	dbState, ok := state.Databases[dbName]
+	if ok {
+		slog.Debug("State found for database", "database", dbName, "state", dbState)
+	} else {
+		slog.Debug("State not found for database", "database", dbName)
 	}
 
 	// Apply the database
@@ -53,7 +72,15 @@ func preview(cmd *cobra.Command, args []string) error {
 	migrationMessage := ApplyMigration(ctx, dbConfig, conn)
 
 	// Apply the seeding
-	seedingMessage := ApplySeeding(dbConfig, conn)
+	seedingMessage := ApplySeeding(dbConfig, &dbState, conn)
+
+	// Save the state
+	state.Databases[dbName] = dbState
+	if statePath != "" {
+		if err := state.Save(statePath); err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, err)
+		}
+	}
 
 	if migrationMessage != "" {
 		fmt.Println("\n" + migrationMessage)

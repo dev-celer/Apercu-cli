@@ -16,7 +16,7 @@ type HandlerInterface interface {
 	GetOutput() string
 }
 
-func GetSeedingHandler(dbConfig config.Database, connection database.ConnectionFields) (HandlerInterface, error) {
+func GetSeedingHandler(dbConfig config.Database, state *config.DatabaseState, connection database.ConnectionFields) (HandlerInterface, error) {
 	if len(dbConfig.Seed) == 0 {
 		slog.Debug("No seed specified")
 		return nil, nil
@@ -25,5 +25,6 @@ func GetSeedingHandler(dbConfig config.Database, connection database.ConnectionF
 	return NewDirectSeed(
 		connection,
 		dbConfig.Seed,
+		state,
 	)
 }

@@ -1,6 +1,7 @@
 package seeding
 
 import (
+	"apercu-cli/config"
 	"apercu-cli/internal/database"
 	"database/sql"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -15,6 +17,7 @@ import (
 
 type DirectSeed struct {
 	db            *sql.DB
+	state         *config.DatabaseState
 	errCount      int
 	seedFilesPath []string
 	startTime     *time.Time
@@ -22,7 +25,7 @@ type DirectSeed struct {
 	output        string
 }
 
-func NewDirectSeed(conn database.ConnectionFields, seedPath []string) (*DirectSeed, error) {
+func NewDirectSeed(conn database.ConnectionFields, seedPath []string, state *config.DatabaseState) (*DirectSeed, error) {
 	db, err := sql.Open("postgres", conn.Url)
 	if err != nil {
 		return nil, errors.New(fmt.Sprintf("Failed to connect to database: %v", err))
@@ -47,6 +50,11 @@ func NewDirectSeed(conn database.ConnectionFields, seedPath []string) (*DirectSe
 					return err
 				}
 				if !d.IsDir() && filepath.Ext(p) == ".sql" {
+					if slices.Contains(state.AppliedSeeds, p) {
+						slog.Debug("Seed is already applied, skipping", "file", p)
+						return nil
+					}
+
 					slog.Debug("Found sql file", "file", p)
 					seedFiles = append(seedFiles, p)
 				}
@@ -55,12 +63,17 @@ func NewDirectSeed(conn database.ConnectionFields, seedPath []string) (*DirectSe
 				return nil, errors.New(fmt.Sprintf("Failed to search for sql files inside seed path: %v", err))
 			}
 		} else {
+			if slices.Contains(state.AppliedSeeds, path) {
+				slog.Debug("Seed is already applied, skipping", "file", path)
+				continue
+			}
+
 			slog.Debug("Path is a file, adding to seed files list", "file", path)
 			seedFiles = append(seedFiles, path)
 		}
 	}
 
-	return &DirectSeed{db: db, seedFilesPath: seedFiles}, nil
+	return &DirectSeed{db: db, seedFilesPath: seedFiles, state: state}, nil
 }
 
 func (h *DirectSeed) Close() error {
@@ -89,6 +102,7 @@ func (h *DirectSeed) Apply() {
 		if err != nil {
 			h.errCount++
 			_, _ = fmt.Fprintln(os.Stderr, "Failed to execute seed file:", seedFile+"\n"+err.Error())
+			h.output += "----------\n"
 			continue
 		}
 
@@ -100,6 +114,9 @@ func (h *DirectSeed) Apply() {
 
 		h.output += fmt.Sprintf("Seeding completed in %s\n", duration.String())
 		h.output += "----------\n"
+
+		// Append to state
+		h.state.AppliedSeeds = append(h.state.AppliedSeeds, seedFile)
 	}
 
 	// Set end time
