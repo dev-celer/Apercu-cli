@@ -3,6 +3,7 @@ package commands
 import (
 	"apercu-cli/config"
 	"apercu-cli/internal/database"
+	"encoding/json"
 	"fmt"
 	"os"
 
@@ -76,6 +77,20 @@ func reset(cmd *cobra.Command, args []string) error {
 	if seedingMessage != "" {
 		fmt.Println(seedingMessage)
 	}
-	fmt.Println(fmt.Sprintf("\nDATABASE_URL: %s", conn.Url))
+
+	if jsonOutput {
+		databaseConnections := map[string]database.ConnectionFields{
+			dbName: conn,
+		}
+		jsonData, err := json.Marshal(databaseConnections)
+		if err != nil {
+			fmt.Println(fmt.Sprintf("Failed to marshal database connections: %v", err))
+			os.Exit(1)
+		}
+
+		fmt.Println(fmt.Sprintf("\nDATABASE_CONNECTIONS=%s", string(jsonData)))
+	} else {
+		fmt.Println(fmt.Sprintf("\nDATABASE_URL: %s", conn.Url))
+	}
 	return nil
 }
