@@ -43,6 +43,8 @@ func preview(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
+	} else {
+		state = *config.NewState()
 	}
 	dbState, ok := state.Databases[dbName]
 	if ok {
