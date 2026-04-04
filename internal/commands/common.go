@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 )
 
@@ -21,16 +22,16 @@ func ApplySeeding(dbConfig config.Database, state *config.DatabaseState, connect
 	}()
 
 	if err != nil {
-		fmt.Println(err)
+		_, _ = fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	if seedHandler != nil {
 		seedHandler.Apply()
 
 		if runnerOutput {
-			fmt.Println("\n-----Seeding output-----")
-			fmt.Println(seedHandler.GetOutput())
-			fmt.Println("---------------------")
+			_, _ = fmt.Fprintln(log.Writer(), "\n-----Seeding output-----")
+			_, _ = fmt.Fprintln(log.Writer(), seedHandler.GetOutput())
+			_, _ = fmt.Fprintln(log.Writer(), "---------------------")
 		}
 
 		if errCount := seedHandler.GetFailedCount(); errCount > 0 {
@@ -55,7 +56,7 @@ func ApplyMigration(ctx context.Context, dbConfig config.Database, connectionFie
 		// Get the current migration count
 		initCount, initCountErr := migrationHandler.GetCount()
 		if initCountErr != nil && !errors.Is(initCountErr, migration.ErrMigrationTableNotFound) {
-			fmt.Println(initCountErr)
+			_, _ = fmt.Fprintln(os.Stderr, initCountErr)
 			os.Exit(1)
 		}
 
@@ -63,16 +64,16 @@ func ApplyMigration(ctx context.Context, dbConfig config.Database, connectionFie
 		if err := migrationHandler.Apply(ctx); err != nil {
 			fmt.Println("Migration failed")
 			if output := migrationHandler.GetOutput(); output != "" {
-				fmt.Println(migrationHandler.GetOutput())
+				_, _ = fmt.Fprintln(os.Stderr, migrationHandler.GetOutput())
 			}
-			fmt.Println(err)
+			_, _ = fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
 		if runnerOutput {
 			if output := migrationHandler.GetOutput(); output != "" {
-				fmt.Println("\n-----Migration runner output-----")
-				fmt.Println(migrationHandler.GetOutput())
-				fmt.Println("---------------------------------")
+				_, _ = fmt.Fprintln(log.Writer(), "\n-----Migration runner output-----")
+				_, _ = fmt.Fprintln(log.Writer(), migrationHandler.GetOutput())
+				_, _ = fmt.Fprintln(log.Writer(), "---------------------------------")
 			}
 		}
 
@@ -81,9 +82,9 @@ func ApplyMigration(ctx context.Context, dbConfig config.Database, connectionFie
 		finalCount, finalCountErr := migrationHandler.GetCount()
 		if finalCountErr != nil {
 			if errors.Is(finalCountErr, migration.ErrMigrationTableNotFound) {
-				fmt.Println("WARNING: migration table not found, cannot determine migration count")
+				_, _ = fmt.Fprintln(log.Writer(), "WARNING: migration table not found, cannot determine migration count")
 			} else {
-				fmt.Println(finalCountErr)
+				_, _ = fmt.Fprintln(os.Stderr, finalCountErr)
 				os.Exit(1)
 			}
 		} else {

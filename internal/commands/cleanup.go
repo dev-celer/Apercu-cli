@@ -34,12 +34,12 @@ func cleanup(cmd *cobra.Command, args []string) error {
 
 	handler, err := database.GetSourceDatabaseHandler(dbConfig)
 	if err != nil {
-		fmt.Println(err)
+		_, _ = fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
 	if err := handler.Cleanup(); err != nil {
-		fmt.Println(err)
+		_, _ = fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 

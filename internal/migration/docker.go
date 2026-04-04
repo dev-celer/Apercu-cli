@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -102,7 +103,7 @@ func (h *DockerHandler) GetCount() (int, error) {
 }
 
 func (h *DockerHandler) Apply(ctx context.Context) error {
-	fmt.Println("Applying migrations...")
+	_, _ = fmt.Fprintln(log.Writer(), "Applying migrations...")
 
 	cli, err := client.NewClientWithOpts(client.FromEnv)
 	if err != nil {

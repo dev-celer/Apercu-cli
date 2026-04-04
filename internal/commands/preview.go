@@ -5,6 +5,7 @@ import (
 	"apercu-cli/internal/database"
 	"encoding/json"
 	"fmt"
+	"log"
 	"log/slog"
 	"os"
 
@@ -26,7 +27,8 @@ func preview(cmd *cobra.Command, args []string) error {
 	// Get config
 	configFile, err := config.LoadConfig(".")
 	if err != nil {
-		return err
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
 
 	var dbConfig config.Database
@@ -42,7 +44,8 @@ func preview(cmd *cobra.Command, args []string) error {
 	if statePath != "" {
 		state, err = config.GetState(statePath)
 		if err != nil {
-			return err
+			_, _ = fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
 		}
 	} else {
 		state = *config.NewState()
@@ -57,16 +60,16 @@ func preview(cmd *cobra.Command, args []string) error {
 	// Apply the database
 	dbHandler, err := database.GetSourceDatabaseHandler(dbConfig)
 	if err != nil {
-		fmt.Println(err)
+		_, _ = fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	if err := dbHandler.Apply(); err != nil {
-		fmt.Println(err)
+		_, _ = fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	conn, err := dbHandler.GetConnectionFields()
 	if err != nil {
-		fmt.Println(err)
+		_, _ = fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
@@ -86,11 +89,12 @@ func preview(cmd *cobra.Command, args []string) error {
 	}
 
 	if migrationMessage != "" {
-		fmt.Println("\n" + migrationMessage)
+		_, _ = fmt.Fprintln(log.Writer(), "\n"+migrationMessage)
 	}
 	if seedingMessage != "" {
-		fmt.Println(seedingMessage)
+		_, _ = fmt.Fprintln(log.Writer(), seedingMessage)
 	}
+	_, _ = fmt.Fprintln(log.Writer(), "\n")
 
 	if jsonOutput {
 		databaseConnections := map[string]database.ConnectionFields{
@@ -98,13 +102,13 @@ func preview(cmd *cobra.Command, args []string) error {
 		}
 		jsonData, err := json.Marshal(databaseConnections)
 		if err != nil {
-			fmt.Println(fmt.Sprintf("Failed to marshal database connections: %v", err))
+			_, _ = fmt.Fprintln(os.Stderr, fmt.Sprintf("Failed to marshal database connections: %v", err))
 			os.Exit(1)
 		}
 
-		fmt.Println(fmt.Sprintf("\nDATABASE_CONNECTIONS=%s", string(jsonData)))
+		fmt.Println(fmt.Sprintf("DATABASE_CONNECTIONS=%s", string(jsonData)))
 	} else {
-		fmt.Println(fmt.Sprintf("\nDATABASE_URL: %s", conn.Url))
+		fmt.Println(fmt.Sprintf("DATABASE_URL: %s", conn.Url))
 	}
 	return nil
 }

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -81,7 +82,7 @@ func (h *DirectSeed) Close() error {
 }
 
 func (h *DirectSeed) Apply() {
-	fmt.Println("Seeding database...")
+	_, _ = fmt.Fprintln(log.Writer(), "Seeding database...")
 
 	// Set start time
 	h.startTime = new(time.Time)
