@@ -14,7 +14,11 @@ import (
 func ApplySeeding(dbConfig config.Database, state *config.DatabaseState, connectionFields database.ConnectionFields) string {
 	var seedingMessage string
 	seedHandler, err := seeding.GetSeedingHandler(dbConfig, state, connectionFields)
-	defer func() { _ = seedHandler.Close() }()
+	defer func() {
+		if seedHandler != nil {
+			_ = seedHandler.Close()
+		}
+	}()
 
 	if err != nil {
 		fmt.Println(err)
