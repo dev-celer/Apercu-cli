@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"log/slog"
 	"os"
@@ -118,6 +119,13 @@ func (h *DockerHandler) Apply(ctx context.Context) error {
 		return errors.New(fmt.Sprintf("Failed to pull docker image: %v", err))
 	}
 	defer func() { _ = readCloser.Close() }()
+
+	var pullBuffer bytes.Buffer
+	_, err = io.Copy(&pullBuffer, readCloser)
+	if err != nil {
+		slog.Error("Failed to read docker pull logs", "error", err)
+	}
+	slog.Debug("Docker image pulled", "output", pullBuffer.String())
 
 	// Create container config
 	env := make([]string, len(h.env))
