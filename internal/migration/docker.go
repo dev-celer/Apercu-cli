@@ -113,10 +113,10 @@ func (h *DockerHandler) Apply(ctx context.Context) error {
 	// Pull docker image
 	slog.Debug("Pulling docker image", "image", h.image)
 	readCloser, err := cli.ImagePull(ctx, h.image, image.PullOptions{})
-	defer func() { _ = readCloser.Close() }()
 	if err != nil {
 		return errors.New(fmt.Sprintf("Failed to pull docker image: %v", err))
 	}
+	defer func() { _ = readCloser.Close() }()
 
 	// Create container config
 	env := make([]string, len(h.env))
