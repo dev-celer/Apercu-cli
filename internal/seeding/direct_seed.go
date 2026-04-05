@@ -85,24 +85,26 @@ func (h *DirectSeed) Apply() {
 	_, _ = fmt.Fprintln(log.Writer(), "Seeding database...")
 
 	// Set start time
-	h.startTime = new(time.Time)
+	h.startTime = new(time.Now())
 
 	for _, seedFile := range h.seedFilesPath {
 		slog.Debug("Seeding file", "file", seedFile)
 
+		startTime := time.Now()
 		h.output += fmt.Sprintf("Seeding file %s\n", seedFile)
 		// Read seed file
 		content, err := os.ReadFile(seedFile)
 		if err != nil {
 			h.errCount++
-			_, _ = fmt.Fprintln(os.Stderr, "Failed to read seed file:", seedFile)
+			h.output += fmt.Sprintf("Failed to read seed file: %s\n", seedFile)
+			h.output += "----------\n"
 			continue
 		}
 		// Execute seed file
 		res, err := h.db.Exec(string(content))
 		if err != nil {
 			h.errCount++
-			_, _ = fmt.Fprintln(os.Stderr, "Failed to execute seed file:", seedFile+"\n"+err.Error())
+			h.output += fmt.Sprintf("Failed to execute seed file: %s\n", seedFile)
 			h.output += "----------\n"
 			continue
 		}
@@ -111,7 +113,7 @@ func (h *DirectSeed) Apply() {
 		if err == nil {
 			h.output += fmt.Sprintf("Affected rows: %d\n", affectedRows)
 		}
-		duration := time.Now().Sub(*h.startTime)
+		duration := time.Now().Sub(startTime)
 
 		h.output += fmt.Sprintf("Seeding completed in %s\n", duration.String())
 		h.output += "----------\n"
@@ -121,7 +123,7 @@ func (h *DirectSeed) Apply() {
 	}
 
 	// Set end time
-	h.endTime = new(time.Time)
+	h.endTime = new(time.Now())
 }
 
 func (h *DirectSeed) GetAppliedCount() int {
