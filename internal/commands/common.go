@@ -28,7 +28,7 @@ func ApplySeeding(dbConfig config.Database, state *config.DatabaseState, connect
 	if seedHandler != nil {
 		seedHandler.Apply()
 
-		if runnerOutput {
+		if runnerOutput || seedHandler.GetFailedCount() > 0 {
 			_, _ = fmt.Fprintln(log.Writer(), "\n-----Seeding output-----")
 			_, _ = fmt.Fprintln(log.Writer(), seedHandler.GetOutput())
 			_, _ = fmt.Fprintln(log.Writer(), "---------------------")
