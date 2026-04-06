@@ -1,6 +1,7 @@
 package database
 
 import (
+	"apercu-cli/config"
 	"errors"
 	"fmt"
 	"log"
@@ -262,4 +263,107 @@ func (h *NeonBranchHandler) GetConnectionFields() (ConnectionFields, error) {
 	}
 
 	return h.connectionFields, nil
+}
+
+func (h *NeonBranchHandler) getAllPreviewBranches(previewPattern string) ([]neon.Branch, error) {
+	slog.Debug("Getting all preview branches")
+
+	// Extract start of the preview pattern, before any variable
+	reg := regexp.MustCompile(`(\S*)\${{\s*\w+\s*}}`)
+	matches := reg.FindStringSubmatch(previewPattern)
+
+	// List branches based on preview pattern
+	slog.Debug("Listing branches starting with", "pattern_start", matches[1])
+	branches := make([]neon.Branch, 0)
+	var cursor *string
+	for {
+		resp, err := h.client.ListProjectBranches(h.projectId, &matches[1], nil, cursor, nil, nil)
+		if err != nil {
+			return nil, errors.New(fmt.Sprintf("Failed to list project branches: %v", err))
+		}
+		branches = append(branches, resp.Branches...)
+		if resp.Pagination != nil && resp.Pagination.Next != nil {
+			cursor = resp.Pagination.Next
+		} else {
+			break
+		}
+	}
+	slog.Debug(fmt.Sprintf("Found %d branches starting with", len(branches)), "pattern_start", matches[1])
+
+	// Filter out branches that are not child of the parent branch or does not match the preview pattern
+	replaceRegex := regexp.MustCompile(`\${{\s*\w+\s*}}`)
+	patternRegexString := replaceRegex.ReplaceAllString(previewPattern, ".*")
+	patternRegexString = "^" + patternRegexString + "$"
+	slog.Debug("Generated preview branch pattern regex", "pattern_regex", patternRegexString)
+
+	patternRegex, err := regexp.Compile(patternRegexString)
+	if err != nil {
+		return nil, errors.New(fmt.Sprintf("Failed to compile regex for preview pattern substitution: %v", err))
+	}
+
+	filteredBranches := make([]neon.Branch, 0)
+	for _, branch := range branches {
+		if *branch.ParentID != h.parentBranchId {
+			slog.Debug("Branch is not child of parent branch, skipping", "branch_name", branch.Name, "branch_parent_id", *branch.ParentID, "parent_branch_id", h.parentBranchId, "parent_branch_name", h.parentBranch)
+			continue
+		}
+		if patternRegex.MatchString(branch.Name) {
+			slog.Debug("Branch matches preview pattern, adding", "branch_name", branch.Name)
+			filteredBranches = append(filteredBranches, branch)
+		} else {
+			slog.Debug("Branch does not match preview pattern, skipping", "branch_name", branch.Name)
+		}
+	}
+
+	return filteredBranches, nil
+}
+
+func (h *NeonBranchHandler) PrunePreviewDatabases(openedPullRequestNumber []string) ([]string, error) {
+	// Find parent branch id from name
+	if h.parentBranchId == "" {
+		parentBranch, err := h.getBranchByName(h.parentBranch)
+		if err != nil {
+			return nil, err
+		}
+		if parentBranch == nil {
+			return nil, errors.New(fmt.Sprintf("Failed to find parent branch with name: %v", h.parentBranch))
+		}
+		h.parentBranchId = parentBranch.ID
+	}
+
+	previewBranches, err := h.getAllPreviewBranches(h.previewBranch)
+	if err != nil {
+		return nil, err
+	}
+
+	prunedBranches := make([]string, 0)
+
+	for _, branch := range previewBranches {
+		// Try to match branch to an opened pull request
+		found := false
+		for _, prNumber := range openedPullRequestNumber {
+			internalVariables := make(map[string]string)
+			internalVariables["PR_NUMBER"] = prNumber
+			prBranchName := config.ReplaceVariables(h.previewBranch, internalVariables)
+
+			if branch.Name == prBranchName {
+				slog.Debug("Branch matches opened pull request, skipping", "branch_name", branch.Name)
+				found = true
+				break
+			}
+		}
+		if found {
+			continue
+		}
+
+		slog.Debug("Branch does not match opened pull request, deleting", "branch_name", branch.Name)
+		_, err := h.client.DeleteProjectBranch(h.projectId, branch.ID)
+		if err != nil {
+			return nil, errors.New(fmt.Sprintf("Failed to delete project branch: %v", err))
+		}
+		prunedBranches = append(prunedBranches, branch.Name)
+	}
+
+	slog.Debug(fmt.Sprintf("Pruned %d branches", len(prunedBranches)))
+	return prunedBranches, nil
 }

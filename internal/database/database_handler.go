@@ -21,6 +21,7 @@ type HandlerInterface interface {
 	Cleanup() error
 	Reset() error
 	GetConnectionFields() (ConnectionFields, error)
+	PrunePreviewDatabases(openedPullRequestNumber []string) ([]string, error)
 }
 
 func GetSourceDatabaseHandler(dbConfig config.Database) (HandlerInterface, error) {
@@ -43,4 +44,26 @@ func GetSourceDatabaseHandler(dbConfig config.Database) (HandlerInterface, error
 	}
 
 	return nil, errors.New(fmt.Sprintf("unsupported source database provider: %s", dbConfig.Source.Provider))
+}
+
+func GetDatabaseHandlerForPruning(dbConfig config.Database) (HandlerInterface, error) {
+	if dbConfig.Source == nil {
+		slog.Debug("No source database specified")
+		return nil, nil
+	}
+
+	switch dbConfig.Source.Provider {
+	case config.DatabaseProviderNeon:
+		if dbConfig.Source.Neon == nil {
+			return nil, errors.New("missing neon source database configuration")
+		}
+		return NewNeonBranchHandler(
+			config.ReplaceVariables(dbConfig.Source.Neon.ProjectId, map[string]string{}),
+			config.ReplaceVariables(dbConfig.Source.Neon.ApiKey, map[string]string{}),
+			config.ReplaceVariables(dbConfig.Source.Neon.ParentBranch, map[string]string{}),
+			dbConfig.Source.Neon.PreviewBranch,
+		)
+	}
+
+	return nil, errors.New(fmt.Sprintf("unsupported database provider: %s", dbConfig.Source.Provider))
 }
