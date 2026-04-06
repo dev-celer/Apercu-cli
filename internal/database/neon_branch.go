@@ -63,13 +63,23 @@ func (h *NeonBranchHandler) extractConnectionFieldsFromUrl(databaseUrl string) (
 
 func (h *NeonBranchHandler) getBranchByName(branchName string) (*neon.Branch, error) {
 	slog.Debug("Getting branch by name", "branch_name", branchName)
-	resp, err := h.client.ListProjectBranches(h.projectId, &branchName, nil, nil, nil, nil)
-	if err != nil {
-		return nil, errors.New(fmt.Sprintf("Failed to list project branches: %v", err))
+	var branches []neon.Branch
+	var cursor *string
+	for {
+		resp, err := h.client.ListProjectBranches(h.projectId, &branchName, nil, cursor, nil, nil)
+		if err != nil {
+			return nil, errors.New(fmt.Sprintf("Failed to list project branches: %v", err))
+		}
+		branches = append(branches, resp.Branches...)
+		if resp.Pagination != nil && resp.Pagination.Next != nil {
+			cursor = resp.Pagination.Next
+		} else {
+			break
+		}
 	}
 
 	var previewBranch *neon.Branch
-	for _, branch := range resp.Branches {
+	for _, branch := range branches {
 		if branch.Name == branchName {
 			previewBranch = &branch
 		}
