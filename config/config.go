@@ -42,7 +42,6 @@ func ReplaceVariables(data string, internalVariables map[string]string) string {
 			fmt.Println(fmt.Sprintf("WARNING: Variable %s not set", varName))
 		}
 
-		slog.Debug("Replacing variable", "variable", match, "value", envValue)
 		return envValue
 	})
 }
