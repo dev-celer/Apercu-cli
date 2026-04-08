@@ -3,6 +3,8 @@ package commands
 import (
 	"apercu-cli/config"
 	"apercu-cli/internal/database"
+	"apercu-cli/internal/migration"
+	"apercu-cli/internal/seeding"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -75,10 +77,29 @@ func preview(cmd *cobra.Command, args []string) error {
 
 	// Apply the migrations
 	ctx := cmd.Context()
-	migrationMessage := ApplyMigration(ctx, dbConfig, conn)
+	migrationHandler := migration.GetMigrationHandler(dbConfig, conn)
+	migrationMessage, err := ApplyMigration(ctx, migrationHandler)
+	if err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 
 	// Apply the seeding
-	seedingMessage := ApplySeeding(dbConfig, &dbState, conn)
+	seedHandler, err := seeding.GetSeedingHandler(dbConfig, &dbState, conn)
+	if err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	defer func() {
+		if seedHandler != nil {
+			_ = seedHandler.Close()
+		}
+	}()
+	seedingMessage, err := ApplySeeding(seedHandler)
+	if err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 
 	// Save the state
 	state.Databases[dbName] = dbState
@@ -94,7 +115,7 @@ func preview(cmd *cobra.Command, args []string) error {
 	if seedingMessage != "" {
 		_, _ = fmt.Fprintln(log.Writer(), seedingMessage)
 	}
-	_, _ = fmt.Fprintln(log.Writer(), "\n")
+	_, _ = fmt.Fprintln(log.Writer())
 
 	if jsonOutput {
 		databaseConnections := map[string]database.ConnectionFields{
