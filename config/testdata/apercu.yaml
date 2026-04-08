@@ -1,0 +1,17 @@
+databases:
+  mydb:
+    source:
+      provider: neon
+      neon:
+        project_id: "test-project"
+        api_key: "test-key"
+        parent_branch: "main"
+        preview_branch: "preview-${{ PR_NUMBER }}"
+    migration:
+      runner: "flyway"
+      command: ["migrate"]
+      env:
+        DATABASE_URL: "${{ DATABASE_URL }}"
+      local_folder: "./migrations"
+    seed:
+      - "./seeds/data.sql"

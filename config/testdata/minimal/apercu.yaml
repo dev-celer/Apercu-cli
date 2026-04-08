@@ -1,0 +1,9 @@
+databases:
+  mydb:
+    source:
+      provider: neon
+      neon:
+        project_id: "test-project"
+        api_key: "test-key"
+        parent_branch: "main"
+        preview_branch: "preview"
