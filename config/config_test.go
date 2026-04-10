@@ -21,9 +21,9 @@ func TestLoadConfig_Valid(t *testing.T) {
 	assert.Equal(t, "main", db.Source.Neon.ParentBranch)
 	assert.Equal(t, "preview-${{ PR_NUMBER }}", db.Source.Neon.PreviewBranch)
 
-	assert.Equal(t, "flyway", db.Migration.Runner)
+	assert.Equal(t, "flyway", db.Migration.Image)
 	assert.Equal(t, []string{"migrate"}, db.Migration.Command)
-	assert.Equal(t, "./migrations", db.Migration.LocalFolder)
+	assert.Equal(t, "./migrations", db.Migration.LocalDir)
 
 	assert.Equal(t, []string{"./seeds/data.sql"}, db.Seed)
 }

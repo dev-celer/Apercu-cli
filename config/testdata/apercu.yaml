@@ -8,10 +8,10 @@ databases:
         parent_branch: "main"
         preview_branch: "preview-${{ PR_NUMBER }}"
     migration:
-      runner: "flyway"
+      image: "flyway"
       command: ["migrate"]
       env:
         DATABASE_URL: "${{ DATABASE_URL }}"
-      local_folder: "./migrations"
+      local_dir: "./migrations"
     seed:
       - "./seeds/data.sql"

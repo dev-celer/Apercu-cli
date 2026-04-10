@@ -47,11 +47,11 @@ func GetMigrationHandler(dbConfig config.Database, connection database.Connectio
 	}
 
 	return NewDockerHandler(
-		config.ReplaceVariables(dbConfig.Migration.Runner, internalEnv),
+		config.ReplaceVariables(dbConfig.Migration.Image, internalEnv),
 		commands,
 		env,
 		workDir,
-		config.ReplaceVariables(dbConfig.Migration.LocalFolder, internalEnv),
+		config.ReplaceVariables(dbConfig.Migration.LocalDir, internalEnv),
 		connection.Url,
 	)
 }
