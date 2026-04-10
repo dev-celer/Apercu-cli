@@ -27,7 +27,7 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	rootCmd.PersistentFlags().BoolVarP(&debug, "debug", "d", false, "enable debug output")
-	rootCmd.PersistentFlags().BoolVarP(&runnerOutput, "runner-output", "o", false, "enable runner output")
+	rootCmd.PersistentFlags().BoolVarP(&runnerOutput, "output", "o", false, "enable migration output and seeding output")
 	rootCmd.PersistentFlags().StringVarP(&statePath, "state-path", "s", "", "path to state file")
 	rootCmd.PersistentFlags().BoolVarP(&jsonOutput, "json", "j", false, "enable JSON output")
 }
