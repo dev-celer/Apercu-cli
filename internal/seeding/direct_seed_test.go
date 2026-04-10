@@ -1,6 +1,11 @@
 package seeding
 
 import (
+	"apercu-cli/config"
+	"crypto/md5"
+	"encoding/hex"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -39,5 +44,106 @@ func TestDirectSeed_GetDuration(t *testing.T) {
 		t.Parallel()
 		h := &DirectSeed{}
 		assert.Nil(t, h.GetDuration())
+	})
+}
+
+func TestCompareSeedContentFromHash(t *testing.T) {
+	t.Parallel()
+
+	t.Run("matching hash", func(t *testing.T) {
+		t.Parallel()
+		tmpDir := t.TempDir()
+		filePath := filepath.Join(tmpDir, "seed.sql")
+		content := []byte("INSERT INTO users (name) VALUES ('test');")
+		err := os.WriteFile(filePath, content, 0644)
+		assert.NoError(t, err)
+
+		h := md5.Sum(content)
+		hash := hex.EncodeToString(h[:])
+
+		match, err := compareSeedContentFromHash(hash, filePath)
+		assert.NoError(t, err)
+		assert.True(t, match)
+	})
+
+	t.Run("non-matching hash", func(t *testing.T) {
+		t.Parallel()
+		tmpDir := t.TempDir()
+		filePath := filepath.Join(tmpDir, "seed.sql")
+		err := os.WriteFile(filePath, []byte("INSERT INTO users (name) VALUES ('test');"), 0644)
+		assert.NoError(t, err)
+
+		match, err := compareSeedContentFromHash("abcdef1234567890abcdef1234567890", filePath)
+		assert.NoError(t, err)
+		assert.False(t, match)
+	})
+
+	t.Run("file does not exist", func(t *testing.T) {
+		t.Parallel()
+		match, err := compareSeedContentFromHash("somehash", "/nonexistent/path/seed.sql")
+		assert.Error(t, err)
+		assert.False(t, match)
+	})
+}
+
+func TestIsSeedAlreadyApplied(t *testing.T) {
+	t.Parallel()
+
+	t.Run("seed not in state", func(t *testing.T) {
+		t.Parallel()
+		state := []config.SeedState{
+			{Name: "other.sql", Hash: "abc"},
+		}
+
+		applied, err := isSeedAlreadyApplied("seed.sql", state)
+		assert.NoError(t, err)
+		assert.False(t, applied)
+	})
+
+	t.Run("seed in state with matching content", func(t *testing.T) {
+		t.Parallel()
+		tmpDir := t.TempDir()
+		filePath := filepath.Join(tmpDir, "seed.sql")
+		content := []byte("SELECT 1;")
+		err := os.WriteFile(filePath, content, 0644)
+		assert.NoError(t, err)
+
+		h := md5.Sum(content)
+		hash := hex.EncodeToString(h[:])
+
+		state := []config.SeedState{
+			{Name: filePath, Hash: hash},
+		}
+
+		applied, err := isSeedAlreadyApplied(filePath, state)
+		assert.NoError(t, err)
+		assert.True(t, applied)
+	})
+
+	t.Run("seed in state with different content", func(t *testing.T) {
+		t.Parallel()
+		tmpDir := t.TempDir()
+		filePath := filepath.Join(tmpDir, "seed.sql")
+		err := os.WriteFile(filePath, []byte("SELECT 2;"), 0644)
+		assert.NoError(t, err)
+
+		originalContent := []byte("SELECT 1;")
+		h := md5.Sum(originalContent)
+		hash := hex.EncodeToString(h[:])
+
+		state := []config.SeedState{
+			{Name: filePath, Hash: hash},
+		}
+
+		applied, err := isSeedAlreadyApplied(filePath, state)
+		assert.NoError(t, err)
+		assert.False(t, applied)
+	})
+
+	t.Run("empty state", func(t *testing.T) {
+		t.Parallel()
+		applied, err := isSeedAlreadyApplied("seed.sql", []config.SeedState{})
+		assert.NoError(t, err)
+		assert.False(t, applied)
 	})
 }
