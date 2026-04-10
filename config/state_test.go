@@ -17,7 +17,9 @@ func TestStateSaveAndLoad(t *testing.T) {
 	original := &State{
 		Databases: map[string]DatabaseState{
 			"mydb": {
-				AppliedSeeds: []string{"seed1.sql", "seed2.sql"},
+				AppliedSeeds: []SeedState{
+					{Name: "seed1.sql", Hash: "abc123"},
+					{Name: "seed2.sql", Hash: "def456"}},
 			},
 		},
 	}

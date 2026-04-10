@@ -13,7 +13,12 @@ type State struct {
 }
 
 type DatabaseState struct {
-	AppliedSeeds []string `yaml:"applied_seeds" json:"applied_seeds"`
+	AppliedSeeds []SeedState `yaml:"applied_seeds" json:"applied_seeds"`
+}
+
+type SeedState struct {
+	Name string `yaml:"name" json:"seed_file"`
+	Hash string `yaml:"hash" json:"seed_hash"`
 }
 
 func NewState() *State {

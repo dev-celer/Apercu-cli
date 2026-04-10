@@ -3,9 +3,12 @@ package seeding
 import (
 	"apercu-cli/config"
 	"apercu-cli/internal/database"
+	"crypto/md5"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"log/slog"
 	"os"
@@ -26,6 +29,37 @@ type DirectSeed struct {
 	output        string
 }
 
+// Returns true if the content of the seed file matches the hash
+func compareSeedContentFromHash(hash string, filePath string) (bool, error) {
+	f, err := os.Open(filePath)
+	if err != nil {
+		_, _ = fmt.Fprintln(log.Writer(), "WARNING: Failed to open seed file:", filePath)
+		return false, errors.New(fmt.Sprintf("Failed to read seed file: %v", err))
+	}
+	defer f.Close()
+
+	h := md5.New()
+	if _, err := io.Copy(h, f); err != nil {
+		_, _ = fmt.Fprintln(log.Writer(), "WARNING: Failed to read seed file:", filePath)
+		return false, errors.New(fmt.Sprintf("Failed to read seed file: %v", err))
+	}
+
+	contentHash := hex.EncodeToString(h.Sum(nil))
+	return contentHash == hash, nil
+}
+
+func isSeedAlreadyApplied(filePath string, state []config.SeedState) (bool, error) {
+	seedIndex := slices.IndexFunc(state, func(seed config.SeedState) bool {
+		return seed.Name == filePath
+	})
+	if seedIndex == -1 {
+		return false, nil
+	}
+
+	slog.Debug("Seed file has already been applied, checking content", "file", filePath)
+	return compareSeedContentFromHash(state[seedIndex].Hash, filePath)
+}
+
 func NewDirectSeed(conn database.ConnectionFields, seedPath []string, state *config.DatabaseState) (*DirectSeed, error) {
 	db, err := sql.Open("postgres", conn.Url)
 	if err != nil {
@@ -38,7 +72,7 @@ func NewDirectSeed(conn database.ConnectionFields, seedPath []string, state *con
 		info, err := os.Stat(path)
 		if err != nil {
 			if os.IsNotExist(err) {
-				fmt.Println("WARNING: Seed path not found:", path)
+				_, _ = fmt.Fprintln(log.Writer(), "WARNING: Seed path not found:", path)
 				continue
 			}
 			return nil, errors.New(fmt.Sprintf("Failed to get seed path: %v", err))
@@ -51,8 +85,12 @@ func NewDirectSeed(conn database.ConnectionFields, seedPath []string, state *con
 					return err
 				}
 				if !d.IsDir() && filepath.Ext(p) == ".sql" {
-					if slices.Contains(state.AppliedSeeds, p) {
-						slog.Debug("Seed is already applied, skipping", "file", p)
+					applied, err := isSeedAlreadyApplied(p, state.AppliedSeeds)
+					if err != nil {
+						return nil
+					}
+					if applied {
+						slog.Debug("Seed file has already been applied, skipping", "file", p)
 						return nil
 					}
 
@@ -64,8 +102,12 @@ func NewDirectSeed(conn database.ConnectionFields, seedPath []string, state *con
 				return nil, errors.New(fmt.Sprintf("Failed to search for sql files inside seed path: %v", err))
 			}
 		} else {
-			if slices.Contains(state.AppliedSeeds, path) {
-				slog.Debug("Seed is already applied, skipping", "file", path)
+			applied, err := isSeedAlreadyApplied(path, state.AppliedSeeds)
+			if err != nil {
+				continue
+			}
+			if applied {
+				slog.Debug("Seed file has already been applied, skipping", "file", path)
 				continue
 			}
 
@@ -119,7 +161,15 @@ func (h *DirectSeed) Apply() {
 		h.output += "----------\n"
 
 		// Append to state
-		h.state.AppliedSeeds = append(h.state.AppliedSeeds, seedFile)
+		hasher := md5.New()
+		_, _ = hasher.Write(content)
+		hash := hasher.Sum(nil)
+		hashStr := hex.EncodeToString(hash)
+
+		h.state.AppliedSeeds = append(h.state.AppliedSeeds, config.SeedState{
+			Name: seedFile,
+			Hash: hashStr,
+		})
 	}
 
 	// Set end time
