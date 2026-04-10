@@ -14,4 +14,5 @@ databases:
         DATABASE_URL: "${{ DATABASE_URL }}"
       local_dir: "./migrations"
     seed:
-      - "./seeds/data.sql"
+      - path: "./seeds/data.sql"
+        seed_on: "always"

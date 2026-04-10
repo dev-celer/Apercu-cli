@@ -25,7 +25,7 @@ func TestLoadConfig_Valid(t *testing.T) {
 	assert.Equal(t, []string{"migrate"}, db.Migration.Command)
 	assert.Equal(t, "./migrations", db.Migration.LocalDir)
 
-	assert.Equal(t, []string{"./seeds/data.sql"}, db.Seed)
+	assert.Equal(t, []DatabaseSeed{{Path: "./seeds/data.sql", SeedOn: DatabaseSeedTypeAlways}}, db.Seed)
 }
 
 func TestLoadConfig_Minimal(t *testing.T) {

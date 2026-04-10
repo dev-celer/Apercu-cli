@@ -86,21 +86,21 @@ func TestCompareSeedContentFromHash(t *testing.T) {
 	})
 }
 
-func TestIsSeedAlreadyApplied(t *testing.T) {
+func TestShouldSeedBeApplied(t *testing.T) {
 	t.Parallel()
 
-	t.Run("seed not in state", func(t *testing.T) {
+	t.Run("seed not in state with create mode", func(t *testing.T) {
 		t.Parallel()
 		state := []config.SeedState{
 			{Name: "other.sql", Hash: "abc"},
 		}
 
-		applied, err := isSeedAlreadyApplied("seed.sql", state)
+		applied, err := shouldSeedBeApplied("seed.sql", config.DatabaseSeedTypeCreate, state)
 		assert.NoError(t, err)
-		assert.False(t, applied)
+		assert.True(t, applied)
 	})
 
-	t.Run("seed in state with matching content", func(t *testing.T) {
+	t.Run("always mode applies even if already applied", func(t *testing.T) {
 		t.Parallel()
 		tmpDir := t.TempDir()
 		filePath := filepath.Join(tmpDir, "seed.sql")
@@ -115,12 +115,32 @@ func TestIsSeedAlreadyApplied(t *testing.T) {
 			{Name: filePath, Hash: hash},
 		}
 
-		applied, err := isSeedAlreadyApplied(filePath, state)
+		applied, err := shouldSeedBeApplied(filePath, config.DatabaseSeedTypeAlways, state)
 		assert.NoError(t, err)
 		assert.True(t, applied)
 	})
 
-	t.Run("seed in state with different content", func(t *testing.T) {
+	t.Run("create mode skips when already applied with same content", func(t *testing.T) {
+		t.Parallel()
+		tmpDir := t.TempDir()
+		filePath := filepath.Join(tmpDir, "seed.sql")
+		content := []byte("SELECT 1;")
+		err := os.WriteFile(filePath, content, 0644)
+		assert.NoError(t, err)
+
+		h := md5.Sum(content)
+		hash := hex.EncodeToString(h[:])
+
+		state := []config.SeedState{
+			{Name: filePath, Hash: hash},
+		}
+
+		applied, err := shouldSeedBeApplied(filePath, config.DatabaseSeedTypeCreate, state)
+		assert.NoError(t, err)
+		assert.False(t, applied)
+	})
+
+	t.Run("create mode skips when already applied with different content", func(t *testing.T) {
 		t.Parallel()
 		tmpDir := t.TempDir()
 		filePath := filepath.Join(tmpDir, "seed.sql")
@@ -135,15 +155,55 @@ func TestIsSeedAlreadyApplied(t *testing.T) {
 			{Name: filePath, Hash: hash},
 		}
 
-		applied, err := isSeedAlreadyApplied(filePath, state)
+		applied, err := shouldSeedBeApplied(filePath, config.DatabaseSeedTypeCreate, state)
 		assert.NoError(t, err)
 		assert.False(t, applied)
 	})
 
-	t.Run("empty state", func(t *testing.T) {
+	t.Run("update mode applies when content changed", func(t *testing.T) {
 		t.Parallel()
-		applied, err := isSeedAlreadyApplied("seed.sql", []config.SeedState{})
+		tmpDir := t.TempDir()
+		filePath := filepath.Join(tmpDir, "seed.sql")
+		err := os.WriteFile(filePath, []byte("SELECT 2;"), 0644)
+		assert.NoError(t, err)
+
+		originalContent := []byte("SELECT 1;")
+		h := md5.Sum(originalContent)
+		hash := hex.EncodeToString(h[:])
+
+		state := []config.SeedState{
+			{Name: filePath, Hash: hash},
+		}
+
+		applied, err := shouldSeedBeApplied(filePath, config.DatabaseSeedTypeUpdate, state)
+		assert.NoError(t, err)
+		assert.True(t, applied)
+	})
+
+	t.Run("update mode skips when content unchanged", func(t *testing.T) {
+		t.Parallel()
+		tmpDir := t.TempDir()
+		filePath := filepath.Join(tmpDir, "seed.sql")
+		content := []byte("SELECT 1;")
+		err := os.WriteFile(filePath, content, 0644)
+		assert.NoError(t, err)
+
+		h := md5.Sum(content)
+		hash := hex.EncodeToString(h[:])
+
+		state := []config.SeedState{
+			{Name: filePath, Hash: hash},
+		}
+
+		applied, err := shouldSeedBeApplied(filePath, config.DatabaseSeedTypeUpdate, state)
 		assert.NoError(t, err)
 		assert.False(t, applied)
+	})
+
+	t.Run("empty state applies seed", func(t *testing.T) {
+		t.Parallel()
+		applied, err := shouldSeedBeApplied("seed.sql", config.DatabaseSeedTypeCreate, []config.SeedState{})
+		assert.NoError(t, err)
+		assert.True(t, applied)
 	})
 }

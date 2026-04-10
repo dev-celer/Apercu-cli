@@ -53,7 +53,7 @@ type Config struct {
 type Database struct {
 	Source    *DatabaseSource    `yaml:"source"`
 	Migration *DatabaseMigration `yaml:"migration"`
-	Seed      []string           `yaml:"seed,omitempty"`
+	Seed      []DatabaseSeed     `yaml:"seed,omitempty"`
 }
 
 type DatabaseSource struct {
@@ -81,3 +81,16 @@ type DatabaseMigration struct {
 	LocalDir string            `yaml:"local_dir,omitempty"`
 	WorkDir  *string           `yaml:"work_dir"`
 }
+
+type DatabaseSeed struct {
+	Path   string           `yaml:"path"`
+	SeedOn DatabaseSeedType `yaml:"seed_on"`
+}
+
+type DatabaseSeedType string
+
+const (
+	DatabaseSeedTypeAlways DatabaseSeedType = "always"
+	DatabaseSeedTypeUpdate DatabaseSeedType = "update"
+	DatabaseSeedTypeCreate DatabaseSeedType = "create"
+)

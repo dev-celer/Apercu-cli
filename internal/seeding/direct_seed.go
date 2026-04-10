@@ -48,31 +48,46 @@ func compareSeedContentFromHash(hash string, filePath string) (bool, error) {
 	return contentHash == hash, nil
 }
 
-func isSeedAlreadyApplied(filePath string, state []config.SeedState) (bool, error) {
+func shouldSeedBeApplied(filePath string, seedOn config.DatabaseSeedType, state []config.SeedState) (bool, error) {
+	if seedOn == config.DatabaseSeedTypeAlways {
+		slog.Debug("Seed on always, applying seed file", "file", filePath)
+		return true, nil
+	}
+
 	seedIndex := slices.IndexFunc(state, func(seed config.SeedState) bool {
 		return seed.Name == filePath
 	})
 	if seedIndex == -1 {
-		return false, nil
+		slog.Debug("Seed file has not been applied yet, applying seed file", "file", filePath)
+		return true, nil
 	}
 
 	slog.Debug("Seed file has already been applied, checking content", "file", filePath)
-	return compareSeedContentFromHash(state[seedIndex].Hash, filePath)
+	seedUnchanged, err := compareSeedContentFromHash(state[seedIndex].Hash, filePath)
+	if err != nil {
+		return false, err
+	}
+
+	if !seedUnchanged && seedOn == config.DatabaseSeedTypeUpdate {
+		slog.Debug("Seed file has been updated, applying seed file", "file", filePath)
+		return true, nil
+	}
+	return false, nil
 }
 
-func NewDirectSeed(conn database.ConnectionFields, seedPath []string, state *config.DatabaseState) (*DirectSeed, error) {
+func NewDirectSeed(conn database.ConnectionFields, seedFiles []config.DatabaseSeed, state *config.DatabaseState) (*DirectSeed, error) {
 	db, err := sql.Open("postgres", conn.Url)
 	if err != nil {
 		return nil, errors.New(fmt.Sprintf("Failed to connect to database: %v", err))
 	}
 
-	seedFiles := make([]string, 0)
-	for _, path := range seedPath {
-		slog.Debug("Searching for seed files", "path", path)
-		info, err := os.Stat(path)
+	seedFilesToApply := make([]string, 0)
+	for _, seedFile := range seedFiles {
+		slog.Debug("Searching for seed files", "path", seedFile.Path)
+		info, err := os.Stat(seedFile.Path)
 		if err != nil {
 			if os.IsNotExist(err) {
-				_, _ = fmt.Fprintln(log.Writer(), "WARNING: Seed path not found:", path)
+				_, _ = fmt.Fprintln(log.Writer(), "WARNING: Seed path not found:", seedFile.Path)
 				continue
 			}
 			return nil, errors.New(fmt.Sprintf("Failed to get seed path: %v", err))
@@ -80,43 +95,40 @@ func NewDirectSeed(conn database.ConnectionFields, seedPath []string, state *con
 
 		if info.IsDir() {
 			slog.Debug("Path is a directory, searching for sql files inside")
-			if err := filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
+			if err := filepath.WalkDir(seedFile.Path, func(p string, d os.DirEntry, err error) error {
 				if err != nil {
 					return err
 				}
 				if !d.IsDir() && filepath.Ext(p) == ".sql" {
-					applied, err := isSeedAlreadyApplied(p, state.AppliedSeeds)
+					slog.Debug("Found sql file", "file", p)
+					needApply, err := shouldSeedBeApplied(p, seedFile.SeedOn, state.AppliedSeeds)
 					if err != nil {
 						return nil
 					}
-					if applied {
-						slog.Debug("Seed file has already been applied, skipping", "file", p)
+					if !needApply {
 						return nil
 					}
 
-					slog.Debug("Found sql file", "file", p)
-					seedFiles = append(seedFiles, p)
+					seedFilesToApply = append(seedFilesToApply, p)
 				}
 				return nil
 			}); err != nil {
 				return nil, errors.New(fmt.Sprintf("Failed to search for sql files inside seed path: %v", err))
 			}
 		} else {
-			applied, err := isSeedAlreadyApplied(path, state.AppliedSeeds)
+			slog.Debug("Path is a file", "file", seedFile.Path)
+			needApply, err := shouldSeedBeApplied(seedFile.Path, seedFile.SeedOn, state.AppliedSeeds)
 			if err != nil {
 				continue
 			}
-			if applied {
-				slog.Debug("Seed file has already been applied, skipping", "file", path)
+			if !needApply {
 				continue
 			}
-
-			slog.Debug("Path is a file, adding to seed files list", "file", path)
-			seedFiles = append(seedFiles, path)
+			seedFilesToApply = append(seedFilesToApply, seedFile.Path)
 		}
 	}
 
-	return &DirectSeed{db: db, seedFilesPath: seedFiles, state: state}, nil
+	return &DirectSeed{db: db, seedFilesPath: seedFilesToApply, state: state}, nil
 }
 
 func (h *DirectSeed) Close() error {
