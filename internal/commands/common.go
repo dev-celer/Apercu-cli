@@ -20,7 +20,9 @@ func ApplySeeding(seedHandler seeding.HandlerInterface) string {
 
 	if runnerOutput || seedHandler.GetOutput().FailedCount > 0 {
 		_, _ = fmt.Fprintln(log.Writer(), "\n-----Seeding output-----")
-		_, _ = fmt.Fprintln(log.Writer(), seedHandler.GetOutput())
+		if seedHandler.GetOutput().Logs != nil {
+			_, _ = fmt.Fprintln(log.Writer(), *seedHandler.GetOutput().Logs)
+		}
 		_, _ = fmt.Fprintln(log.Writer(), "---------------------")
 	}
 
