@@ -159,7 +159,7 @@ func (h *DirectSeed) Apply() {
 		if err != nil {
 			h.output.FailedCount++
 			*h.output.Logs += fmt.Sprintf("Failed to read seed file: %s\n", seedFile)
-			*h.output.Logs += "----------\n"
+			*h.output.Logs += "----------"
 			continue
 		}
 		// Execute seed file
@@ -168,7 +168,7 @@ func (h *DirectSeed) Apply() {
 			h.output.FailedCount++
 			*h.output.Logs += fmt.Sprintf("Failed to execute seed file: %s\n", seedFile)
 			*h.output.Logs += fmt.Sprintf("Error: %s\n", err.Error())
-			*h.output.Logs += "----------\n"
+			*h.output.Logs += "----------"
 			continue
 		}
 
@@ -179,7 +179,7 @@ func (h *DirectSeed) Apply() {
 		duration := time.Now().Sub(startTime)
 
 		*h.output.Logs += fmt.Sprintf("Seeding completed in %s\n", duration.String())
-		*h.output.Logs += "----------\n"
+		*h.output.Logs += "----------"
 		h.output.SuccessCount++
 
 		// Append to state
