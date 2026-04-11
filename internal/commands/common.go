@@ -89,6 +89,8 @@ func ErrorAndExit(err error, dbOutput *output.OutputDatabase, dbName string) {
 		}
 
 		fmt.Println(fmt.Sprintf("OUTPUT=%s", string(jsonData)))
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		os.Exit(0)
 	}
 	_, _ = fmt.Fprintln(os.Stderr, err)
 	os.Exit(1)
