@@ -60,7 +60,6 @@ func reset(cmd *cobra.Command, args []string) error {
 		dbOutput.Errors = append(dbOutput.Errors, err.Error())
 		ErrorAndExit(err, dbOutput, dbName)
 	}
-	dbOutput.ConnectionFields = &conn
 
 	// Apply the migrations
 	ctx := cmd.Context()
@@ -121,6 +120,16 @@ func reset(cmd *cobra.Command, args []string) error {
 			os.Exit(1)
 		}
 
+		connectionOutput := map[string]database.ConnectionFields{
+			dbName: conn,
+		}
+		connJsonData, err := json.Marshal(connectionOutput)
+		if err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, fmt.Sprintf("Failed to marshal database connection json output: %v", err))
+			os.Exit(1)
+		}
+
+		fmt.Println(fmt.Sprintf("DATABASE_CONNECTIONS=%s", string(connJsonData)))
 		fmt.Println(fmt.Sprintf("OUTPUT=%s", string(jsonData)))
 	} else {
 		fmt.Println(fmt.Sprintf("DATABASE_URL: %s", conn.Url))

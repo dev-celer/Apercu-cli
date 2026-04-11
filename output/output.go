@@ -1,24 +1,20 @@
 package output
 
-import "apercu-cli/internal/database"
-
 type Output struct {
 	Databases map[string]OutputDatabase `yaml:"databases,omitempty" json:"databases,omitempty"`
 }
 
 type OutputDatabase struct {
-	ConnectionFields *database.ConnectionFields `yaml:"connection_fields,omitempty" json:"connection_fields,omitempty"`
-	Migration        *OutputDatabaseMigration   `yaml:"migration,omitempty" json:"migration,omitempty"`
-	Seeding          *OutputDatabaseSeeding     `yaml:"seeding,omitempty" json:"seeding,omitempty"`
-	Warnings         []string                   `yaml:"warnings,omitempty" json:"warnings,omitempty"`
-	Errors           []string                   `yaml:"errors,omitempty" json:"errors,omitempty"`
+	Migration *OutputDatabaseMigration `yaml:"migration,omitempty" json:"migration,omitempty"`
+	Seeding   *OutputDatabaseSeeding   `yaml:"seeding,omitempty" json:"seeding,omitempty"`
+	Warnings  []string                 `yaml:"warnings,omitempty" json:"warnings,omitempty"`
+	Errors    []string                 `yaml:"errors,omitempty" json:"errors,omitempty"`
 }
 
 func NewOutputDatabase() *OutputDatabase {
 	return &OutputDatabase{
-		ConnectionFields: nil,
-		Warnings:         make([]string, 0),
-		Errors:           make([]string, 0),
+		Warnings: make([]string, 0),
+		Errors:   make([]string, 0),
 	}
 }
 
