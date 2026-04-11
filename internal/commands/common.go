@@ -93,30 +93,37 @@ func SaveOutputInFile(path string, output *output.Output) error {
 	return nil
 }
 
-func PrintOutput(output *output.Output) {
-	jsonData, err := json.Marshal(output)
+func SaveMarkdownFile(path string, output *output.Output) error {
+	content, err := output.RenderMarkdown()
 	if err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, fmt.Sprintf("Failed to marshal database json output: %v", err))
-		os.Exit(1)
+		return errors.New(fmt.Sprintf("Failed to render markdown output: %v", err))
 	}
 
-	fmt.Println(fmt.Sprintf("OUTPUT=%s", string(jsonData)))
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		return errors.New(fmt.Sprintf("Failed to save markdown file: %v", err))
+	}
+
+	slog.Debug("Markdown file saved", "path", path)
+	return nil
 }
 
 func ErrorAndExit(err error, dbOutput *output.OutputDatabase, dbName string) {
-	if jsonOutput {
-		outputData := output.Output{
-			Databases: map[string]output.OutputDatabase{
-				dbName: *dbOutput,
-			},
+	outputData := output.Output{
+		Databases: map[string]output.OutputDatabase{
+			dbName: *dbOutput,
+		},
+	}
+
+	if markdownOutput != "" {
+		if err := SaveMarkdownFile(markdownOutput, &outputData); err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, err)
 		}
-		if outputFile != "" {
-			if err := SaveOutputInFile(outputFile, &outputData); err != nil {
-				_, _ = fmt.Fprintln(os.Stderr, err)
-				os.Exit(1)
-			}
-		} else {
-			PrintOutput(&outputData)
+	}
+
+	if outputFile != "" {
+		if err := SaveOutputInFile(outputFile, &outputData); err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
 		}
 		_, _ = fmt.Fprintln(os.Stderr, err)
 		os.Exit(0)

@@ -123,6 +123,26 @@ func preview(cmd *cobra.Command, args []string) error {
 	}
 	_, _ = fmt.Fprintln(log.Writer())
 
+	outputData := output.Output{
+		Databases: map[string]output.OutputDatabase{
+			dbName: *dbOutput,
+		},
+	}
+
+	if markdownOutput != "" {
+		if err := SaveMarkdownFile(markdownOutput, &outputData); err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+	}
+
+	if outputFile != "" {
+		if err := SaveOutputInFile(outputFile, &outputData); err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+	}
+
 	if jsonOutput {
 		// Print the connection json output
 		connectionOutput := map[string]database.ConnectionFields{
@@ -134,21 +154,6 @@ func preview(cmd *cobra.Command, args []string) error {
 			os.Exit(1)
 		}
 		fmt.Println(fmt.Sprintf("DATABASE_CONNECTIONS=%s", string(connJsonData)))
-
-		// Handle the json output
-		outputData := output.Output{
-			Databases: map[string]output.OutputDatabase{
-				dbName: *dbOutput,
-			},
-		}
-		if outputFile != "" {
-			if err := SaveOutputInFile(outputFile, &outputData); err != nil {
-				_, _ = fmt.Fprintln(os.Stderr, err)
-				os.Exit(1)
-			}
-		} else {
-			PrintOutput(&outputData)
-		}
 	} else {
 		fmt.Println(fmt.Sprintf("DATABASE_URL: %s", conn.Url))
 	}

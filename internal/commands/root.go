@@ -11,6 +11,7 @@ import (
 var debug bool
 var runnerOutput bool
 var jsonOutput bool
+var markdownOutput string
 var statePath string
 var outputFile string
 
@@ -23,9 +24,6 @@ var rootCmd = &cobra.Command{
 			slog.SetLogLoggerLevel(slog.LevelDebug)
 			runnerOutput = true
 		}
-		if outputFile != "" {
-			jsonOutput = true
-		}
 	},
 }
 
@@ -34,7 +32,8 @@ func init() {
 	rootCmd.PersistentFlags().BoolVarP(&runnerOutput, "output", "o", false, "enable migration output and seeding output")
 	rootCmd.PersistentFlags().StringVarP(&statePath, "state-path", "s", "", "path to state file")
 	rootCmd.PersistentFlags().BoolVarP(&jsonOutput, "json", "j", false, "enable JSON output")
-	rootCmd.PersistentFlags().StringVar(&outputFile, "output-file", "", "path to output file")
+	rootCmd.PersistentFlags().StringVar(&markdownOutput, "markdown-file", "", "enable Markdown file output")
+	rootCmd.PersistentFlags().StringVar(&outputFile, "output-file", "", "path to JSON output file")
 }
 
 func Execute() {

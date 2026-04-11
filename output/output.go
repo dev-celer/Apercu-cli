@@ -1,5 +1,11 @@
 package output
 
+import (
+	"bytes"
+	"fmt"
+	"text/template"
+)
+
 type Output struct {
 	Databases map[string]OutputDatabase `yaml:"databases,omitempty" json:"databases,omitempty"`
 }
@@ -54,4 +60,87 @@ func NewSeedingOutput() *OutputDatabaseSeeding {
 		Warnings:     make([]string, 0),
 		Errors:       make([]string, 0),
 	}
+}
+
+var templateFuncs = template.FuncMap{
+	"deref": func(s *string) string {
+		if s == nil {
+			return ""
+		}
+		return *s
+	},
+}
+
+var markdownTmpl = template.Must(template.New("markdown").Funcs(templateFuncs).Parse(
+	`# Apercu Output
+{{range $name, $db := .Databases}}
+## Database: {{$name}}
+{{if $db.Migration}}
+### Migration
+| Field | Value |
+|-------|-------|
+| Duration | {{$db.Migration.Duration}} |
+| Count | {{$db.Migration.Count}} |
+{{if $db.Migration.Warnings}}
+**Warnings:**
+{{range $db.Migration.Warnings}}- {{.}}
+{{end}}{{end}}
+{{- if $db.Migration.Errors}}
+**Errors:**
+{{range $db.Migration.Errors}}- {{.}}
+{{end}}{{end}}
+{{- if $db.Migration.Logs}}
+<details>
+<summary>Logs</summary>
+
+` + "```" + `
+{{deref $db.Migration.Logs}}
+` + "```" + `
+
+</details>
+{{end}}
+{{- end}}
+{{- if $db.Seeding}}
+### Seeding
+| Field | Value |
+|-------|-------|
+| Duration | {{$db.Seeding.Duration}} |
+| Success | {{$db.Seeding.SuccessCount}} |
+| Failed | {{$db.Seeding.FailedCount}} |
+{{if $db.Seeding.Warnings}}
+**Warnings:**
+{{range $db.Seeding.Warnings}}- {{.}}
+{{end}}{{end}}
+{{- if $db.Seeding.Errors}}
+**Errors:**
+{{range $db.Seeding.Errors}}- {{.}}
+{{end}}{{end}}
+{{- if $db.Seeding.Logs}}
+<details>
+<summary>Logs</summary>
+
+` + "```" + `
+{{deref $db.Seeding.Logs}}
+` + "```" + `
+
+</details>
+{{end}}
+{{- end}}
+{{- if $db.Warnings}}
+### Warnings
+{{range $db.Warnings}}- {{.}}
+{{end}}{{end}}
+{{- if $db.Errors}}
+### Errors
+{{range $db.Errors}}- {{.}}
+{{end}}{{end}}
+{{- end}}
+`))
+
+func (o *Output) RenderMarkdown() (string, error) {
+	var buf bytes.Buffer
+	if err := markdownTmpl.Execute(&buf, o); err != nil {
+		return "", fmt.Errorf("failed to render markdown: %w", err)
+	}
+	return buf.String(), nil
 }
