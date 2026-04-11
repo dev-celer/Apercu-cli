@@ -1,6 +1,7 @@
 package migration
 
 import (
+	"apercu-cli/output"
 	"bytes"
 	"context"
 	"database/sql"
@@ -27,9 +28,7 @@ type DockerHandler struct {
 	workDir     string
 	localFolder string
 	databaseUrl string
-	startTime   *time.Time
-	endTime     *time.Time
-	output      string
+	output      *output.OutputDatabaseMigration
 }
 
 func NewDockerHandler(image string, command []string, env map[string]string, workDir string, localFolder string, databaseUrl string) *DockerHandler {
@@ -40,6 +39,7 @@ func NewDockerHandler(image string, command []string, env map[string]string, wor
 		workDir:     workDir,
 		localFolder: localFolder,
 		databaseUrl: databaseUrl,
+		output:      output.NewMigrationOutput(),
 	}
 }
 
@@ -68,7 +68,7 @@ func (h *DockerHandler) getMigrationTableName(db *sql.DB) (string, error) {
 	return tableName, nil
 }
 
-func (h *DockerHandler) GetCount() (int, error) {
+func (h *DockerHandler) getCount() (int, error) {
 	slog.Debug("Connect to database")
 	db, err := sql.Open("postgres", h.databaseUrl)
 	if err != nil {
@@ -105,6 +105,12 @@ func (h *DockerHandler) GetCount() (int, error) {
 
 func (h *DockerHandler) Apply(ctx context.Context) error {
 	_, _ = fmt.Fprintln(log.Writer(), "Applying migrations...")
+
+	// Get the current migration count
+	initCount, initCountErr := h.getCount()
+	if initCountErr != nil && !errors.Is(initCountErr, ErrMigrationTableNotFound) {
+		return initCountErr
+	}
 
 	cli, err := client.NewClientWithOpts(client.FromEnv)
 	if err != nil {
@@ -162,7 +168,7 @@ func (h *DockerHandler) Apply(ctx context.Context) error {
 
 	// Initialize start time
 	slog.Debug("Starting docker container")
-	h.startTime = new(time.Now())
+	startTime := time.Now()
 	// Start container
 	if err := cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
 		return errors.New(fmt.Sprintf("Failed to start docker container: %v", err))
@@ -191,15 +197,16 @@ func (h *DockerHandler) Apply(ctx context.Context) error {
 		return errors.New(fmt.Sprintf("Failed to wait for docker container: %v", err))
 	case status := <-statusCh:
 		if status.StatusCode != 0 {
-			h.output = buffer.String()
+			h.output.Logs = new(buffer.String())
 			return errors.New(fmt.Sprintf("Docker container exited with status code: %d", status.StatusCode))
 		}
 	}
 
 	// Set end time
-	h.endTime = new(time.Now())
+	endTime := time.Now()
+	h.output.Duration = endTime.Sub(startTime).String()
 	slog.Debug("Docker container finished")
-	h.output = buffer.String()
+	h.output.Logs = new(buffer.String())
 
 	// Cleanup container
 	slog.Debug("Cleanup docker container")
@@ -207,17 +214,25 @@ func (h *DockerHandler) Apply(ctx context.Context) error {
 		slog.Error("Failed to cleanup docker container", "error", err)
 	}
 
+	// Get the new migration count
+	finalCount, finalCountErr := h.getCount()
+	if finalCountErr != nil {
+		if errors.Is(finalCountErr, ErrMigrationTableNotFound) {
+			h.output.Warnings = append(h.output.Warnings, "Migration table not found, cannot determine migration count")
+			_, _ = fmt.Fprintln(log.Writer(), "WARNING: migration table not found, cannot determine migration count")
+		} else {
+			return finalCountErr
+		}
+	} else {
+		if initCountErr != nil {
+			initCount = 0
+		}
+		h.output.Count = finalCount - initCount
+	}
+
 	return nil
 }
 
-func (h *DockerHandler) GetDuration() *time.Duration {
-	if h.startTime == nil || h.endTime == nil {
-		return nil
-	}
-
-	return new(h.endTime.Sub(*h.startTime))
-}
-
-func (h *DockerHandler) GetOutput() string {
+func (h *DockerHandler) GetOutput() *output.OutputDatabaseMigration {
 	return h.output
 }

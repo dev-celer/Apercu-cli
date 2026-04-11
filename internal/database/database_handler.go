@@ -22,6 +22,7 @@ type HandlerInterface interface {
 	Reset() error
 	GetConnectionFields() (ConnectionFields, error)
 	PrunePreviewDatabases(openedPullRequestNumber []string) ([]string, error)
+	GetWarnings() []string
 }
 
 func GetSourceDatabaseHandler(dbConfig config.Database) (HandlerInterface, error) {

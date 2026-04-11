@@ -21,6 +21,7 @@ type NeonBranchHandler struct {
 	client           *neon.Client
 	previewBranch    string
 	connectionFields ConnectionFields
+	warnings         []string
 }
 
 func NewNeonBranchHandler(projectId string, apiKey string, parentBranch string, previewBranch string) (*NeonBranchHandler, error) {
@@ -35,6 +36,7 @@ func NewNeonBranchHandler(projectId string, apiKey string, parentBranch string, 
 		parentBranch:  parentBranch,
 		previewBranch: previewBranch,
 		client:        client,
+		warnings:      make([]string, 0),
 	}, nil
 }
 
@@ -391,4 +393,8 @@ func selectBranchesForPruning(branches []neon.Branch, previewPattern string, ope
 		}
 	}
 	return result
+}
+
+func (h *NeonBranchHandler) GetWarnings() []string {
+	return h.warnings
 }

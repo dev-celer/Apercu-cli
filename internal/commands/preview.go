@@ -5,6 +5,7 @@ import (
 	"apercu-cli/internal/database"
 	"apercu-cli/internal/migration"
 	"apercu-cli/internal/seeding"
+	"apercu-cli/output"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -40,14 +41,15 @@ func preview(cmd *cobra.Command, args []string) error {
 		dbName = name
 		break
 	}
+	dbOutput := output.NewOutputDatabase()
 
 	// Get state
 	var state config.State
 	if statePath != "" {
 		state, err = config.GetState(statePath)
 		if err != nil {
-			_, _ = fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+			dbOutput.Errors = append(dbOutput.Errors, err.Error())
+			ErrorAndExit(err, dbOutput, dbName)
 		}
 	} else {
 		state = *config.NewState()
@@ -62,49 +64,54 @@ func preview(cmd *cobra.Command, args []string) error {
 	// Apply the database
 	dbHandler, err := database.GetSourceDatabaseHandler(dbConfig)
 	if err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		dbOutput.Errors = append(dbOutput.Errors, err.Error())
+		ErrorAndExit(err, dbOutput, dbName)
 	}
 	if err := dbHandler.Apply(); err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		dbOutput.Errors = append(dbOutput.Errors, err.Error())
+		ErrorAndExit(err, dbOutput, dbName)
 	}
 	conn, err := dbHandler.GetConnectionFields()
 	if err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		dbOutput.Errors = append(dbOutput.Errors, err.Error())
+		ErrorAndExit(err, dbOutput, dbName)
 	}
+	dbOutput.ConnectionFields = &conn
 
 	// Apply the migrations
 	ctx := cmd.Context()
 	migrationHandler := migration.GetMigrationHandler(dbConfig, conn)
 	migrationMessage, err := ApplyMigration(ctx, migrationHandler)
 	if err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		dbOutput.Migration = migrationHandler.GetOutput()
+		ErrorAndExit(err, dbOutput, dbName)
+	}
+	if migrationHandler != nil {
+		dbOutput.Migration = migrationHandler.GetOutput()
 	}
 
 	// Apply the seeding
 	seedHandler, err := seeding.GetSeedingHandler(dbConfig, &dbState, conn)
 	if err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		dbOutput.Seeding = output.NewSeedingOutput()
+		dbOutput.Seeding.Errors = append(dbOutput.Seeding.Errors, err.Error())
+		ErrorAndExit(err, dbOutput, dbName)
 	}
 	defer func() {
 		if seedHandler != nil {
 			_ = seedHandler.Close()
 		}
 	}()
-	seedingMessage, err := ApplySeeding(seedHandler)
-	if err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+	seedingMessage := ApplySeeding(seedHandler)
+	if seedHandler != nil {
+		dbOutput.Seeding = seedHandler.GetOutput()
 	}
 
 	// Save the state
 	state.Databases[dbName] = dbState
 	if statePath != "" {
 		if err := state.Save(statePath); err != nil {
+			dbOutput.Warnings = append(dbOutput.Warnings, err.Error())
 			_, _ = fmt.Fprintln(os.Stderr, err)
 		}
 	}
@@ -118,16 +125,18 @@ func preview(cmd *cobra.Command, args []string) error {
 	_, _ = fmt.Fprintln(log.Writer())
 
 	if jsonOutput {
-		databaseConnections := map[string]database.ConnectionFields{
-			dbName: conn,
+		outputData := output.Output{
+			Databases: map[string]output.OutputDatabase{
+				dbName: *dbOutput,
+			},
 		}
-		jsonData, err := json.Marshal(databaseConnections)
+		jsonData, err := json.Marshal(outputData)
 		if err != nil {
-			_, _ = fmt.Fprintln(os.Stderr, fmt.Sprintf("Failed to marshal database connections: %v", err))
+			_, _ = fmt.Fprintln(os.Stderr, fmt.Sprintf("Failed to marshal database json output: %v", err))
 			os.Exit(1)
 		}
 
-		fmt.Println(fmt.Sprintf("DATABASE_CONNECTIONS=%s", string(jsonData)))
+		fmt.Println(fmt.Sprintf("OUTPUT=%s", string(jsonData)))
 	} else {
 		fmt.Println(fmt.Sprintf("DATABASE_URL: %s", conn.Url))
 	}

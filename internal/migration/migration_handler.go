@@ -3,17 +3,15 @@ package migration
 import (
 	"apercu-cli/config"
 	"apercu-cli/internal/database"
+	"apercu-cli/output"
 	"context"
 	"log/slog"
 	"strconv"
-	"time"
 )
 
 type HandlerInterface interface {
-	GetCount() (int, error)
 	Apply(ctx context.Context) error
-	GetDuration() *time.Duration
-	GetOutput() string
+	GetOutput() *output.OutputDatabaseMigration
 }
 
 func GetMigrationHandler(dbConfig config.Database, connection database.ConnectionFields) HandlerInterface {

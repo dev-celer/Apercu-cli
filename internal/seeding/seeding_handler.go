@@ -3,17 +3,14 @@ package seeding
 import (
 	"apercu-cli/config"
 	"apercu-cli/internal/database"
+	"apercu-cli/output"
 	"log/slog"
-	"time"
 )
 
 type HandlerInterface interface {
 	Close() error
 	Apply()
-	GetDuration() *time.Duration
-	GetAppliedCount() int
-	GetFailedCount() int
-	GetOutput() string
+	GetOutput() *output.OutputDatabaseSeeding
 }
 
 func GetSeedingHandler(dbConfig config.Database, state *config.DatabaseState, connection database.ConnectionFields) (HandlerInterface, error) {
