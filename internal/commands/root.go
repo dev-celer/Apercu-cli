@@ -12,6 +12,7 @@ var debug bool
 var runnerOutput bool
 var jsonOutput bool
 var statePath string
+var outputFile string
 
 var rootCmd = &cobra.Command{
 	Use:   "apercu",
@@ -22,6 +23,9 @@ var rootCmd = &cobra.Command{
 			slog.SetLogLoggerLevel(slog.LevelDebug)
 			runnerOutput = true
 		}
+		if outputFile != "" {
+			jsonOutput = true
+		}
 	},
 }
 
@@ -30,6 +34,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVarP(&runnerOutput, "output", "o", false, "enable migration output and seeding output")
 	rootCmd.PersistentFlags().StringVarP(&statePath, "state-path", "s", "", "path to state file")
 	rootCmd.PersistentFlags().BoolVarP(&jsonOutput, "json", "j", false, "enable JSON output")
+	rootCmd.PersistentFlags().StringVar(&outputFile, "output-file", "", "path to output file")
 }
 
 func Execute() {

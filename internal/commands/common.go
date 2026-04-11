@@ -6,8 +6,10 @@ import (
 	"apercu-cli/output"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 )
 
@@ -77,6 +79,30 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 	return migrationMessage, nil
 }
 
+func SaveOutputInFile(path string, output *output.Output) error {
+	content, err := json.Marshal(output)
+	if err != nil {
+		return errors.New(fmt.Sprintf("Failed to save output file: %v", err))
+	}
+
+	if err := os.WriteFile(path, content, 0644); err != nil {
+		return errors.New(fmt.Sprintf("Failed to save output file: %v", err))
+	}
+
+	slog.Debug("Output file saved", "path", path)
+	return nil
+}
+
+func PrintOutput(output *output.Output) {
+	jsonData, err := json.Marshal(output)
+	if err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, fmt.Sprintf("Failed to marshal database json output: %v", err))
+		os.Exit(1)
+	}
+
+	fmt.Println(fmt.Sprintf("OUTPUT=%s", string(jsonData)))
+}
+
 func ErrorAndExit(err error, dbOutput *output.OutputDatabase, dbName string) {
 	if jsonOutput {
 		outputData := output.Output{
@@ -84,13 +110,14 @@ func ErrorAndExit(err error, dbOutput *output.OutputDatabase, dbName string) {
 				dbName: *dbOutput,
 			},
 		}
-		jsonData, err := json.Marshal(outputData)
-		if err != nil {
-			_, _ = fmt.Fprintln(os.Stderr, fmt.Sprintf("Failed to marshal database json output: %v", err))
-			os.Exit(1)
+		if outputFile != "" {
+			if err := SaveOutputInFile(outputFile, &outputData); err != nil {
+				_, _ = fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+		} else {
+			PrintOutput(&outputData)
 		}
-
-		fmt.Println(fmt.Sprintf("OUTPUT=%s", string(jsonData)))
 		_, _ = fmt.Fprintln(os.Stderr, err)
 		os.Exit(0)
 	}

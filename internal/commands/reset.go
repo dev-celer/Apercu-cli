@@ -109,17 +109,7 @@ func reset(cmd *cobra.Command, args []string) error {
 	_, _ = fmt.Fprintln(log.Writer())
 
 	if jsonOutput {
-		outputData := output.Output{
-			Databases: map[string]output.OutputDatabase{
-				dbName: *dbOutput,
-			},
-		}
-		jsonData, err := json.Marshal(outputData)
-		if err != nil {
-			_, _ = fmt.Fprintln(os.Stderr, fmt.Sprintf("Failed to marshal database json output: %v", err))
-			os.Exit(1)
-		}
-
+		// Print the connection json output
 		connectionOutput := map[string]database.ConnectionFields{
 			dbName: conn,
 		}
@@ -128,9 +118,22 @@ func reset(cmd *cobra.Command, args []string) error {
 			_, _ = fmt.Fprintln(os.Stderr, fmt.Sprintf("Failed to marshal database connection json output: %v", err))
 			os.Exit(1)
 		}
-
 		fmt.Println(fmt.Sprintf("DATABASE_CONNECTIONS=%s", string(connJsonData)))
-		fmt.Println(fmt.Sprintf("OUTPUT=%s", string(jsonData)))
+
+		// Handle the json output
+		outputData := output.Output{
+			Databases: map[string]output.OutputDatabase{
+				dbName: *dbOutput,
+			},
+		}
+		if outputFile != "" {
+			if err := SaveOutputInFile(outputFile, &outputData); err != nil {
+				_, _ = fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+		} else {
+			PrintOutput(&outputData)
+		}
 	} else {
 		fmt.Println(fmt.Sprintf("DATABASE_URL: %s", conn.Url))
 	}
