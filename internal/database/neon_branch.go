@@ -96,6 +96,37 @@ func (h *NeonBranchHandler) getBranchByName(branchName string) (*neon.Branch, er
 	return previewBranch, nil
 }
 
+func (h *NeonBranchHandler) resetRolePassword() error {
+	_, _ = fmt.Fprintln(log.Writer(), "Resetting role password")
+
+	// Get preview branch
+	previewBranch, err := h.getBranchByName(h.previewBranch)
+	if err != nil {
+		return err
+	}
+	if previewBranch == nil {
+		return errors.New(fmt.Sprintf("Failed to find preview branch with name: %v", h.previewBranch))
+	}
+
+	// Get role
+	resp, err := h.client.ListProjectBranchRoles(h.projectId, previewBranch.ID)
+	if err != nil {
+		return errors.New(fmt.Sprintf("Failed to list project branch roles: %v", err))
+	}
+	if len(resp.Roles) == 0 {
+		return errors.New(fmt.Sprintf("No role found in branch: %v", h.previewBranch))
+	}
+
+	// Reset role password
+	_, err = h.client.ResetProjectBranchRolePassword(h.projectId, previewBranch.ID, resp.Roles[0].Name)
+	if err != nil {
+		return errors.New(fmt.Sprintf("Failed to reset project branch role password: %v", err))
+	}
+	h.connectionFields = ConnectionFields{}
+
+	return nil
+}
+
 func (h *NeonBranchHandler) Apply() error {
 	_, _ = fmt.Fprintln(log.Writer(), "Branching from parent branch", h.parentBranch+"...")
 
@@ -156,7 +187,11 @@ func (h *NeonBranchHandler) Apply() error {
 	}
 
 	// Wait for the branch to finish resetting before proceeding
-	return h.waitForReady(resp.Branch.ID)
+	if err := h.waitForReady(resp.Branch.ID); err != nil {
+		return err
+	}
+
+	return h.resetRolePassword()
 }
 
 func (h *NeonBranchHandler) Cleanup() error {
@@ -224,7 +259,11 @@ func (h *NeonBranchHandler) Reset() error {
 	}
 
 	// Wait for the branch to finish resetting before proceeding
-	return h.waitForReady(previewBranch.ID)
+	if err := h.waitForReady(previewBranch.ID); err != nil {
+		return err
+	}
+
+	return h.resetRolePassword()
 }
 
 func (h *NeonBranchHandler) GetConnectionFields() (ConnectionFields, error) {
