@@ -2,50 +2,15 @@ package seeding
 
 import (
 	"apercu-cli/config"
+	"apercu-cli/output"
 	"crypto/md5"
 	"encoding/hex"
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 )
-
-func TestDirectSeed_GetDuration(t *testing.T) {
-	t.Parallel()
-
-	t.Run("both times set", func(t *testing.T) {
-		t.Parallel()
-		start := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-		end := time.Date(2024, 1, 1, 0, 0, 3, 0, time.UTC)
-		h := &DirectSeed{startTime: &start, endTime: &end}
-
-		d := h.GetDuration()
-		assert.NotNil(t, d)
-		assert.Equal(t, 3*time.Second, *d)
-	})
-
-	t.Run("nil start time", func(t *testing.T) {
-		t.Parallel()
-		end := time.Now()
-		h := &DirectSeed{endTime: &end}
-		assert.Nil(t, h.GetDuration())
-	})
-
-	t.Run("nil end time", func(t *testing.T) {
-		t.Parallel()
-		start := time.Now()
-		h := &DirectSeed{startTime: &start}
-		assert.Nil(t, h.GetDuration())
-	})
-
-	t.Run("nil times", func(t *testing.T) {
-		t.Parallel()
-		h := &DirectSeed{}
-		assert.Nil(t, h.GetDuration())
-	})
-}
 
 func TestCompareSeedContentFromHash(t *testing.T) {
 	t.Parallel()
@@ -61,7 +26,8 @@ func TestCompareSeedContentFromHash(t *testing.T) {
 		h := md5.Sum(content)
 		hash := hex.EncodeToString(h[:])
 
-		match, err := compareSeedContentFromHash(hash, filePath)
+		o := output.NewSeedingOutput()
+		match, err := compareSeedContentFromHash(hash, filePath, o)
 		assert.NoError(t, err)
 		assert.True(t, match)
 	})
@@ -73,14 +39,16 @@ func TestCompareSeedContentFromHash(t *testing.T) {
 		err := os.WriteFile(filePath, []byte("INSERT INTO users (name) VALUES ('test');"), 0644)
 		assert.NoError(t, err)
 
-		match, err := compareSeedContentFromHash("abcdef1234567890abcdef1234567890", filePath)
+		o := output.NewSeedingOutput()
+		match, err := compareSeedContentFromHash("abcdef1234567890abcdef1234567890", filePath, o)
 		assert.NoError(t, err)
 		assert.False(t, match)
 	})
 
 	t.Run("file does not exist", func(t *testing.T) {
 		t.Parallel()
-		match, err := compareSeedContentFromHash("somehash", "/nonexistent/path/seed.sql")
+		o := output.NewSeedingOutput()
+		match, err := compareSeedContentFromHash("somehash", "/nonexistent/path/seed.sql", o)
 		assert.Error(t, err)
 		assert.False(t, match)
 	})
@@ -95,7 +63,8 @@ func TestShouldSeedBeApplied(t *testing.T) {
 			{Name: "other.sql", Hash: "abc"},
 		}
 
-		applied, err := shouldSeedBeApplied("seed.sql", config.DatabaseSeedTypeCreate, state)
+		o := output.NewSeedingOutput()
+		applied, err := shouldSeedBeApplied("seed.sql", config.DatabaseSeedTypeCreate, state, o)
 		assert.NoError(t, err)
 		assert.True(t, applied)
 	})
@@ -115,7 +84,8 @@ func TestShouldSeedBeApplied(t *testing.T) {
 			{Name: filePath, Hash: hash},
 		}
 
-		applied, err := shouldSeedBeApplied(filePath, config.DatabaseSeedTypeAlways, state)
+		o := output.NewSeedingOutput()
+		applied, err := shouldSeedBeApplied(filePath, config.DatabaseSeedTypeAlways, state, o)
 		assert.NoError(t, err)
 		assert.True(t, applied)
 	})
@@ -135,7 +105,8 @@ func TestShouldSeedBeApplied(t *testing.T) {
 			{Name: filePath, Hash: hash},
 		}
 
-		applied, err := shouldSeedBeApplied(filePath, config.DatabaseSeedTypeCreate, state)
+		o := output.NewSeedingOutput()
+		applied, err := shouldSeedBeApplied(filePath, config.DatabaseSeedTypeCreate, state, o)
 		assert.NoError(t, err)
 		assert.False(t, applied)
 	})
@@ -155,7 +126,8 @@ func TestShouldSeedBeApplied(t *testing.T) {
 			{Name: filePath, Hash: hash},
 		}
 
-		applied, err := shouldSeedBeApplied(filePath, config.DatabaseSeedTypeCreate, state)
+		o := output.NewSeedingOutput()
+		applied, err := shouldSeedBeApplied(filePath, config.DatabaseSeedTypeCreate, state, o)
 		assert.NoError(t, err)
 		assert.False(t, applied)
 	})
@@ -175,7 +147,8 @@ func TestShouldSeedBeApplied(t *testing.T) {
 			{Name: filePath, Hash: hash},
 		}
 
-		applied, err := shouldSeedBeApplied(filePath, config.DatabaseSeedTypeUpdate, state)
+		o := output.NewSeedingOutput()
+		applied, err := shouldSeedBeApplied(filePath, config.DatabaseSeedTypeUpdate, state, o)
 		assert.NoError(t, err)
 		assert.True(t, applied)
 	})
@@ -195,14 +168,16 @@ func TestShouldSeedBeApplied(t *testing.T) {
 			{Name: filePath, Hash: hash},
 		}
 
-		applied, err := shouldSeedBeApplied(filePath, config.DatabaseSeedTypeUpdate, state)
+		o := output.NewSeedingOutput()
+		applied, err := shouldSeedBeApplied(filePath, config.DatabaseSeedTypeUpdate, state, o)
 		assert.NoError(t, err)
 		assert.False(t, applied)
 	})
 
 	t.Run("empty state applies seed", func(t *testing.T) {
 		t.Parallel()
-		applied, err := shouldSeedBeApplied("seed.sql", config.DatabaseSeedTypeCreate, []config.SeedState{})
+		o := output.NewSeedingOutput()
+		applied, err := shouldSeedBeApplied("seed.sql", config.DatabaseSeedTypeCreate, []config.SeedState{}, o)
 		assert.NoError(t, err)
 		assert.True(t, applied)
 	})
