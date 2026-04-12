@@ -12,7 +12,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strconv"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
@@ -149,40 +148,15 @@ func (h *NeonBranchAnonymizerHandler) Anonymize(ctx context.Context) error {
 	cwd, _ := os.Getwd()
 	configPath := filepath.Join(cwd, h.configPath)
 	configDir := filepath.Dir(configPath)
+	configPathInContainer := filepath.Join("/tmp/greenmask", filepath.Join(filepath.Base(configDir), filepath.Base(configPath)))
 
-	entrypoint := []string{
-		"sh",
-		"-c",
-		// Dump parent branch
-		"'",
-		"PGPASSWORD=" + parentCred.Password,
-		"greenmask",
-		"--config",
-		filepath.Join(filepath.Base(configDir), filepath.Base(configPath)),
-		"dump",
-		"--host",
-		parentCred.Host,
-		"--port",
-		strconv.Itoa(parentCred.Port),
-		"--dbname",
-		parentCred.Database,
-		"--user",
-		parentCred.User,
-		// Restore to storage branch
-		"PGPASSWORD=" + storageCred.Password,
-		"greenmask",
-		"--config",
-		filepath.Join(filepath.Base(configDir), filepath.Base(configPath)),
-		"restore",
-		"latest",
-		"--host",
-		storageCred.Host,
-		"--port",
-		strconv.Itoa(storageCred.Port),
-		"--dbname",
-		storageCred.Database,
-		"'",
-	}
+	cmd := fmt.Sprintf(
+		"PGPASSWORD=%s greenmask --config %s dump -h %s -p %d -d %s -U %s && PGPASSWORD=%s greenmask --config %s restore latest -h %s -p %d -d %s -U %s",
+		parentCred.Password, configPathInContainer, parentCred.Host, parentCred.Port, parentCred.Database, parentCred.User,
+		storageCred.Password, configPathInContainer, storageCred.Host, storageCred.Port, storageCred.Database, storageCred.User,
+	)
+
+	entrypoint := []string{"sh", "-c", cmd}
 
 	containerConfig := container.Config{
 		Image:      GREENMASK_IMAGE,
