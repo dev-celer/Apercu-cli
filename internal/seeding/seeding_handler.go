@@ -2,7 +2,7 @@ package seeding
 
 import (
 	"apercu-cli/config"
-	"apercu-cli/internal/database"
+	"apercu-cli/helper"
 	"apercu-cli/output"
 	"log/slog"
 )
@@ -13,7 +13,7 @@ type HandlerInterface interface {
 	GetOutput() *output.OutputDatabaseSeeding
 }
 
-func GetSeedingHandler(dbConfig config.Database, state *config.DatabaseState, connection database.ConnectionFields) (HandlerInterface, error) {
+func GetSeedingHandler(dbConfig config.Database, state *config.DatabaseState, connection helper.ConnectionFields) (HandlerInterface, error) {
 	if len(dbConfig.Seed) == 0 {
 		slog.Debug("No seed specified")
 		return nil, nil

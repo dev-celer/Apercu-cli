@@ -2,26 +2,18 @@ package database
 
 import (
 	"apercu-cli/config"
+	"apercu-cli/helper"
 	"errors"
 	"fmt"
 	"log/slog"
 )
 
-type ConnectionFields struct {
-	Host     string `json:"host" yaml:"host"`
-	Port     int    `json:"port" yaml:"port"`
-	User     string `json:"user" yaml:"user"`
-	Password string `json:"password" yaml:"password"`
-	Database string `json:"database" yaml:"database"`
-	Url      string `json:"url" yaml:"url"`
-}
-
 type HandlerInterface interface {
 	Apply() error
 	Cleanup() error
 	Reset() error
-	GetParentConnectionFields() (ConnectionFields, error)
-	GetPreviewConnectionFields() (ConnectionFields, error)
+	GetParentConnectionFields() (helper.ConnectionFields, error)
+	GetPreviewConnectionFields() (helper.ConnectionFields, error)
 	PrunePreviewDatabases(openedPullRequestNumber []string) ([]string, error)
 	GetWarnings() []string
 }

@@ -2,13 +2,13 @@ package database
 
 import (
 	"apercu-cli/config"
+	"apercu-cli/helper"
+	neonHelper "apercu-cli/helper/neon"
 	"errors"
 	"fmt"
 	"log"
 	"log/slog"
 	"regexp"
-	"strconv"
-	"time"
 
 	neon "github.com/kislerdm/neon-sdk-go"
 )
@@ -21,7 +21,7 @@ type NeonBranchHandler struct {
 	branchingType    config.DatabaseNeonBranchingType
 	client           *neon.Client
 	previewBranch    string
-	connectionFields ConnectionFields
+	connectionFields helper.ConnectionFields
 	warnings         []string
 }
 
@@ -42,98 +42,12 @@ func NewNeonBranchHandler(projectId string, apiKey string, parentBranch string, 
 	}, nil
 }
 
-func (h *NeonBranchHandler) extractConnectionFieldsFromUrl(databaseUrl string) (ConnectionFields, error) {
-	reg := regexp.MustCompile(`postgresql:\/\/(.+?):(.+?)@(.+?)[\/:](\d*)\/?(.+?)\?`)
-	matches := reg.FindStringSubmatch(databaseUrl)
-
-	portStr := matches[4]
-	if portStr == "" {
-		portStr = "5432"
-	}
-	port, err := strconv.Atoi(portStr)
-	if err != nil {
-		return ConnectionFields{}, errors.New(fmt.Sprintf("Failed to parse port from database url: %v", err))
-	}
-
-	return ConnectionFields{
-		Host:     matches[3],
-		Port:     port,
-		User:     matches[1],
-		Password: matches[2],
-		Database: matches[5],
-		Url:      databaseUrl,
-	}, nil
-}
-
-func (h *NeonBranchHandler) getBranchByName(branchName string) (*neon.Branch, error) {
-	slog.Debug("Getting branch by name", "branch_name", branchName)
-	var branches []neon.Branch
-	var cursor *string
-	for {
-		resp, err := h.client.ListProjectBranches(h.projectId, &branchName, nil, cursor, nil, nil)
-		if err != nil {
-			return nil, errors.New(fmt.Sprintf("Failed to list project branches: %v", err))
-		}
-		branches = append(branches, resp.Branches...)
-		if resp.Pagination != nil && resp.Pagination.Next != nil {
-			cursor = resp.Pagination.Next
-		} else {
-			break
-		}
-	}
-
-	var previewBranch *neon.Branch
-	for _, branch := range branches {
-		if branch.Name == branchName {
-			previewBranch = &branch
-		}
-	}
-
-	if previewBranch != nil {
-		slog.Debug("Found branch with id", "branch_id", previewBranch.ID)
-	} else {
-		slog.Debug("No branch with name", "branch_name", branchName)
-	}
-
-	return previewBranch, nil
-}
-
-func (h *NeonBranchHandler) resetRolePassword() error {
-	// Get preview branch
-	previewBranch, err := h.getBranchByName(h.previewBranch)
-	if err != nil {
-		return err
-	}
-	if previewBranch == nil {
-		return errors.New(fmt.Sprintf("Failed to find preview branch with name: %v", h.previewBranch))
-	}
-
-	// Get role
-	resp, err := h.client.ListProjectBranchRoles(h.projectId, previewBranch.ID)
-	if err != nil {
-		return errors.New(fmt.Sprintf("Failed to list project branch roles: %v", err))
-	}
-	if len(resp.Roles) == 0 {
-		return errors.New(fmt.Sprintf("No role found in branch: %v", h.previewBranch))
-	}
-
-	// Reset role password
-	slog.Debug("Resetting role password", "role_name", resp.Roles[0].Name)
-	_, err = h.client.ResetProjectBranchRolePassword(h.projectId, previewBranch.ID, resp.Roles[0].Name)
-	if err != nil {
-		return errors.New(fmt.Sprintf("Failed to reset project branch role password: %v", err))
-	}
-	h.connectionFields = ConnectionFields{}
-
-	return nil
-}
-
 func (h *NeonBranchHandler) Apply() error {
 	_, _ = fmt.Fprintln(log.Writer(), "Branching from parent branch", h.parentBranch+"...")
 
 	// Find parent branch id from name
 	if h.parentBranchId == "" {
-		parentBranch, err := h.getBranchByName(h.parentBranch)
+		parentBranch, err := neonHelper.GetBranchByName(h.client, h.projectId, h.parentBranch)
 		if err != nil {
 			return err
 		}
@@ -144,7 +58,7 @@ func (h *NeonBranchHandler) Apply() error {
 	}
 
 	// Check if preview branch exists
-	previewBranch, err := h.getBranchByName(h.previewBranch)
+	previewBranch, err := neonHelper.GetBranchByName(h.client, h.projectId, h.previewBranch)
 	if err != nil {
 		return err
 	}
@@ -185,7 +99,7 @@ func (h *NeonBranchHandler) Apply() error {
 	// Retrieve database_url
 	if resp.ConnectionURIs != nil && len(*resp.ConnectionURIs) > 0 {
 		// Extract values from database url
-		connection, err := h.extractConnectionFieldsFromUrl((*resp.ConnectionURIs)[0].ConnectionURI)
+		connection, err := neonHelper.ExtractConnectionFieldsFromUrl((*resp.ConnectionURIs)[0].ConnectionURI)
 		if err != nil {
 			return err
 		}
@@ -197,18 +111,22 @@ func (h *NeonBranchHandler) Apply() error {
 	}
 
 	// Wait for the branch to finish resetting before proceeding
-	if err := h.waitForReady(resp.Branch.ID); err != nil {
+	if err := neonHelper.WaitForBranchToBeReady(h.client, h.projectId, resp.Branch.ID); err != nil {
 		return err
 	}
 
-	return h.resetRolePassword()
+	if err := neonHelper.ResetRolePassword(h.client, h.projectId, h.previewBranch); err != nil {
+		return err
+	}
+	h.connectionFields = helper.ConnectionFields{}
+	return nil
 }
 
 func (h *NeonBranchHandler) Cleanup() error {
 	_, _ = fmt.Fprintln(log.Writer(), "Cleaning up preview branch", h.previewBranch+"...")
 
 	// Find branch id by name
-	previewBranch, err := h.getBranchByName(h.previewBranch)
+	previewBranch, err := neonHelper.GetBranchByName(h.client, h.projectId, h.previewBranch)
 	if err != nil {
 		return err
 	}
@@ -225,33 +143,11 @@ func (h *NeonBranchHandler) Cleanup() error {
 	return nil
 }
 
-func (h *NeonBranchHandler) waitForReady(branchID string) error {
-	slog.Debug("Waiting for branch to be ready", "branch_id", branchID)
-	timeout := time.After(2 * time.Minute)
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-timeout:
-			return errors.New("timed out waiting for branch to be ready")
-		case <-ticker.C:
-			resp, err := h.client.GetProjectBranch(h.projectId, branchID)
-			if err != nil {
-				return errors.New(fmt.Sprintf("Failed to get branch state: %v", err))
-			}
-			slog.Debug("Branch state", "state", resp.Branch.CurrentState)
-			if resp.Branch.CurrentState == "ready" {
-				return nil
-			}
-		}
-	}
-}
-
 func (h *NeonBranchHandler) Reset() error {
 	_, _ = fmt.Fprintln(log.Writer(), "Resetting preview branch", h.previewBranch, "to it's parent state...")
 
 	// Find branch id by name
-	previewBranch, err := h.getBranchByName(h.previewBranch)
+	previewBranch, err := neonHelper.GetBranchByName(h.client, h.projectId, h.previewBranch)
 	if err != nil {
 		return err
 	}
@@ -269,63 +165,30 @@ func (h *NeonBranchHandler) Reset() error {
 	}
 
 	// Wait for the branch to finish resetting before proceeding
-	if err := h.waitForReady(previewBranch.ID); err != nil {
+	if err := neonHelper.WaitForBranchToBeReady(h.client, h.projectId, previewBranch.ID); err != nil {
 		return err
 	}
 
-	return h.resetRolePassword()
+	if err := neonHelper.ResetRolePassword(h.client, h.projectId, h.previewBranch); err != nil {
+		return err
+	}
+	h.connectionFields = helper.ConnectionFields{}
+	return nil
 }
 
-func (h *NeonBranchHandler) getConnectionFieldsFromBranch(branchName string) (ConnectionFields, error) {
-	slog.Debug("Connection fields not found, retrieving from database")
-	previewBranch, err := h.getBranchByName(h.previewBranch)
-	if err != nil {
-		return ConnectionFields{}, err
-	}
-	if previewBranch == nil {
-		return ConnectionFields{}, errors.New(fmt.Sprintf("Failed to find preview branch with name: %v", h.previewBranch))
-	}
-
-	slog.Debug("Getting database from project branch")
-	database, err := h.client.ListProjectBranchDatabases(h.projectId, previewBranch.ID)
-	if err != nil {
-		return ConnectionFields{}, errors.New(fmt.Sprintf("Failed to list project branch databases: %v", err))
-	}
-	if len(database.Databases) == 0 {
-		return ConnectionFields{}, errors.New(fmt.Sprintf("No database found in branch: %v", h.previewBranch))
-	}
-	slog.Debug("Found database with name", "database_name", database.Databases[0].Name)
-
-	slog.Debug("Getting role from project branch")
-	roles, err := h.client.ListProjectBranchRoles(h.projectId, previewBranch.ID)
-	if err != nil {
-		return ConnectionFields{}, errors.New(fmt.Sprintf("Failed to list project branch roles: %v", err))
-	}
-	if len(roles.Roles) == 0 {
-		return ConnectionFields{}, errors.New(fmt.Sprintf("No role found in branch: %v", h.previewBranch))
-	}
-	slog.Debug("Found role with name", "role_name", roles.Roles[0].Name)
-
-	slog.Debug("Getting database url")
-	resp, err := h.client.GetConnectionURI(h.projectId, &previewBranch.ID, nil, database.Databases[0].Name, roles.Roles[0].Name, nil)
-	if err != nil {
-		return ConnectionFields{}, errors.New(fmt.Sprintf("Failed to get branch connection uri: %v", err))
-	}
-	slog.Debug("Database url found", "database_url", resp.URI)
-
-	// Extract values from database url
-	return h.extractConnectionFieldsFromUrl(resp.URI)
+func (h *NeonBranchHandler) GetParentConnectionFields() (helper.ConnectionFields, error) {
+	return neonHelper.GetConnectionFieldsFromBranch(h.client, h.projectId, h.parentBranch)
 }
 
-func (h *NeonBranchHandler) GetParentConnectionFields() (ConnectionFields, error) {
-	return h.getConnectionFieldsFromBranch(h.parentBranch)
-}
-
-func (h *NeonBranchHandler) GetPreviewConnectionFields() (ConnectionFields, error) {
-	if h.connectionFields.Url != "" {
-		return h.connectionFields, nil
+func (h *NeonBranchHandler) GetPreviewConnectionFields() (helper.ConnectionFields, error) {
+	if h.connectionFields.Url == "" {
+		conn, err := neonHelper.GetConnectionFieldsFromBranch(h.client, h.projectId, h.previewBranch)
+		if err != nil {
+			return helper.ConnectionFields{}, err
+		}
+		h.connectionFields = conn
 	}
-	return h.getConnectionFieldsFromBranch(h.previewBranch)
+	return h.connectionFields, nil
 }
 
 func (h *NeonBranchHandler) getAllPreviewBranches(previewPattern string) ([]neon.Branch, error) {
@@ -367,7 +230,7 @@ func (h *NeonBranchHandler) getAllPreviewBranches(previewPattern string) ([]neon
 func (h *NeonBranchHandler) PrunePreviewDatabases(openedPullRequestNumber []string) ([]string, error) {
 	// Find parent branch id from name
 	if h.parentBranchId == "" {
-		parentBranch, err := h.getBranchByName(h.parentBranch)
+		parentBranch, err := neonHelper.GetBranchByName(h.client, h.projectId, h.parentBranch)
 		if err != nil {
 			return nil, err
 		}

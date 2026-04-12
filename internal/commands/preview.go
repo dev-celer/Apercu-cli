@@ -2,6 +2,7 @@ package commands
 
 import (
 	"apercu-cli/config"
+	"apercu-cli/helper"
 	"apercu-cli/internal/database"
 	"apercu-cli/internal/migration"
 	"apercu-cli/internal/seeding"
@@ -145,7 +146,7 @@ func preview(cmd *cobra.Command, args []string) error {
 
 	if jsonOutput {
 		// Print the connection json output
-		connectionOutput := map[string]database.ConnectionFields{
+		connectionOutput := map[string]helper.ConnectionFields{
 			dbName: conn,
 		}
 		connJsonData, err := json.Marshal(connectionOutput)

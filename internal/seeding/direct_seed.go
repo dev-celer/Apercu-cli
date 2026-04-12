@@ -2,7 +2,7 @@ package seeding
 
 import (
 	"apercu-cli/config"
-	"apercu-cli/internal/database"
+	"apercu-cli/helper"
 	"apercu-cli/output"
 	"crypto/md5"
 	"database/sql"
@@ -75,7 +75,7 @@ func shouldSeedBeApplied(filePath string, seedOn config.DatabaseSeedType, state 
 	return false, nil
 }
 
-func NewDirectSeed(conn database.ConnectionFields, seedFiles []config.DatabaseSeed, state *config.DatabaseState) (*DirectSeed, error) {
+func NewDirectSeed(conn helper.ConnectionFields, seedFiles []config.DatabaseSeed, state *config.DatabaseState) (*DirectSeed, error) {
 	outputData := output.NewSeedingOutput()
 	db, err := sql.Open("postgres", conn.Url)
 	if err != nil {

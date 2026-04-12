@@ -2,7 +2,7 @@ package migration
 
 import (
 	"apercu-cli/config"
-	"apercu-cli/internal/database"
+	"apercu-cli/helper"
 	"apercu-cli/output"
 	"context"
 	"log/slog"
@@ -14,7 +14,7 @@ type HandlerInterface interface {
 	GetOutput() *output.OutputDatabaseMigration
 }
 
-func GetMigrationHandler(dbConfig config.Database, connection database.ConnectionFields) HandlerInterface {
+func GetMigrationHandler(dbConfig config.Database, connection helper.ConnectionFields) HandlerInterface {
 	if dbConfig.Migration == nil {
 		slog.Debug("No migration specified")
 		return nil
