@@ -20,7 +20,8 @@ type HandlerInterface interface {
 	Apply() error
 	Cleanup() error
 	Reset() error
-	GetConnectionFields() (ConnectionFields, error)
+	GetParentConnectionFields() (ConnectionFields, error)
+	GetPreviewConnectionFields() (ConnectionFields, error)
 	PrunePreviewDatabases(openedPullRequestNumber []string) ([]string, error)
 	GetWarnings() []string
 }
@@ -44,10 +45,35 @@ func GetSourceDatabaseHandler(dbConfig config.Database) (HandlerInterface, error
 			branchingType = config.DatabaseNeonBranchingTypeParentData
 		}
 
+		var projectId string
+		var apiKey string
+		var parentBranch string
+
+		// If anonymization is configured with storage on neon use those values
+		if dbConfig.Anonymization != nil && dbConfig.Anonymization.Storage.Neon != nil {
+			if dbConfig.Anonymization.Storage.Neon.ProjectId != nil {
+				projectId = config.ReplaceVariables(*dbConfig.Anonymization.Storage.Neon.ProjectId, map[string]string{})
+			} else {
+				projectId = config.ReplaceVariables(dbConfig.Source.Neon.ProjectId, map[string]string{})
+			}
+
+			if dbConfig.Anonymization.Storage.Neon.ApiKey != nil {
+				apiKey = config.ReplaceVariables(*dbConfig.Anonymization.Storage.Neon.ApiKey, map[string]string{})
+			} else {
+				apiKey = config.ReplaceVariables(dbConfig.Source.Neon.ApiKey, map[string]string{})
+			}
+
+			parentBranch = config.ReplaceVariables(dbConfig.Anonymization.Storage.Neon.BranchName, map[string]string{})
+		} else {
+			projectId = config.ReplaceVariables(dbConfig.Source.Neon.ProjectId, map[string]string{})
+			apiKey = config.ReplaceVariables(dbConfig.Source.Neon.ApiKey, map[string]string{})
+			parentBranch = config.ReplaceVariables(dbConfig.Source.Neon.ParentBranch, map[string]string{})
+		}
+
 		return NewNeonBranchHandler(
-			config.ReplaceVariables(dbConfig.Source.Neon.ProjectId, map[string]string{}),
-			config.ReplaceVariables(dbConfig.Source.Neon.ApiKey, map[string]string{}),
-			config.ReplaceVariables(dbConfig.Source.Neon.ParentBranch, map[string]string{}),
+			projectId,
+			apiKey,
+			parentBranch,
 			config.ReplaceVariables(dbConfig.Source.Neon.PreviewBranch, map[string]string{}),
 			branchingType,
 		)
@@ -75,11 +101,36 @@ func GetDatabaseHandlerForPruning(dbConfig config.Database) (HandlerInterface, e
 			branchingType = config.DatabaseNeonBranchingTypeParentData
 		}
 
+		var projectId string
+		var apiKey string
+		var parentBranch string
+
+		// If anonymization is configured with storage on neon use those values
+		if dbConfig.Anonymization != nil && dbConfig.Anonymization.Storage.Neon != nil {
+			if dbConfig.Anonymization.Storage.Neon.ProjectId != nil {
+				projectId = config.ReplaceVariables(*dbConfig.Anonymization.Storage.Neon.ProjectId, map[string]string{})
+			} else {
+				projectId = config.ReplaceVariables(dbConfig.Source.Neon.ProjectId, map[string]string{})
+			}
+
+			if dbConfig.Anonymization.Storage.Neon.ApiKey != nil {
+				apiKey = config.ReplaceVariables(*dbConfig.Anonymization.Storage.Neon.ApiKey, map[string]string{})
+			} else {
+				apiKey = config.ReplaceVariables(dbConfig.Source.Neon.ApiKey, map[string]string{})
+			}
+
+			parentBranch = config.ReplaceVariables(dbConfig.Anonymization.Storage.Neon.BranchName, map[string]string{})
+		} else {
+			projectId = config.ReplaceVariables(dbConfig.Source.Neon.ProjectId, map[string]string{})
+			apiKey = config.ReplaceVariables(dbConfig.Source.Neon.ApiKey, map[string]string{})
+			parentBranch = config.ReplaceVariables(dbConfig.Source.Neon.ParentBranch, map[string]string{})
+		}
+
 		return NewNeonBranchHandler(
-			config.ReplaceVariables(dbConfig.Source.Neon.ProjectId, map[string]string{}),
-			config.ReplaceVariables(dbConfig.Source.Neon.ApiKey, map[string]string{}),
-			config.ReplaceVariables(dbConfig.Source.Neon.ParentBranch, map[string]string{}),
-			dbConfig.Source.Neon.PreviewBranch,
+			projectId,
+			apiKey,
+			parentBranch,
+			config.ReplaceVariables(dbConfig.Source.Neon.PreviewBranch, map[string]string{}),
 			branchingType,
 		)
 	}

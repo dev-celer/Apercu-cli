@@ -71,7 +71,7 @@ func preview(cmd *cobra.Command, args []string) error {
 		dbOutput.Errors = append(dbOutput.Errors, err.Error())
 		ErrorAndExit(err, dbOutput, dbName)
 	}
-	conn, err := dbHandler.GetConnectionFields()
+	conn, err := dbHandler.GetPreviewConnectionFields()
 	if err != nil {
 		dbOutput.Errors = append(dbOutput.Errors, err.Error())
 		ErrorAndExit(err, dbOutput, dbName)
