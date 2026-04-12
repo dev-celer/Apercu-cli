@@ -79,7 +79,7 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 	return migrationMessage, nil
 }
 
-func SaveOutputInFile(path string, output *output.Output) error {
+func SaveOutputInFile(path string, output *output.PreviewOutput) error {
 	content, err := json.Marshal(output)
 	if err != nil {
 		return errors.New(fmt.Sprintf("Failed to save output file: %v", err))
@@ -93,7 +93,7 @@ func SaveOutputInFile(path string, output *output.Output) error {
 	return nil
 }
 
-func SaveMarkdownFile(path string, output *output.Output) error {
+func SaveMarkdownFile(path string, output *output.PreviewOutput) error {
 	content, err := output.RenderMarkdown()
 	if err != nil {
 		return errors.New(fmt.Sprintf("Failed to render markdown output: %v", err))
@@ -107,9 +107,9 @@ func SaveMarkdownFile(path string, output *output.Output) error {
 	return nil
 }
 
-func ErrorAndExit(err error, dbOutput *output.OutputDatabase, dbName string) {
-	outputData := output.Output{
-		Databases: map[string]output.OutputDatabase{
+func ErrorAndExit(err error, dbOutput *output.PreviewOutputDatabase, dbName string) {
+	outputData := output.PreviewOutput{
+		Databases: map[string]output.PreviewOutputDatabase{
 			dbName: *dbOutput,
 		},
 	}

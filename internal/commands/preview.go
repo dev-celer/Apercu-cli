@@ -42,7 +42,7 @@ func preview(cmd *cobra.Command, args []string) error {
 		dbName = name
 		break
 	}
-	dbOutput := output.NewOutputDatabase()
+	dbOutput := output.NewPreviewOutputDatabase()
 
 	// Get state
 	var state config.State
@@ -124,8 +124,8 @@ func preview(cmd *cobra.Command, args []string) error {
 	}
 	_, _ = fmt.Fprintln(log.Writer())
 
-	outputData := output.Output{
-		Databases: map[string]output.OutputDatabase{
+	outputData := output.PreviewOutput{
+		Databases: map[string]output.PreviewOutputDatabase{
 			dbName: *dbOutput,
 		},
 	}

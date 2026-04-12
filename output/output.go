@@ -6,19 +6,19 @@ import (
 	"text/template"
 )
 
-type Output struct {
-	Databases map[string]OutputDatabase `yaml:"databases,omitempty" json:"databases,omitempty"`
+type PreviewOutput struct {
+	Databases map[string]PreviewOutputDatabase `yaml:"databases,omitempty" json:"databases,omitempty"`
 }
 
-type OutputDatabase struct {
+type PreviewOutputDatabase struct {
 	Migration *OutputDatabaseMigration `yaml:"migration,omitempty" json:"migration,omitempty"`
 	Seeding   *OutputDatabaseSeeding   `yaml:"seeding,omitempty" json:"seeding,omitempty"`
 	Warnings  []string                 `yaml:"warnings,omitempty" json:"warnings,omitempty"`
 	Errors    []string                 `yaml:"errors,omitempty" json:"errors,omitempty"`
 }
 
-func NewOutputDatabase() *OutputDatabase {
-	return &OutputDatabase{
+func NewPreviewOutputDatabase() *PreviewOutputDatabase {
+	return &PreviewOutputDatabase{
 		Warnings: make([]string, 0),
 		Errors:   make([]string, 0),
 	}
@@ -59,6 +59,22 @@ func NewSeedingOutput() *OutputDatabaseSeeding {
 		Duration:     "",
 		Warnings:     make([]string, 0),
 		Errors:       make([]string, 0),
+	}
+}
+
+type OutputDatabaseAnonymization struct {
+	Logs     *string  `yaml:"logs,omitempty" json:"logs,omitempty"`
+	Duration string   `yaml:"duration" json:"duration"`
+	Warnings []string `yaml:"warnings,omitempty" json:"warnings,omitempty"`
+	Errors   []string `yaml:"errors,omitempty" json:"errors,omitempty"`
+}
+
+func NewAnonymizationOutput() *OutputDatabaseAnonymization {
+	return &OutputDatabaseAnonymization{
+		Logs:     nil,
+		Duration: "",
+		Warnings: make([]string, 0),
+		Errors:   make([]string, 0),
 	}
 }
 
@@ -148,7 +164,7 @@ var markdownTmpl = template.Must(template.New("markdown").Funcs(templateFuncs).P
 {{- end}}
 `))
 
-func (o *Output) RenderMarkdown() (string, error) {
+func (o *PreviewOutput) RenderMarkdown() (string, error) {
 	var buf bytes.Buffer
 	if err := markdownTmpl.Execute(&buf, o); err != nil {
 		return "", fmt.Errorf("failed to render markdown: %w", err)

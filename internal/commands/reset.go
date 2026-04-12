@@ -41,7 +41,7 @@ func reset(cmd *cobra.Command, args []string) error {
 		dbConfig = db
 		break
 	}
-	dbOutput := output.NewOutputDatabase()
+	dbOutput := output.NewPreviewOutputDatabase()
 
 	// Initialize new state
 	var dbState config.DatabaseState
@@ -109,8 +109,8 @@ func reset(cmd *cobra.Command, args []string) error {
 	}
 	_, _ = fmt.Fprintln(log.Writer())
 
-	outputData := output.Output{
-		Databases: map[string]output.OutputDatabase{
+	outputData := output.PreviewOutput{
+		Databases: map[string]output.PreviewOutputDatabase{
 			dbName: *dbOutput,
 		},
 	}
