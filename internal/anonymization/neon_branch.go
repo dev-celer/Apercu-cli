@@ -224,5 +224,11 @@ func (h *NeonBranchAnonymizerHandler) Anonymize(ctx context.Context) error {
 	slog.Debug("Docker container finished")
 	h.output.Logs = new(buffer.String())
 
+	// Cleanup container
+	slog.Debug("Cleanup docker container")
+	if err := cli.ContainerRemove(ctx, resp.ID, container.RemoveOptions{Force: true}); err != nil {
+		slog.Error("Failed to cleanup docker container", "error", err)
+	}
+
 	return nil
 }
