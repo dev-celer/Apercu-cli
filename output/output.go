@@ -74,22 +74,26 @@ var templateFuncs = template.FuncMap{
 var markdownTmpl = template.Must(template.New("markdown").Funcs(templateFuncs).Parse(
 	`# Apercu Output
 {{range $name, $db := .Databases}}
-## Database: {{$name}}
-{{if $db.Migration}}
+## {{$name}}
+{{- if $db.Migration}}
+
 ### Migration
-| Field | Value |
-|-------|-------|
-| Duration | {{$db.Migration.Duration}} |
-| Count | {{$db.Migration.Count}} |
-{{if $db.Migration.Warnings}}
-**Warnings:**
-{{range $db.Migration.Warnings}}- {{.}}
-{{end}}{{end}}
+
+{{$db.Migration.Count}} migration(s) ran in {{$db.Migration.Duration}}
+{{- if $db.Migration.Warnings}}
+
+> [!WARNING]
+{{range $db.Migration.Warnings}}> - {{.}}
+{{end}}
+{{- end}}
 {{- if $db.Migration.Errors}}
-**Errors:**
-{{range $db.Migration.Errors}}- {{.}}
-{{end}}{{end}}
+
+> [!CAUTION]
+{{range $db.Migration.Errors}}> - {{.}}
+{{end}}
+{{- end}}
 {{- if $db.Migration.Logs}}
+
 <details>
 <summary>Logs</summary>
 
@@ -98,24 +102,27 @@ var markdownTmpl = template.Must(template.New("markdown").Funcs(templateFuncs).P
 ` + "```" + `
 
 </details>
-{{end}}
+{{- end}}
 {{- end}}
 {{- if $db.Seeding}}
+
 ### Seeding
-| Field | Value |
-|-------|-------|
-| Duration | {{$db.Seeding.Duration}} |
-| Success | {{$db.Seeding.SuccessCount}} |
-| Failed | {{$db.Seeding.FailedCount}} |
-{{if $db.Seeding.Warnings}}
-**Warnings:**
-{{range $db.Seeding.Warnings}}- {{.}}
-{{end}}{{end}}
+
+{{$db.Seeding.SuccessCount}} succeeded · {{$db.Seeding.FailedCount}} failed · {{$db.Seeding.Duration}}
+{{- if $db.Seeding.Warnings}}
+
+> [!WARNING]
+{{range $db.Seeding.Warnings}}> - {{.}}
+{{end}}
+{{- end}}
 {{- if $db.Seeding.Errors}}
-**Errors:**
-{{range $db.Seeding.Errors}}- {{.}}
-{{end}}{{end}}
+
+> [!CAUTION]
+{{range $db.Seeding.Errors}}> - {{.}}
+{{end}}
+{{- end}}
 {{- if $db.Seeding.Logs}}
+
 <details>
 <summary>Logs</summary>
 
@@ -124,16 +131,20 @@ var markdownTmpl = template.Must(template.New("markdown").Funcs(templateFuncs).P
 ` + "```" + `
 
 </details>
-{{end}}
+{{- end}}
 {{- end}}
 {{- if $db.Warnings}}
-### Warnings
-{{range $db.Warnings}}- {{.}}
-{{end}}{{end}}
+
+> [!WARNING]
+{{range $db.Warnings}}> - {{.}}
+{{end}}
+{{- end}}
 {{- if $db.Errors}}
-### Errors
-{{range $db.Errors}}- {{.}}
-{{end}}{{end}}
+
+> [!CAUTION]
+{{range $db.Errors}}> - {{.}}
+{{end}}
+{{- end}}
 {{- end}}
 `))
 
