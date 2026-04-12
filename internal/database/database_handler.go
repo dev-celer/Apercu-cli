@@ -36,11 +36,20 @@ func GetSourceDatabaseHandler(dbConfig config.Database) (HandlerInterface, error
 		if dbConfig.Source.Neon == nil {
 			return nil, errors.New("missing neon source database configuration")
 		}
+
+		// Prepare branching type
+		branchingTypeStr := config.ReplaceVariables(string(dbConfig.Source.Neon.BranchingType), map[string]string{})
+		branchingType := config.DatabaseNeonBranchingType(branchingTypeStr)
+		if !branchingType.Valid() {
+			branchingType = config.DatabaseNeonBranchingTypeParentData
+		}
+
 		return NewNeonBranchHandler(
 			config.ReplaceVariables(dbConfig.Source.Neon.ProjectId, map[string]string{}),
 			config.ReplaceVariables(dbConfig.Source.Neon.ApiKey, map[string]string{}),
 			config.ReplaceVariables(dbConfig.Source.Neon.ParentBranch, map[string]string{}),
 			config.ReplaceVariables(dbConfig.Source.Neon.PreviewBranch, map[string]string{}),
+			branchingType,
 		)
 	}
 
@@ -58,11 +67,20 @@ func GetDatabaseHandlerForPruning(dbConfig config.Database) (HandlerInterface, e
 		if dbConfig.Source.Neon == nil {
 			return nil, errors.New("missing neon source database configuration")
 		}
+
+		// Prepare branching type
+		branchingTypeStr := config.ReplaceVariables(string(dbConfig.Source.Neon.BranchingType), map[string]string{})
+		branchingType := config.DatabaseNeonBranchingType(branchingTypeStr)
+		if !branchingType.Valid() {
+			branchingType = config.DatabaseNeonBranchingTypeParentData
+		}
+
 		return NewNeonBranchHandler(
 			config.ReplaceVariables(dbConfig.Source.Neon.ProjectId, map[string]string{}),
 			config.ReplaceVariables(dbConfig.Source.Neon.ApiKey, map[string]string{}),
 			config.ReplaceVariables(dbConfig.Source.Neon.ParentBranch, map[string]string{}),
 			dbConfig.Source.Neon.PreviewBranch,
+			branchingType,
 		)
 	}
 

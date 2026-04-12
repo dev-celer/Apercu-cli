@@ -68,10 +68,26 @@ const (
 )
 
 type DatabaseNeonSource struct {
-	ProjectId     string `yaml:"project_id"`
-	ApiKey        string `yaml:"api_key"`
-	ParentBranch  string `yaml:"parent_branch"`
-	PreviewBranch string `yaml:"preview_branch"`
+	ProjectId     string                    `yaml:"project_id"`
+	ApiKey        string                    `yaml:"api_key"`
+	ParentBranch  string                    `yaml:"parent_branch"`
+	PreviewBranch string                    `yaml:"preview_branch"`
+	BranchingType DatabaseNeonBranchingType `yaml:"branching_type" default:"parent_data"`
+}
+
+type DatabaseNeonBranchingType string
+
+const (
+	DatabaseNeonBranchingTypeSchemaOnly DatabaseNeonBranchingType = "schema_only"
+	DatabaseNeonBranchingTypeParentData DatabaseNeonBranchingType = "parent_data"
+)
+
+func (b DatabaseNeonBranchingType) Valid() bool {
+	_, ok := map[DatabaseNeonBranchingType]struct{}{
+		DatabaseNeonBranchingTypeSchemaOnly: {},
+		DatabaseNeonBranchingTypeParentData: {},
+	}[b]
+	return ok
 }
 
 type DatabaseMigration struct {

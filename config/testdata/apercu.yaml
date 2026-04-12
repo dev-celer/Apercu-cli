@@ -7,6 +7,7 @@ databases:
         api_key: "test-key"
         parent_branch: "main"
         preview_branch: "preview-${{ PR_NUMBER }}"
+        branching_type: "schema_only"
     migration:
       image: "flyway"
       command: ["migrate"]

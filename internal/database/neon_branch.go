@@ -18,13 +18,14 @@ type NeonBranchHandler struct {
 	apiKey           string
 	parentBranch     string
 	parentBranchId   string
+	branchingType    config.DatabaseNeonBranchingType
 	client           *neon.Client
 	previewBranch    string
 	connectionFields ConnectionFields
 	warnings         []string
 }
 
-func NewNeonBranchHandler(projectId string, apiKey string, parentBranch string, previewBranch string) (*NeonBranchHandler, error) {
+func NewNeonBranchHandler(projectId string, apiKey string, parentBranch string, previewBranch string, branchingType config.DatabaseNeonBranchingType) (*NeonBranchHandler, error) {
 	client, err := neon.NewClient(neon.Config{Key: apiKey})
 	if err != nil {
 		return nil, errors.New(fmt.Sprintf("Failed to connect to Neon API: %v", err))
@@ -37,6 +38,7 @@ func NewNeonBranchHandler(projectId string, apiKey string, parentBranch string, 
 		previewBranch: previewBranch,
 		client:        client,
 		warnings:      make([]string, 0),
+		branchingType: branchingType,
 	}, nil
 }
 
@@ -153,14 +155,23 @@ func (h *NeonBranchHandler) Apply() error {
 		return nil
 	}
 
-	slog.Debug("Preview branch does not exist, creating new one")
+	slog.Debug("Preview branch does not exist, creating new one", "branching_type", h.branchingType)
+
+	var initSource string
+	switch h.branchingType {
+	case config.DatabaseNeonBranchingTypeParentData:
+		initSource = "parent-data"
+	case config.DatabaseNeonBranchingTypeSchemaOnly:
+		initSource = "schema-only"
+	}
 
 	// Create preview branch
 	resp, err := h.client.CreateProjectBranch(h.projectId, &neon.CreateProjectBranchReqObj{
 		BranchCreateRequest: neon.BranchCreateRequest{
 			Branch: &neon.BranchCreateRequestBranch{
-				Name:     &h.previewBranch,
-				ParentID: &h.parentBranchId,
+				Name:       &h.previewBranch,
+				ParentID:   &h.parentBranchId,
+				InitSource: &initSource,
 			},
 			Endpoints: &[]neon.BranchCreateRequestEndpointOptions{
 				{Type: neon.EndpointTypeReadWrite},
