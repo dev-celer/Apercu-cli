@@ -99,8 +99,6 @@ func (h *NeonBranchHandler) getBranchByName(branchName string) (*neon.Branch, er
 }
 
 func (h *NeonBranchHandler) resetRolePassword() error {
-	_, _ = fmt.Fprintln(log.Writer(), "Resetting role password")
-
 	// Get preview branch
 	previewBranch, err := h.getBranchByName(h.previewBranch)
 	if err != nil {
@@ -120,6 +118,7 @@ func (h *NeonBranchHandler) resetRolePassword() error {
 	}
 
 	// Reset role password
+	slog.Debug("Resetting role password", "role_name", resp.Roles[0].Name)
 	_, err = h.client.ResetProjectBranchRolePassword(h.projectId, previewBranch.ID, resp.Roles[0].Name)
 	if err != nil {
 		return errors.New(fmt.Sprintf("Failed to reset project branch role password: %v", err))
