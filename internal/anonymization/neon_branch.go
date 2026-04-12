@@ -70,10 +70,17 @@ func (h *NeonBranchAnonymizerHandler) GetOutput() *output.OutputDatabaseAnonymiz
 
 func (h *NeonBranchAnonymizerHandler) createStorageBranch() (*neon.Branch, error) {
 	_, _ = fmt.Fprintln(log.Writer(), "Creating storage branch for anonymized data", h.storageBranch+"...")
+	parentBranch, err := neonHelper.GetBranchByName(h.parentClient, h.parentProjectId, h.parentBranch)
+	if err != nil {
+		return nil, err
+	}
+
 	resp, err := h.storageClient.CreateProjectBranch(h.storageProjectId, &neon.CreateProjectBranchReqObj{
 		BranchCreateRequest: neon.BranchCreateRequest{
 			Branch: &neon.BranchCreateRequestBranch{
-				Name: &h.storageBranch,
+				Name:       &h.storageBranch,
+				ParentID:   &parentBranch.ID,
+				InitSource: new("schema-only"),
 			},
 			Endpoints: &[]neon.BranchCreateRequestEndpointOptions{
 				{Type: neon.EndpointTypeReadWrite},
@@ -101,6 +108,10 @@ func (h *NeonBranchAnonymizerHandler) Anonymize(ctx context.Context) error {
 		return err
 	}
 	if storageBranch == nil {
+		if h.parentProjectId != h.parentProjectId {
+			return errors.New(fmt.Sprintf("Storage branch in another project, it should be created manually with the right database name"))
+		}
+
 		// Create target branch if missing
 		storageBranch, err = h.createStorageBranch()
 		if err != nil {
