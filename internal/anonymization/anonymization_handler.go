@@ -41,7 +41,7 @@ func GetDatabaseAnonymizer(dbConfig config.Database) (HandlerInterface, error) {
 
 		var storageApiKey *string
 		if dbConfig.Anonymization.Storage.Neon.ApiKey != nil {
-			storageApiKey = new(config.ReplaceVariables(dbConfig.Source.Neon.ApiKey, map[string]string{}))
+			storageApiKey = new(config.ReplaceVariables(*dbConfig.Anonymization.Storage.Neon.ApiKey, map[string]string{}))
 		}
 
 		env := make(map[string]string, len(dbConfig.Anonymization.Env))
