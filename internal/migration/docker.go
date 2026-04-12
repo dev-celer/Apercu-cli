@@ -134,7 +134,7 @@ func (h *DockerHandler) Apply(ctx context.Context) error {
 	slog.Debug("Docker image pulled", "output", pullBuffer.String())
 
 	// Create container config
-	env := make([]string, len(h.env))
+	env := make([]string, 0)
 	for k, v := range h.env {
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}

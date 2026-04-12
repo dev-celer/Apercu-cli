@@ -151,7 +151,7 @@ func (h *NeonBranchAnonymizerHandler) Anonymize(ctx context.Context) error {
 	}
 
 	// Create GreenMask container config
-	env := make([]string, len(h.env))
+	env := make([]string, 0)
 	for k, v := range h.env {
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
