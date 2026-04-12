@@ -20,6 +20,12 @@ func TestLoadConfig_Valid(t *testing.T) {
 	assert.Equal(t, "test-key", db.Source.Neon.ApiKey)
 	assert.Equal(t, "main", db.Source.Neon.ParentBranch)
 	assert.Equal(t, "preview-${{ PR_NUMBER }}", db.Source.Neon.PreviewBranch)
+	assert.Equal(t, DatabaseNeonBranchingTypeSchemaOnly, db.Source.Neon.BranchingType)
+
+	assert.Equal(t, "./greenmask.yaml", db.Anonymization.GreenmaskConfig)
+	assert.Nil(t, db.Anonymization.Storage.Neon.ProjectId)
+	assert.Nil(t, db.Anonymization.Storage.Neon.ApiKey)
+	assert.Equal(t, "main-anonymized", db.Anonymization.Storage.Neon.BranchName)
 
 	assert.Equal(t, "flyway", db.Migration.Image)
 	assert.Equal(t, []string{"migrate"}, db.Migration.Command)

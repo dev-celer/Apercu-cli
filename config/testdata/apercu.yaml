@@ -8,6 +8,13 @@ databases:
         parent_branch: "main"
         preview_branch: "preview-${{ PR_NUMBER }}"
         branching_type: "schema_only"
+    anonymization:
+      greenmask_config: "./greenmask.yaml"
+      env:
+        DATABASE_URL: "${{ DATABASE_URL }}"
+      storage:
+        neon:
+          branch_name: "main-anonymized"
     migration:
       image: "flyway"
       command: ["migrate"]

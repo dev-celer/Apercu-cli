@@ -51,9 +51,10 @@ type Config struct {
 }
 
 type Database struct {
-	Source    *DatabaseSource    `yaml:"source"`
-	Migration *DatabaseMigration `yaml:"migration"`
-	Seed      []DatabaseSeed     `yaml:"seed,omitempty"`
+	Source        *DatabaseSource        `yaml:"source"`
+	Anonymization *DatabaseAnonymization `yaml:"anonymization,omitempty"`
+	Migration     *DatabaseMigration     `yaml:"migration,omitempty"`
+	Seed          []DatabaseSeed         `yaml:"seed,omitempty"`
 }
 
 type DatabaseSource struct {
@@ -110,3 +111,19 @@ const (
 	DatabaseSeedTypeUpdate DatabaseSeedType = "update"
 	DatabaseSeedTypeCreate DatabaseSeedType = "create"
 )
+
+type DatabaseAnonymization struct {
+	GreenmaskConfig string                       `yaml:"greenmask_config"`
+	Storage         DatabaseAnonymizationStorage `yaml:"storage"`
+	Env             map[string]string            `yaml:"env"`
+}
+
+type DatabaseAnonymizationStorage struct {
+	Neon *DatabaseAnonymizationStorageNeon `yaml:"neon,omitempty"`
+}
+
+type DatabaseAnonymizationStorageNeon struct {
+	ProjectId  *string `yaml:"project_id,omitempty"`
+	ApiKey     *string `yaml:"api_key,omitempty"`
+	BranchName string  `yaml:"branch_name"`
+}
