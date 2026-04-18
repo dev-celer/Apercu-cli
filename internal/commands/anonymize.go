@@ -4,6 +4,8 @@ import (
 	"apercu-cli/config"
 	"apercu-cli/internal/anonymization"
 	"fmt"
+	"log"
+	"log/slog"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -39,13 +41,26 @@ func anonymize(cmd *cobra.Command, args []string) error {
 	}
 
 	if err := handler.Anonymize(cmd.Context()); err != nil {
+		if handler.GetOutput() != nil && handler.GetOutput().Logs != nil {
+			_, _ = fmt.Println(log.Writer(), "-------Greenmask output-------")
+			_, _ = fmt.Println(log.Writer(), *handler.GetOutput().Logs)
+			_, _ = fmt.Println(log.Writer(), "-----------------------------")
+		}
+
 		_, _ = fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
 	output := handler.GetOutput()
+	if output != nil && output.Logs != nil {
+		slog.Debug("-------Greenmask output-------")
+		slog.Debug(*output.Logs)
+		slog.Debug("-----------------------------")
+	}
 
-	fmt.Println("\nAnonymized database successfully in", output.Duration)
+	if output != nil {
+		fmt.Println("\nAnonymized database successfully in", output.Duration)
+	}
 
 	return nil
 }
