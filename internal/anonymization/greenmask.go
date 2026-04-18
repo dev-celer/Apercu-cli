@@ -78,7 +78,7 @@ func (h *GreenmaskHandler) Anonymize(ctx context.Context) error {
 	configPathInContainer := filepath.Join("/tmp/greenmask", filepath.Base(h.configPath))
 
 	cmd := fmt.Sprintf(
-		"PGPASSWORD=%s greenmask --config %s dump -h %s -p %d -d %s -U %s && PGPASSWORD=%s greenmask --config %s restore latest -h %s -p %d -d %s -U %s",
+		"PGPASSWORD=%s greenmask --config %s dump -h %s -p %d -d %s -U %s && PGPASSWORD=%s greenmask --config %s restore latest -c -h %s -p %d -d %s -U %s",
 		h.sourceConnection.Password, configPathInContainer, h.sourceConnection.Host, h.sourceConnection.Port, h.sourceConnection.Database, h.sourceConnection.User,
 		h.storageConnection.Password, configPathInContainer, h.storageConnection.Host, h.storageConnection.Port, h.storageConnection.Database, h.storageConnection.User,
 	)
