@@ -3,6 +3,7 @@ package commands
 import (
 	"apercu-cli/config"
 	"apercu-cli/internal/anonymization"
+	"apercu-cli/internal/database"
 	"fmt"
 	"log"
 	"log/slog"
@@ -34,12 +35,33 @@ func anonymize(cmd *cobra.Command, args []string) error {
 		break
 	}
 
-	handler, err := anonymization.GetDatabaseAnonymizer(dbConfig)
+	// Get the databases handlers
+	sourceHandler, storageHandler, err := database.GetAnonymizationDatabaseHandlers(dbConfig)
 	if err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
+	// Create or reset the storage database
+	if err := storageHandler.Reset(); err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
+	// Get the databases connection fields
+	sourceConn, err := sourceHandler.GetConnectionFields()
+	if err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	storageConn, err := storageHandler.GetConnectionFields()
+	if err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
+	// Anonymize the database
+	handler := anonymization.GetDatabaseAnonymizer(dbConfig, sourceConn, storageConn)
 	if err := handler.Anonymize(cmd.Context()); err != nil {
 		if handler.GetOutput() != nil && handler.GetOutput().Logs != nil {
 			_, _ = fmt.Println(log.Writer(), "-------Greenmask output-------")

@@ -9,16 +9,15 @@ import (
 )
 
 type HandlerInterface interface {
-	Apply() error
-	Cleanup() error
+	Exists() (bool, error)
+	Create() error
+	Delete() error
 	Reset() error
-	GetParentConnectionFields() (helper.ConnectionFields, error)
-	GetPreviewConnectionFields() (helper.ConnectionFields, error)
-	PrunePreviewDatabases(openedPullRequestNumber []string) ([]string, error)
+	GetConnectionFields() (helper.ConnectionFields, error)
 	GetWarnings() []string
 }
 
-func GetSourceDatabaseHandler(dbConfig config.Database) (HandlerInterface, error) {
+func GetPreviewDatabaseHandler(dbConfig config.Database) (HandlerInterface, error) {
 	if dbConfig.Source == nil {
 		slog.Debug("No source database specified")
 		return nil, nil
@@ -62,19 +61,90 @@ func GetSourceDatabaseHandler(dbConfig config.Database) (HandlerInterface, error
 			parentBranch = config.ReplaceVariables(dbConfig.Source.Neon.ParentBranch, map[string]string{})
 		}
 
-		return NewNeonBranchHandler(
+		return NewNeonHandler(
 			projectId,
 			apiKey,
-			parentBranch,
+			&parentBranch,
 			config.ReplaceVariables(dbConfig.Source.Neon.PreviewBranch, map[string]string{}),
-			branchingType,
+			&branchingType,
 		)
 	}
 
 	return nil, errors.New(fmt.Sprintf("unsupported source database provider: %s", dbConfig.Source.Provider))
 }
 
-func GetDatabaseHandlerForPruning(dbConfig config.Database) (HandlerInterface, error) {
+// GetAnonymizationDatabaseHandlers return (source, storage, error)
+func GetAnonymizationDatabaseHandlers(dbConfig config.Database) (HandlerInterface, HandlerInterface, error) {
+	if dbConfig.Source == nil || dbConfig.Anonymization == nil {
+		slog.Debug("No source database specified")
+		return nil, nil, nil
+	}
+
+	switch dbConfig.Source.Provider {
+	case config.DatabaseProviderNeon:
+		if dbConfig.Anonymization.Storage.Neon == nil {
+			return nil, nil, errors.New("missing neon anonymization storage configuration")
+		}
+		if dbConfig.Source.Neon == nil {
+			return nil, nil, errors.New("missing neon source database configuration")
+		}
+
+		parentProjectId := config.ReplaceVariables(dbConfig.Source.Neon.ProjectId, map[string]string{})
+		var storageProjectId string
+		if dbConfig.Anonymization.Storage.Neon.ProjectId != nil {
+			storageProjectId = config.ReplaceVariables(*dbConfig.Anonymization.Storage.Neon.ProjectId, map[string]string{})
+		} else {
+			storageProjectId = parentProjectId
+		}
+
+		sourceApiKey := config.ReplaceVariables(dbConfig.Source.Neon.ApiKey, map[string]string{})
+		var storageApiKey string
+		if dbConfig.Anonymization.Storage.Neon.ApiKey != nil {
+			storageApiKey = config.ReplaceVariables(*dbConfig.Anonymization.Storage.Neon.ApiKey, map[string]string{})
+		} else {
+			storageApiKey = sourceApiKey
+		}
+
+		env := make(map[string]string, len(dbConfig.Anonymization.Env))
+		for k, v := range dbConfig.Anonymization.Env {
+			env[k] = config.ReplaceVariables(v, map[string]string{})
+		}
+
+		sourceBranch := config.ReplaceVariables(dbConfig.Source.Neon.ParentBranch, map[string]string{})
+		sourceHandler, err := NewNeonHandler(
+			config.ReplaceVariables(dbConfig.Source.Neon.ProjectId, map[string]string{}),
+			sourceApiKey,
+			nil,
+			sourceBranch,
+			nil,
+		)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		storageHandler, err := NewNeonHandler(
+			storageProjectId,
+			storageApiKey,
+			&sourceBranch,
+			config.ReplaceVariables(dbConfig.Anonymization.Storage.Neon.BranchName, map[string]string{}),
+			new(config.DatabaseNeonBranchingTypeSchemaOnly),
+		)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		return sourceHandler, storageHandler, nil
+	}
+
+	return nil, nil, errors.New(fmt.Sprintf("unsupported database provider: %s", dbConfig.Source.Provider))
+}
+
+type PruningHandlerInterface interface {
+	Prune([]string) ([]string, error)
+	GetWarnings() []string
+}
+
+func GetPruningDatabaseHandler(dbConfig config.Database) (PruningHandlerInterface, error) {
 	if dbConfig.Source == nil {
 		slog.Debug("No source database specified")
 		return nil, nil
@@ -118,12 +188,11 @@ func GetDatabaseHandlerForPruning(dbConfig config.Database) (HandlerInterface, e
 			parentBranch = config.ReplaceVariables(dbConfig.Source.Neon.ParentBranch, map[string]string{})
 		}
 
-		return NewNeonBranchHandler(
+		return NewNeonPruneHandler(
 			projectId,
 			apiKey,
 			parentBranch,
 			config.ReplaceVariables(dbConfig.Source.Neon.PreviewBranch, map[string]string{}),
-			branchingType,
 		)
 	}
 

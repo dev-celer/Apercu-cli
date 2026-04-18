@@ -62,21 +62,33 @@ func preview(cmd *cobra.Command, args []string) error {
 		slog.Debug("State not found for database", "database", dbName)
 	}
 
-	// Apply the database
-	dbHandler, err := database.GetSourceDatabaseHandler(dbConfig)
+	// Create the preview database if it doesn't exist
+	dbHandler, err := database.GetPreviewDatabaseHandler(dbConfig)
 	if err != nil {
 		dbOutput.Errors = append(dbOutput.Errors, err.Error())
 		ErrorAndExit(err, dbOutput, dbName)
 	}
-	if err := dbHandler.Apply(); err != nil {
-		dbOutput.Errors = append(dbOutput.Errors, err.Error())
-		ErrorAndExit(err, dbOutput, dbName)
+	if dbHandler == nil {
+		return nil
 	}
-	conn, err := dbHandler.GetPreviewConnectionFields()
+
+	exist, err := dbHandler.Exists()
 	if err != nil {
 		dbOutput.Errors = append(dbOutput.Errors, err.Error())
 		ErrorAndExit(err, dbOutput, dbName)
 	}
+	if !exist {
+		if err := dbHandler.Create(); err != nil {
+			dbOutput.Errors = append(dbOutput.Errors, err.Error())
+			ErrorAndExit(err, dbOutput, dbName)
+		}
+	}
+	conn, err := dbHandler.GetConnectionFields()
+	if err != nil {
+		dbOutput.Errors = append(dbOutput.Errors, err.Error())
+		ErrorAndExit(err, dbOutput, dbName)
+	}
+	dbOutput.Warnings = dbHandler.GetWarnings()
 
 	// Apply the migrations
 	ctx := cmd.Context()

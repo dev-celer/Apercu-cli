@@ -47,20 +47,25 @@ func reset(cmd *cobra.Command, args []string) error {
 	var dbState config.DatabaseState
 
 	// Reset the database
-	dbHandler, err := database.GetSourceDatabaseHandler(dbConfig)
+	dbHandler, err := database.GetPreviewDatabaseHandler(dbConfig)
 	if err != nil {
 		dbOutput.Errors = append(dbOutput.Errors, err.Error())
 		ErrorAndExit(err, dbOutput, dbName)
 	}
+	if dbHandler == nil {
+		return nil
+	}
+
 	if err := dbHandler.Reset(); err != nil {
 		dbOutput.Errors = append(dbOutput.Errors, err.Error())
 		ErrorAndExit(err, dbOutput, dbName)
 	}
-	conn, err := dbHandler.GetPreviewConnectionFields()
+	conn, err := dbHandler.GetConnectionFields()
 	if err != nil {
 		dbOutput.Errors = append(dbOutput.Errors, err.Error())
 		ErrorAndExit(err, dbOutput, dbName)
 	}
+	dbOutput.Warnings = dbHandler.GetWarnings()
 
 	// Apply the migrations
 	ctx := cmd.Context()

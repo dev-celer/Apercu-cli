@@ -32,15 +32,25 @@ func cleanup(cmd *cobra.Command, args []string) error {
 		break
 	}
 
-	handler, err := database.GetSourceDatabaseHandler(dbConfig)
+	handler, err := database.GetPreviewDatabaseHandler(dbConfig)
 	if err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
-	if err := handler.Cleanup(); err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+	if handler != nil {
+		exist, err := handler.Exists()
+		if err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+
+		if exist {
+			if err := handler.Delete(); err != nil {
+				_, _ = fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+		}
 	}
 
 	return nil
