@@ -132,22 +132,22 @@ func extractConnectionFieldsFromUrl(databaseUrl string) (helper.ConnectionFields
 	}, nil
 }
 
-func (h *NeonHandler) waitForBranchToBeReady(branchId string) error {
-	slog.Debug("Waiting for branch to be ready", "branch_id", branchId)
+func (h *NeonHandler) waitForOperationToComplete(operationId string) error {
+	slog.Debug("Waiting for operation to complete", "operation_id", operationId)
 	timeout := time.After(2 * time.Minute)
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-timeout:
-			return errors.New("timed out waiting for branch to be ready")
+			return errors.New("timed out waiting for operation to complete")
 		case <-ticker.C:
-			resp, err := h.client.GetProjectBranch(h.projectId, branchId)
+			resp, err := h.client.GetProjectOperation(h.projectId, operationId)
 			if err != nil {
-				return errors.New(fmt.Sprintf("Failed to get branch state: %v", err))
+				return errors.New(fmt.Sprintf("Failed to get operation state: %v", err))
 			}
-			slog.Debug("Branch state", "state", resp.Branch.CurrentState)
-			if resp.Branch.CurrentState == "ready" {
+			slog.Debug("Operation state", "state", resp.Operation.Status)
+			if resp.Operation.Status == neon.OperationStatusFinished {
 				return nil
 			}
 		}
@@ -211,9 +211,11 @@ func (h *NeonHandler) Create() error {
 	}
 	slog.Debug("Branch created, id", "branch_id", resp.Branch.ID)
 
-	// Wait for the branch to finish resetting before proceeding
-	if err := h.waitForBranchToBeReady(resp.Branch.ID); err != nil {
-		return err
+	// Wait for operation to complete before proceeding
+	for _, op := range resp.Operations {
+		if err := h.waitForOperationToComplete(op.ID); err != nil {
+			return err
+		}
 	}
 
 	if err := h.resetRolePassword(); err != nil {
@@ -236,8 +238,15 @@ func (h *NeonHandler) Delete() error {
 	}
 
 	// Delete branch
-	if _, err := h.client.DeleteProjectBranch(h.projectId, branch.ID); err != nil {
+	resp, err := h.client.DeleteProjectBranch(h.projectId, branch.ID)
+	if err != nil {
 		return errors.New(fmt.Sprintf("Failed to delete branch: %v", err))
+	}
+
+	for _, op := range resp.Operations {
+		if err := h.waitForOperationToComplete(op.ID); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -254,10 +263,15 @@ func (h *NeonHandler) Reset() error {
 		return h.Create()
 	}
 
+	if branch.ParentID == nil {
+		_, _ = fmt.Fprintln(log.Writer(), "Branch already at root, nothing to reset")
+		return nil
+	}
+
 	_, _ = fmt.Fprintln(log.Writer(), "Resetting branch", h.branch, "to it's parent state...")
 
 	// Reset branch to parent state
-	_, err = h.client.RestoreProjectBranch(h.projectId, branch.ID, neon.BranchRestoreRequest{
+	resp, err := h.client.RestoreProjectBranch(h.projectId, branch.ID, neon.BranchRestoreRequest{
 		SourceBranchID: *branch.ParentID,
 	})
 	if err != nil {
@@ -265,12 +279,15 @@ func (h *NeonHandler) Reset() error {
 	}
 
 	// Wait for the branch to finish resetting before proceeding
-	if err := h.waitForBranchToBeReady(branch.ID); err != nil {
-		return err
+	for _, op := range resp.Operations {
+		if err := h.waitForOperationToComplete(op.ID); err != nil {
+			return err
+		}
 	}
 
 	if err := h.resetRolePassword(); err != nil {
 		return err
 	}
+
 	return nil
 }
