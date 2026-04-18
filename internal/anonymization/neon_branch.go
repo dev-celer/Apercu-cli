@@ -159,7 +159,7 @@ func (h *NeonBranchAnonymizerHandler) Anonymize(ctx context.Context) error {
 	cwd, _ := os.Getwd()
 	configPath := filepath.Join(cwd, h.configPath)
 	configDir := filepath.Dir(configPath)
-	configPathInContainer := filepath.Join("/tmp/greenmask", filepath.Join(filepath.Base(configDir), filepath.Base(configPath)))
+	configPathInContainer := filepath.Join("/tmp/greenmask", filepath.Base(h.configPath))
 
 	cmd := fmt.Sprintf(
 		"PGPASSWORD=%s greenmask --config %s dump -h %s -p %d -d %s -U %s && PGPASSWORD=%s greenmask --config %s restore latest -h %s -p %d -d %s -U %s",
