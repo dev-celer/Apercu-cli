@@ -42,10 +42,17 @@ func anonymize(cmd *cobra.Command, args []string) error {
 		os.Exit(1)
 	}
 
-	// Create or reset the storage database
-	if err := storageHandler.Reset(); err != nil {
+	// Create the storage database if missing
+	exist, err := storageHandler.Exists()
+	if err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
+	}
+	if !exist {
+		if err := storageHandler.Create(); err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 	}
 
 	// Get the databases connection fields
