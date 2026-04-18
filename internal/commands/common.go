@@ -54,7 +54,7 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 	if err := migrationHandler.Apply(ctx); err != nil {
 		if output != nil && output.Logs != nil {
 			_, _ = fmt.Fprintln(log.Writer(), "\n-----Migration runner output-----")
-			_, _ = fmt.Fprintln(log.Writer(), output.Logs)
+			_, _ = fmt.Fprintln(log.Writer(), *output.Logs)
 			_, _ = fmt.Fprintln(log.Writer(), "---------------------------------")
 			output.Errors = append(output.Errors, err.Error())
 		}
@@ -64,7 +64,7 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 	if runnerOutput {
 		if output != nil && output.Logs != nil {
 			_, _ = fmt.Fprintln(log.Writer(), "\n-----Migration runner output-----")
-			_, _ = fmt.Fprintln(log.Writer(), output.Logs)
+			_, _ = fmt.Fprintln(log.Writer(), *output.Logs)
 			_, _ = fmt.Fprintln(log.Writer(), "---------------------------------")
 		}
 	}
