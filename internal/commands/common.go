@@ -2,6 +2,7 @@ package commands
 
 import (
 	"apercu-cli/helper"
+	"apercu-cli/helper/metrics"
 	"apercu-cli/helper/schema_diff"
 	"apercu-cli/internal/migration"
 	"apercu-cli/internal/seeding"
@@ -45,49 +46,68 @@ func ApplySeeding(seedHandler seeding.HandlerInterface) string {
 	return seedingMessage
 }
 
-func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInterface, databaseConn helper.ConnectionFields) (string, error) {
+func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInterface, databaseConn *helper.ConnectionFields) (string, error) {
 	if migrationHandler == nil {
 		return "", nil
 	}
 
-	initialSchema, err := schema_diff.GetSchema(databaseConn.Url)
-	if err != nil {
-		return "", err
+	migrationOutput := migrationHandler.GetOutput()
+
+	var initialSchema map[string]schema_diff.Schema
+	var initialSize int64
+	if databaseConn != nil {
+		var err error
+		initialSchema, err = schema_diff.GetSchema(databaseConn.Url)
+		if err != nil {
+			return "", err
+		}
+		initialSize, err = metrics.GetDatabaseStorageInBytes(databaseConn.Database, databaseConn.Url)
+		if err != nil {
+			return "", err
+		}
 	}
-	output := migrationHandler.GetOutput()
 
 	// Apply the migrations
 	if err := migrationHandler.Apply(ctx); err != nil {
-		if output != nil && output.Logs != nil {
+		if migrationOutput != nil && migrationOutput.Logs != nil {
 			_, _ = fmt.Fprintln(log.Writer(), "\n-----Migration runner output-----")
-			_, _ = fmt.Fprintln(log.Writer(), *output.Logs)
+			_, _ = fmt.Fprintln(log.Writer(), *migrationOutput.Logs)
 			_, _ = fmt.Fprintln(log.Writer(), "---------------------------------")
-			output.Errors = append(output.Errors, err.Error())
+			migrationOutput.Errors = append(migrationOutput.Errors, err.Error())
 		}
 		return "", fmt.Errorf("migration failed: %w", err)
 	}
 
 	if runnerOutput {
-		if output != nil && output.Logs != nil {
+		if migrationOutput != nil && migrationOutput.Logs != nil {
 			_, _ = fmt.Fprintln(log.Writer(), "\n-----Migration runner output-----")
-			_, _ = fmt.Fprintln(log.Writer(), *output.Logs)
+			_, _ = fmt.Fprintln(log.Writer(), *migrationOutput.Logs)
 			_, _ = fmt.Fprintln(log.Writer(), "---------------------------------")
 		}
 	}
 
-	// Get schema diff
-	finalSchema, err := schema_diff.GetSchema(databaseConn.Url)
-	if err != nil {
-		return "", err
+	if databaseConn != nil && migrationOutput != nil {
+		// Get schema diff
+		finalSchema, err := schema_diff.GetSchema(databaseConn.Url)
+		if err != nil {
+			return "", err
+		}
+		migrationOutput.SchemaDiff = schema_diff.GetSchemaDiffText(initialSchema, finalSchema)
+
+		// Get Database size metrics
+		finalSize, err := metrics.GetDatabaseStorageInBytes(databaseConn.Database, databaseConn.Url)
+		if err != nil {
+			return "", err
+		}
+		migrationOutput.Stats = output.NewOutputDatabaseMigrationStats(initialSize, finalSize)
 	}
-	output.SchemaDiff = schema_diff.GetSchemaDiffText(initialSchema, finalSchema)
 
 	// Generate the migration message
 	migrationMessage := "Migration completed successfully"
-	if output.Duration != "" {
-		migrationMessage += fmt.Sprintf(", completed in %s", output.Duration)
+	if migrationOutput.Duration != "" {
+		migrationMessage += fmt.Sprintf(", completed in %s", migrationOutput.Duration)
 	}
-	migrationMessage += fmt.Sprintf(", %d migrations applied", output.Count)
+	migrationMessage += fmt.Sprintf(", %d migrations applied", migrationOutput.Count)
 
 	return migrationMessage, nil
 }

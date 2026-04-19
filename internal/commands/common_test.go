@@ -34,7 +34,7 @@ func (h *mockSeedingHandler) GetOutput() *output.OutputDatabaseSeeding { return 
 
 func TestApplyMigration_NilHandler(t *testing.T) {
 	t.Parallel()
-	msg, err := ApplyMigration(context.Background(), nil)
+	msg, err := ApplyMigration(context.Background(), nil, nil)
 	require.NoError(t, err)
 	assert.Empty(t, msg)
 }
@@ -50,7 +50,7 @@ func TestApplyMigration_Success(t *testing.T) {
 		},
 	}
 
-	msg, err := ApplyMigration(context.Background(), handler)
+	msg, err := ApplyMigration(context.Background(), handler, nil)
 	require.NoError(t, err)
 	assert.Contains(t, msg, "Migration completed successfully")
 	assert.Contains(t, msg, "3 migrations applied")
@@ -67,7 +67,7 @@ func TestApplyMigration_ApplyError(t *testing.T) {
 		},
 	}
 
-	_, err := ApplyMigration(context.Background(), handler)
+	_, err := ApplyMigration(context.Background(), handler, nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "migration failed")
 	assert.Contains(t, err.Error(), "docker crashed")
@@ -84,7 +84,7 @@ func TestApplyMigration_NoDuration(t *testing.T) {
 		},
 	}
 
-	msg, err := ApplyMigration(context.Background(), handler)
+	msg, err := ApplyMigration(context.Background(), handler, nil)
 	require.NoError(t, err)
 	assert.Contains(t, msg, "Migration completed successfully")
 	assert.NotContains(t, msg, "completed in")

@@ -25,12 +25,27 @@ func NewPreviewOutputDatabase() *PreviewOutputDatabase {
 }
 
 type OutputDatabaseMigration struct {
-	Logs       *string  `yaml:"logs,omitempty" json:"logs,omitempty"`
-	Count      int      `yaml:"count" json:"count"`
-	Duration   string   `yaml:"duration" json:"duration"`
-	SchemaDiff *string  `yaml:"schema_diff,omitempty" json:"schema_diff,omitempty"`
-	Warnings   []string `yaml:"warnings,omitempty" json:"warnings,omitempty"`
-	Errors     []string `yaml:"errors,omitempty" json:"errors,omitempty"`
+	Logs       *string                       `yaml:"logs,omitempty" json:"logs,omitempty"`
+	Count      int                           `yaml:"count" json:"count"`
+	Duration   string                        `yaml:"duration" json:"duration"`
+	SchemaDiff *string                       `yaml:"schema_diff,omitempty" json:"schema_diff,omitempty"`
+	Stats      *OutputDatabaseMigrationStats `yaml:"stats,omitempty" json:"stats,omitempty"`
+	Warnings   []string                      `yaml:"warnings,omitempty" json:"warnings,omitempty"`
+	Errors     []string                      `yaml:"errors,omitempty" json:"errors,omitempty"`
+}
+
+type OutputDatabaseMigrationStats struct {
+	InitialSize int64 `yaml:"initial_size" json:"initial_size"`
+	FinalSize   int64 `yaml:"final_size" json:"final_size"`
+	SizeDelta   int64 `yaml:"size_delta" json:"size_delta"`
+}
+
+func NewOutputDatabaseMigrationStats(initialSize int64, finalSize int64) *OutputDatabaseMigrationStats {
+	return &OutputDatabaseMigrationStats{
+		InitialSize: initialSize,
+		FinalSize:   finalSize,
+		SizeDelta:   finalSize - initialSize,
+	}
 }
 
 func NewMigrationOutput() *OutputDatabaseMigration {
@@ -86,6 +101,18 @@ var templateFuncs = template.FuncMap{
 		}
 		return *s
 	},
+	"size_pretty": func(i int64) string {
+		if i < 1024 {
+			return fmt.Sprintf("%d B", i)
+		} else if i < 1024*1024 {
+			return fmt.Sprintf("%.2f KB", float64(i)/1024)
+		} else if i < 1024*1024*1024 {
+			return fmt.Sprintf("%.2f MB", float64(i)/1024/1024)
+		} else if i < 1024*1024*1024*1024 {
+			return fmt.Sprintf("%.2f GB", float64(i)/1024/1024/1024)
+		}
+		return fmt.Sprintf("%.2f TB", float64(i)/1024/1024/1024/1024)
+	},
 }
 
 var markdownTmpl = template.Must(template.New("markdown").Funcs(templateFuncs).Parse(
@@ -119,6 +146,20 @@ var markdownTmpl = template.Must(template.New("markdown").Funcs(templateFuncs).P
 ` + "```" + `
 
 </details>
+{{- end}}
+{{- if $db.Migration.Stats}}
+
+<details>
+<summary>Stats</summary>
+
+` + "```" + `
+Before Migration Size: {{size_pretty $db.Migration.Stats.InitialSize}}
+After Migration Size: {{size_pretty $db.Migration.Stats.FinalSize}}
+Size Delta: {{size_pretty $db.Migration.Stats.SizeDelta}}
+` + "```" + `
+
+</details>
+
 {{- end}}
 {{- if $db.Migration.Logs}}
 
