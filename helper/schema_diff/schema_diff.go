@@ -301,7 +301,7 @@ func GetSchemaDiffText(oldSchema, newSchema map[string]Schema) *string {
 	for schemaName, schema := range oldSchema {
 		diff := GetSchemaDiff(&schema, new(newSchema[schemaName]))
 		if diff != nil {
-			text += "-----\n" + schemaName + ":\n" + diff.GenerateText() + "\n"
+			text += "\n" + schemaName + ":\n" + diff.GenerateText() + "\n"
 		}
 		delete(newSchema, schemaName)
 	}
@@ -310,7 +310,7 @@ func GetSchemaDiffText(oldSchema, newSchema map[string]Schema) *string {
 	for schemaName, schema := range newSchema {
 		diff := GetSchemaDiff(nil, &schema)
 		if diff != nil {
-			text += "-----\n" + schemaName + ":\n" + diff.GenerateText() + "\n"
+			text += "\n" + schemaName + ":\n" + diff.GenerateText() + "\n"
 		}
 	}
 
