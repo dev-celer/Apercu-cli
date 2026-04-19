@@ -2,6 +2,8 @@ package schema_diff
 
 import (
 	"database/sql"
+	"errors"
+	"fmt"
 	"slices"
 
 	_ "github.com/lib/pq"
@@ -74,31 +76,6 @@ type rawColumn struct {
 	DataType    string
 }
 
-func getColumns(databaseUrl string) ([]rawColumn, error) {
-	db, err := sql.Open("postgres", databaseUrl)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = db.Close() }()
-
-	rows, err := db.Query("SELECT table_schema, table_name, column_name, data_type FROM information_schema.columns WHERE table_schema NOT IN ('information_schema', 'pg_catalog')")
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	var columns []rawColumn
-	for rows.Next() {
-		var c rawColumn
-		if err := rows.Scan(&c.TableSchema, &c.TableName, &c.ColumnName, &c.DataType); err != nil {
-			return nil, err
-		}
-		columns = append(columns, c)
-	}
-
-	return columns, nil
-}
-
 type SchemaDiff struct {
 	DeletedTables []Table
 	CreatedTables []Table
@@ -118,18 +95,19 @@ func (d *SchemaDiff) HasChanges() bool {
 }
 
 type TableDiff struct {
-	OldTable       *Table
-	NewTable       *Table
-	DeletedColumns []Column
-	CreatedColumns []Column
-	UpdatedColumns []struct {
+	Name             string
+	UnchangedColumns []Column
+	DeletedColumns   []Column
+	CreatedColumns   []Column
+	UpdatedColumns   []struct {
 		Old Column
 		New Column
 	}
 }
 
-func NewTableDiff() TableDiff {
+func NewTableDiff(name string) TableDiff {
 	return TableDiff{
+		Name:           name,
 		DeletedColumns: make([]Column, 0),
 		CreatedColumns: make([]Column, 0),
 		UpdatedColumns: make([]struct {
@@ -148,7 +126,7 @@ func hasColumnChanged(oldColumn, newColumn Column) bool {
 }
 
 func getTableDiff(oldTable, newTable Table) *TableDiff {
-	diff := NewTableDiff()
+	diff := NewTableDiff(oldTable.Name)
 
 	// Check updated of created columns
 	for _, newTableColumn := range newTable.Columns {
@@ -162,6 +140,8 @@ func getTableDiff(oldTable, newTable Table) *TableDiff {
 		oldColumn := oldTable.Columns[oldIndex]
 		if hasColumnChanged(oldColumn, newTableColumn) {
 			diff.UpdatedColumns = append(diff.UpdatedColumns, struct{ Old, New Column }{oldColumn, newTableColumn})
+		} else {
+			diff.UnchangedColumns = append(diff.UnchangedColumns, oldColumn)
 		}
 		oldTable.Columns = slices.Delete(oldTable.Columns, oldIndex, oldIndex+1)
 	}
@@ -175,8 +155,20 @@ func getTableDiff(oldTable, newTable Table) *TableDiff {
 	return nil
 }
 
-func getSchemaDiff(oldSchema, newSchema *Schema) *SchemaDiff {
+func GetSchemaDiff(oldSchema, newSchema *Schema) *SchemaDiff {
 	diff := NewSchemaDiff()
+
+	// If old schema is nil, all tables are new
+	if oldSchema == nil {
+		diff.CreatedTables = newSchema.Tables
+		return &diff
+	}
+
+	// If new schema is nil, all tables are deleted
+	if newSchema == nil {
+		diff.DeletedTables = oldSchema.Tables
+		return &diff
+	}
 
 	// Check updated of created tables
 	for _, newTable := range newSchema.Tables {
@@ -200,4 +192,130 @@ func getSchemaDiff(oldSchema, newSchema *Schema) *SchemaDiff {
 		return &diff
 	}
 	return nil
+}
+
+func (t *Table) GenerateText(prefix string) string {
+	var text string
+
+	text += prefix + t.Name + " (\n"
+
+	for _, column := range t.Columns {
+		text += prefix + "\t" + column.Name + "\t" + column.DataType + "\n"
+	}
+
+	text += prefix + ")\n"
+
+	return text
+}
+
+func (t *TableDiff) GenerateText() string {
+	var text string
+
+	text += t.Name + " (\n"
+
+	// Print unchanged columns
+	for _, column := range t.UnchangedColumns {
+		text += "\t" + column.Name + "\t" + column.DataType + "\n"
+	}
+
+	// Print deleted columns
+	for _, column := range t.DeletedColumns {
+		text += "- \t" + column.Name + "\t" + column.DataType + "\n"
+	}
+
+	// Print Updated columns
+	for _, column := range t.UpdatedColumns {
+		text += "- \t" + column.Old.Name + "\t" + column.Old.DataType + "\n"
+		text += "+ \t" + column.New.Name + "\t" + column.New.DataType + "\n"
+	}
+
+	// Print created columns
+	for _, column := range t.CreatedColumns {
+		text += "+ \t" + column.Name + "\t" + column.DataType + "\n"
+	}
+
+	text += ")\n"
+
+	return text
+}
+
+func (d *SchemaDiff) GenerateText() string {
+	var text string
+
+	// Print deleted tables
+	for _, tableDiff := range d.DeletedTables {
+		text += tableDiff.GenerateText("- ") + "\n"
+	}
+
+	// Print updated tables
+	for _, tableDiff := range d.UpdatedTables {
+		text += tableDiff.GenerateText() + "\n"
+	}
+
+	// Print created tables
+	for _, tableDiff := range d.CreatedTables {
+		text += tableDiff.GenerateText("+ ") + "\n"
+	}
+
+	return text
+}
+
+func getColumns(databaseUrl string) ([]rawColumn, error) {
+	db, err := sql.Open("postgres", databaseUrl)
+	if err != nil {
+		return nil, errors.New(fmt.Sprintf("Failed to connect to database: %v", err))
+	}
+	defer func() { _ = db.Close() }()
+
+	rows, err := db.Query("SELECT table_schema, table_name, column_name, data_type FROM information_schema.columns WHERE table_schema NOT IN ('information_schema', 'pg_catalog')")
+	if err != nil {
+		return nil, errors.New(fmt.Sprintf("Failed to query database for schema: %v", err))
+	}
+	defer func() { _ = rows.Close() }()
+
+	var columns []rawColumn
+	for rows.Next() {
+		var c rawColumn
+		if err := rows.Scan(&c.TableSchema, &c.TableName, &c.ColumnName, &c.DataType); err != nil {
+			return nil, errors.New(fmt.Sprintf("Failed to scan schema: %v", err))
+		}
+		columns = append(columns, c)
+	}
+
+	return columns, nil
+}
+
+func GetSchema(databaseUrl string) (map[string]Schema, error) {
+	columns, err := getColumns(databaseUrl)
+	if err != nil {
+		return nil, err
+	}
+
+	convertedSchemas := convertRawColumnToSchemaStructs(columns)
+	return convertedSchemas, nil
+}
+
+func GetSchemaDiffText(oldSchema, newSchema map[string]Schema) *string {
+	var text string
+	// Handle deleted and updated schema
+	for schemaName, schema := range oldSchema {
+		diff := GetSchemaDiff(&schema, new(newSchema[schemaName]))
+		if diff != nil {
+			text += "-----\n" + schemaName + ":\n" + diff.GenerateText() + "\n"
+		}
+		delete(newSchema, schemaName)
+	}
+
+	// Handle created schema
+	for schemaName, schema := range newSchema {
+		diff := GetSchemaDiff(nil, &schema)
+		if diff != nil {
+			text += "-----\n" + schemaName + ":\n" + diff.GenerateText() + "\n"
+		}
+	}
+
+	if text == "" {
+		return nil
+	}
+	return &text
 }

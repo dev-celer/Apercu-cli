@@ -1,6 +1,8 @@
 package commands
 
 import (
+	"apercu-cli/helper"
+	"apercu-cli/helper/schema_diff"
 	"apercu-cli/internal/migration"
 	"apercu-cli/internal/seeding"
 	"apercu-cli/output"
@@ -43,11 +45,15 @@ func ApplySeeding(seedHandler seeding.HandlerInterface) string {
 	return seedingMessage
 }
 
-func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInterface) (string, error) {
+func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInterface, databaseConn helper.ConnectionFields) (string, error) {
 	if migrationHandler == nil {
 		return "", nil
 	}
 
+	initialSchema, err := schema_diff.GetSchema(databaseConn.Url)
+	if err != nil {
+		return "", err
+	}
 	output := migrationHandler.GetOutput()
 
 	// Apply the migrations
@@ -68,6 +74,13 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 			_, _ = fmt.Fprintln(log.Writer(), "---------------------------------")
 		}
 	}
+
+	// Get schema diff
+	finalSchema, err := schema_diff.GetSchema(databaseConn.Url)
+	if err != nil {
+		return "", err
+	}
+	output.SchemaDiff = schema_diff.GetSchemaDiffText(initialSchema, finalSchema)
 
 	// Generate the migration message
 	migrationMessage := "Migration completed successfully"

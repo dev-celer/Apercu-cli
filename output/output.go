@@ -25,11 +25,12 @@ func NewPreviewOutputDatabase() *PreviewOutputDatabase {
 }
 
 type OutputDatabaseMigration struct {
-	Logs     *string  `yaml:"logs,omitempty" json:"logs,omitempty"`
-	Count    int      `yaml:"count" json:"count"`
-	Duration string   `yaml:"duration" json:"duration"`
-	Warnings []string `yaml:"warnings,omitempty" json:"warnings,omitempty"`
-	Errors   []string `yaml:"errors,omitempty" json:"errors,omitempty"`
+	Logs       *string  `yaml:"logs,omitempty" json:"logs,omitempty"`
+	Count      int      `yaml:"count" json:"count"`
+	Duration   string   `yaml:"duration" json:"duration"`
+	SchemaDiff *string  `yaml:"schema_diff,omitempty" json:"schema_diff,omitempty"`
+	Warnings   []string `yaml:"warnings,omitempty" json:"warnings,omitempty"`
+	Errors     []string `yaml:"errors,omitempty" json:"errors,omitempty"`
 }
 
 func NewMigrationOutput() *OutputDatabaseMigration {
@@ -107,6 +108,17 @@ var markdownTmpl = template.Must(template.New("markdown").Funcs(templateFuncs).P
 > [!CAUTION]
 {{range $db.Migration.Errors}}> - {{.}}
 {{end}}
+{{- end}}
+{{- if $db.Migration.SchemaDiff }}
+
+<details>
+<summary>Schema Diff</summary>
+
+` + "```diff" + `
+{{deref $db.Migration.SchemaDiff}}
+` + "```" + `
+
+</details>
 {{- end}}
 {{- if $db.Migration.Logs}}
 

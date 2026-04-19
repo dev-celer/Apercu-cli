@@ -128,14 +128,14 @@ func TestSchemaDiff_HasChanges(t *testing.T) {
 	t.Run("updated table", func(t *testing.T) {
 		t.Parallel()
 		d := NewSchemaDiff()
-		d.UpdatedTables = append(d.UpdatedTables, NewTableDiff())
+		d.UpdatedTables = append(d.UpdatedTables, NewTableDiff("test_table"))
 		assert.True(t, d.HasChanges())
 	})
 }
 
 func TestNewTableDiff(t *testing.T) {
 	t.Parallel()
-	d := NewTableDiff()
+	d := NewTableDiff("")
 	assert.NotNil(t, d.DeletedColumns)
 	assert.NotNil(t, d.CreatedColumns)
 	assert.NotNil(t, d.UpdatedColumns)
@@ -149,24 +149,24 @@ func TestTableDiff_HasChanges(t *testing.T) {
 	t.Parallel()
 	t.Run("empty has no changes", func(t *testing.T) {
 		t.Parallel()
-		d := NewTableDiff()
+		d := NewTableDiff("")
 		assert.False(t, d.HasChanges())
 	})
 	t.Run("deleted column", func(t *testing.T) {
 		t.Parallel()
-		d := NewTableDiff()
+		d := NewTableDiff("test_table")
 		d.DeletedColumns = append(d.DeletedColumns, Column{Name: "id"})
 		assert.True(t, d.HasChanges())
 	})
 	t.Run("created column", func(t *testing.T) {
 		t.Parallel()
-		d := NewTableDiff()
+		d := NewTableDiff("test_table")
 		d.CreatedColumns = append(d.CreatedColumns, Column{Name: "id"})
 		assert.True(t, d.HasChanges())
 	})
 	t.Run("updated column", func(t *testing.T) {
 		t.Parallel()
-		d := NewTableDiff()
+		d := NewTableDiff("test_table")
 		d.UpdatedColumns = append(d.UpdatedColumns, struct {
 			Old Column
 			New Column
@@ -175,6 +175,12 @@ func TestTableDiff_HasChanges(t *testing.T) {
 			New: Column{Name: "id", DataType: "bigint"},
 		})
 		assert.True(t, d.HasChanges())
+	})
+	t.Run("unchanged columns alone are not a change", func(t *testing.T) {
+		t.Parallel()
+		d := NewTableDiff("test_table")
+		d.UnchangedColumns = append(d.UnchangedColumns, Column{Name: "id", DataType: "integer"})
+		assert.False(t, d.HasChanges())
 	})
 }
 
@@ -209,9 +215,11 @@ func TestGetTableDiff_UpdatedColumn(t *testing.T) {
 
 	require.NotNil(t, diff)
 	assert.Empty(t, diff.CreatedColumns)
+	assert.Empty(t, diff.DeletedColumns)
 	require.Len(t, diff.UpdatedColumns, 1)
 	assert.Equal(t, Column{Name: "id", DataType: "integer"}, diff.UpdatedColumns[0].Old)
 	assert.Equal(t, Column{Name: "id", DataType: "bigint"}, diff.UpdatedColumns[0].New)
+	assert.Equal(t, []Column{{Name: "email", DataType: "text"}}, diff.UnchangedColumns)
 }
 
 func TestGetTableDiff_CreatedColumn(t *testing.T) {
@@ -231,6 +239,7 @@ func TestGetTableDiff_CreatedColumn(t *testing.T) {
 	assert.Equal(t, Column{Name: "email", DataType: "text"}, diff.CreatedColumns[0])
 	assert.Empty(t, diff.UpdatedColumns)
 	assert.Empty(t, diff.DeletedColumns)
+	assert.Equal(t, []Column{{Name: "id", DataType: "integer"}}, diff.UnchangedColumns)
 }
 
 func TestGetTableDiff_DeletedColumn(t *testing.T) {
@@ -250,6 +259,7 @@ func TestGetTableDiff_DeletedColumn(t *testing.T) {
 	assert.Equal(t, Column{Name: "email", DataType: "text"}, diff.DeletedColumns[0])
 	assert.Empty(t, diff.CreatedColumns)
 	assert.Empty(t, diff.UpdatedColumns)
+	assert.Equal(t, []Column{{Name: "id", DataType: "integer"}}, diff.UnchangedColumns)
 }
 
 func TestGetSchemaDiff_NoChanges(t *testing.T) {
@@ -262,7 +272,7 @@ func TestGetSchemaDiff_NoChanges(t *testing.T) {
 		{Name: "users", Columns: []Column{{Name: "id", DataType: "integer"}}},
 	}}
 
-	diff := getSchemaDiff(oldS, newS)
+	diff := GetSchemaDiff(oldS, newS)
 	assert.Nil(t, diff)
 }
 
@@ -276,7 +286,7 @@ func TestGetSchemaDiff_CreatedTable(t *testing.T) {
 		{Name: "orders", Columns: []Column{{Name: "id", DataType: "bigint"}}},
 	}}
 
-	diff := getSchemaDiff(oldS, newS)
+	diff := GetSchemaDiff(oldS, newS)
 
 	require.NotNil(t, diff)
 	require.Len(t, diff.CreatedTables, 1)
@@ -293,7 +303,7 @@ func TestGetSchemaDiff_DeletedTable(t *testing.T) {
 		{Name: "users", Columns: []Column{{Name: "id", DataType: "integer"}}},
 	}}
 
-	diff := getSchemaDiff(oldS, newS)
+	diff := GetSchemaDiff(oldS, newS)
 
 	require.NotNil(t, diff)
 	require.Len(t, diff.DeletedTables, 1)
@@ -309,11 +319,41 @@ func TestGetSchemaDiff_UpdatedTable(t *testing.T) {
 		{Name: "users", Columns: []Column{{Name: "id", DataType: "bigint"}}},
 	}}
 
-	diff := getSchemaDiff(oldS, newS)
+	diff := GetSchemaDiff(oldS, newS)
 
 	require.NotNil(t, diff)
 	require.Len(t, diff.UpdatedTables, 1)
 	require.Len(t, diff.UpdatedTables[0].UpdatedColumns, 1)
 	assert.Equal(t, "integer", diff.UpdatedTables[0].UpdatedColumns[0].Old.DataType)
 	assert.Equal(t, "bigint", diff.UpdatedTables[0].UpdatedColumns[0].New.DataType)
+}
+
+func TestGetSchemaDiff_NilOldSchema(t *testing.T) {
+	t.Parallel()
+	newS := &Schema{Tables: []Table{
+		{Name: "users", Columns: []Column{{Name: "id", DataType: "integer"}}},
+		{Name: "orders", Columns: []Column{{Name: "id", DataType: "bigint"}}},
+	}}
+
+	diff := GetSchemaDiff(nil, newS)
+
+	require.NotNil(t, diff)
+	assert.Equal(t, newS.Tables, diff.CreatedTables)
+	assert.Empty(t, diff.DeletedTables)
+	assert.Empty(t, diff.UpdatedTables)
+}
+
+func TestGetSchemaDiff_NilNewSchema(t *testing.T) {
+	t.Parallel()
+	oldS := &Schema{Tables: []Table{
+		{Name: "users", Columns: []Column{{Name: "id", DataType: "integer"}}},
+		{Name: "orders", Columns: []Column{{Name: "id", DataType: "bigint"}}},
+	}}
+
+	diff := GetSchemaDiff(oldS, nil)
+
+	require.NotNil(t, diff)
+	assert.Equal(t, oldS.Tables, diff.DeletedTables)
+	assert.Empty(t, diff.CreatedTables)
+	assert.Empty(t, diff.UpdatedTables)
 }
