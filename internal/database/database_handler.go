@@ -192,7 +192,7 @@ func GetPruningDatabaseHandler(dbConfig config.Database) (PruningHandlerInterfac
 			projectId,
 			apiKey,
 			parentBranch,
-			config.ReplaceVariables(dbConfig.Source.Neon.PreviewBranch, map[string]string{}),
+			dbConfig.Source.Neon.PreviewBranch,
 		)
 	}
 

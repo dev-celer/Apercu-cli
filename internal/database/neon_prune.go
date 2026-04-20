@@ -41,6 +41,8 @@ func (h *NeonPruneHandler) GetWarnings() []string {
 }
 
 func (h *NeonPruneHandler) Prune(openedPullRequestNumber []string) ([]string, error) {
+	slog.Debug("Pruning branches based on pattern", "pattern", h.branchPattern)
+
 	// Find parent branch id from name
 	parentBranch, err := neonHelper.GetBranchByName(h.client, h.projectId, h.parentBranch)
 	if err != nil {
@@ -125,13 +127,19 @@ func (h *NeonPruneHandler) getAllPreviewBranches(previewPattern string, parentBr
 	// Extract start of the preview pattern, before any variable
 	reg := regexp.MustCompile(`(\S*)\${{\s*\w+\s*}}`)
 	matches := reg.FindStringSubmatch(previewPattern)
+	var startPattern string
+	if len(matches) > 1 {
+		startPattern = matches[1]
+	} else {
+		startPattern = previewPattern
+	}
 
 	// List branches based on preview pattern
-	slog.Debug("Listing branches starting with", "pattern_start", matches[1])
+	slog.Debug("Listing branches starting with", "pattern_start", startPattern)
 	branches := make([]neon.Branch, 0)
 	var cursor *string
 	for {
-		resp, err := h.client.ListProjectBranches(h.projectId, &matches[1], nil, cursor, nil, nil)
+		resp, err := h.client.ListProjectBranches(h.projectId, &startPattern, nil, cursor, nil, nil)
 		if err != nil {
 			return nil, errors.New(fmt.Sprintf("Failed to list project branches: %v", err))
 		}
@@ -142,7 +150,7 @@ func (h *NeonPruneHandler) getAllPreviewBranches(previewPattern string, parentBr
 			break
 		}
 	}
-	slog.Debug(fmt.Sprintf("Found %d branches starting with", len(branches)), "pattern_start", matches[1])
+	slog.Debug(fmt.Sprintf("Found %d branches starting with", len(branches)), "pattern_start", startPattern)
 
 	// Filter out branches that are not child of the parent branch or does not match the preview pattern
 	patternRegex, err := previewPatternToRegex(previewPattern)

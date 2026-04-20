@@ -149,7 +149,6 @@ func TestGetPruningDatabaseHandler_MissingNeonConfig(t *testing.T) {
 }
 
 func TestGetPruningDatabaseHandler_UsesSourceValuesWithoutAnonymization(t *testing.T) {
-	t.Setenv("PR_NUMBER", "42")
 	handler, err := GetPruningDatabaseHandler(config.Database{
 		Source: &config.DatabaseSource{
 			Provider: config.DatabaseProviderNeon,
@@ -168,7 +167,7 @@ func TestGetPruningDatabaseHandler_UsesSourceValuesWithoutAnonymization(t *testi
 	assert.Equal(t, "src-project", pruneHandler.projectId)
 	assert.Equal(t, "src-key", pruneHandler.apiKey)
 	assert.Equal(t, "main", pruneHandler.parentBranch)
-	assert.Equal(t, "preview-42", pruneHandler.branchPattern)
+	assert.Equal(t, "preview-${{ PR_NUMBER }}", pruneHandler.branchPattern)
 }
 
 func TestGetAnonymizationDatabaseHandlers_NilSourceOrAnonymization(t *testing.T) {
