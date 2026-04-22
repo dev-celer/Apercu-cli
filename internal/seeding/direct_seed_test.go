@@ -182,3 +182,140 @@ func TestShouldSeedBeApplied(t *testing.T) {
 		assert.True(t, applied)
 	})
 }
+
+func TestGetSeedFilesToApply(t *testing.T) {
+	t.Parallel()
+	dirPath := t.TempDir()
+	err := os.MkdirAll(filepath.Join(dirPath, "seed1"), 0755)
+	assert.NoError(t, err)
+	err = os.MkdirAll(filepath.Join(dirPath, "seed2"), 0755)
+	assert.NoError(t, err)
+
+	err = os.WriteFile(filepath.Join(dirPath, "seed1.sql"), []byte("SELECT 1;"), 0644)
+	assert.NoError(t, err)
+	err = os.WriteFile(filepath.Join(filepath.Join(dirPath, "seed1"), "seed2.sql"), []byte("SELECT 2;"), 0644)
+	assert.NoError(t, err)
+
+	t.Run("no seeds", func(t *testing.T) {
+		t.Parallel()
+		outputData := output.NewSeedingOutput()
+		state := config.DatabaseState{
+			AppliedSeeds: make([]config.SeedState, 0),
+		}
+
+		files, err := getSeedFilesToApply(nil, outputData, &state)
+		assert.NoError(t, err)
+		assert.Len(t, files, 0)
+		assert.Len(t, outputData.Errors, 0)
+		assert.Len(t, outputData.Warnings, 0)
+	})
+
+	t.Run("seed file path", func(t *testing.T) {
+		t.Parallel()
+		outputData := output.NewSeedingOutput()
+		state := config.DatabaseState{
+			AppliedSeeds: make([]config.SeedState, 0),
+		}
+
+		seedsPath := []config.DatabaseSeed{
+			{
+				Path: filepath.Join(dirPath, "seed1.sql"),
+			},
+		}
+		files, err := getSeedFilesToApply(seedsPath, outputData, &state)
+		assert.NoError(t, err)
+		assert.Len(t, files, 1)
+		assert.Equal(t, files[0], filepath.Join(dirPath, "seed1.sql"))
+		assert.Len(t, outputData.Errors, 0)
+		assert.Len(t, outputData.Warnings, 0)
+	})
+
+	t.Run("seed folder path", func(t *testing.T) {
+		t.Parallel()
+		outputData := output.NewSeedingOutput()
+		state := config.DatabaseState{
+			AppliedSeeds: make([]config.SeedState, 0),
+		}
+
+		seedsPath := []config.DatabaseSeed{
+			{
+				Path: filepath.Join(dirPath, "seed1"),
+			},
+		}
+		files, err := getSeedFilesToApply(seedsPath, outputData, &state)
+		assert.NoError(t, err)
+		assert.Len(t, files, 1)
+		assert.Equal(t, files[0], filepath.Join(dirPath, "seed1", "seed2.sql"))
+		assert.Len(t, outputData.Errors, 0)
+		assert.Len(t, outputData.Warnings, 0)
+	})
+
+	t.Run("seed folder and file path", func(t *testing.T) {
+		t.Parallel()
+		outputData := output.NewSeedingOutput()
+		state := config.DatabaseState{
+			AppliedSeeds: make([]config.SeedState, 0),
+		}
+
+		seedsPath := []config.DatabaseSeed{
+			{
+				Path: filepath.Join(dirPath, "seed1"),
+			},
+			{
+				Path: filepath.Join(dirPath, "seed1.sql"),
+			},
+		}
+		files, err := getSeedFilesToApply(seedsPath, outputData, &state)
+		assert.NoError(t, err)
+		assert.Len(t, files, 2)
+		assert.Equal(t, files[0], filepath.Join(dirPath, "seed1", "seed2.sql"))
+		assert.Equal(t, files[1], filepath.Join(dirPath, "seed1.sql"))
+		assert.Len(t, outputData.Errors, 0)
+		assert.Len(t, outputData.Warnings, 0)
+	})
+
+	t.Run("missing path", func(t *testing.T) {
+		t.Parallel()
+		outputData := output.NewSeedingOutput()
+		state := config.DatabaseState{
+			AppliedSeeds: make([]config.SeedState, 0),
+		}
+
+		seedsPath := []config.DatabaseSeed{
+			{
+				Path: filepath.Join(dirPath, "nonexistent"),
+			},
+			{
+				Path: filepath.Join(dirPath, "seed1.sql"),
+			},
+		}
+		files, err := getSeedFilesToApply(seedsPath, outputData, &state)
+		assert.NoError(t, err)
+		assert.Len(t, files, 1)
+		assert.Equal(t, files[0], filepath.Join(dirPath, "seed1.sql"))
+		assert.Len(t, outputData.Errors, 0)
+		assert.Len(t, outputData.Warnings, 1)
+	})
+
+	t.Run("no valid path", func(t *testing.T) {
+		t.Parallel()
+		outputData := output.NewSeedingOutput()
+		state := config.DatabaseState{
+			AppliedSeeds: make([]config.SeedState, 0),
+		}
+
+		seedsPath := []config.DatabaseSeed{
+			{
+				Path: filepath.Join(dirPath, "nonexistent"),
+			},
+			{
+				Path: filepath.Join(dirPath, "seed2.sql"),
+			},
+		}
+		files, err := getSeedFilesToApply(seedsPath, outputData, &state)
+		assert.NoError(t, err)
+		assert.Len(t, files, 0)
+		assert.Len(t, outputData.Errors, 0)
+		assert.Len(t, outputData.Warnings, 2)
+	})
+}

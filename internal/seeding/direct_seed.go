@@ -75,14 +75,7 @@ func shouldSeedBeApplied(filePath string, seedOn config.DatabaseSeedType, state 
 	return false, nil
 }
 
-func NewDirectSeed(conn helper.ConnectionFields, seedFiles []config.DatabaseSeed, state *config.DatabaseState) (*DirectSeed, error) {
-	outputData := output.NewSeedingOutput()
-	db, err := sql.Open("postgres", conn.Url)
-	if err != nil {
-		outputData.Errors = append(outputData.Errors, err.Error())
-		return nil, errors.New(fmt.Sprintf("Failed to connect to database: %v", err))
-	}
-
+func getSeedFilesToApply(seedFiles []config.DatabaseSeed, outputData *output.OutputDatabaseSeeding, state *config.DatabaseState) ([]string, error) {
 	seedFilesToApply := make([]string, 0)
 	for _, seedFile := range seedFiles {
 		slog.Debug("Searching for seed files", "path", seedFile.Path)
@@ -131,6 +124,22 @@ func NewDirectSeed(conn helper.ConnectionFields, seedFiles []config.DatabaseSeed
 			}
 			seedFilesToApply = append(seedFilesToApply, seedFile.Path)
 		}
+	}
+
+	return seedFilesToApply, nil
+}
+
+func NewDirectSeed(conn helper.ConnectionFields, seedFiles []config.DatabaseSeed, state *config.DatabaseState) (*DirectSeed, error) {
+	outputData := output.NewSeedingOutput()
+	db, err := sql.Open("postgres", conn.Url)
+	if err != nil {
+		outputData.Errors = append(outputData.Errors, err.Error())
+		return nil, errors.New(fmt.Sprintf("Failed to connect to database: %v", err))
+	}
+
+	seedFilesToApply, err := getSeedFilesToApply(seedFiles, outputData, state)
+	if err != nil {
+		return nil, err
 	}
 
 	return &DirectSeed{db: db, seedFilesPath: seedFilesToApply, state: state, output: outputData}, nil
