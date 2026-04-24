@@ -5,6 +5,7 @@ go 1.26
 require (
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/google/go-github v17.0.0+incompatible
+	github.com/jackc/pgx/v5 v5.9.2
 	github.com/kislerdm/neon-sdk-go v0.16.0
 	github.com/lib/pq v1.12.0
 	github.com/spf13/cobra v1.10.2
@@ -46,6 +47,7 @@ require (
 	go.opentelemetry.io/otel/sdk/metric v1.43.0 // indirect
 	go.opentelemetry.io/otel/trace v1.43.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
+	golang.org/x/text v0.35.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gotest.tools/v3 v3.5.2 // indirect
