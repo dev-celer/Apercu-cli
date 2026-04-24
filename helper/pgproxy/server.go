@@ -80,7 +80,7 @@ func connectionHandler(ctx context.Context, config *Config, conn net.Conn) {
 	user := startup.Parameters["user"]
 	database := startup.Parameters["database"]
 	appName := startup.Parameters["application_name"]
-	_, _ = fmt.Fprintf(os.Stderr, "Client startup: user=%q database=%q app=%q\n", user, database, appName)
+	_, _ = fmt.Fprintf(os.Stdout, "Client startup: user=%q database=%q app=%q\n", user, database, appName)
 
 	upstream, err := dialUpstream(config, startup)
 	if err != nil {
@@ -89,6 +89,6 @@ func connectionHandler(ctx context.Context, config *Config, conn net.Conn) {
 	}
 	defer upstream.Conn.Close()
 
-	_, _ = fmt.Fprintf(os.Stderr, "Upstream connected to %s:%s\n", config.DatabaseHost, config.DatabasePort)
+	_, _ = fmt.Fprintf(os.Stdout, "Upstream connected to %s:%s\n", config.DatabaseHost, config.DatabasePort)
 	_ = upstream
 }
