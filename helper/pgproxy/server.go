@@ -67,6 +67,11 @@ func getStartupMessage(conn net.Conn, backend *pgproto3.Backend) (*pgproto3.Star
 func connectionHandler(ctx context.Context, config *Config, conn net.Conn) {
 	defer conn.Close()
 
+	if err := conn.SetDeadline(time.Now().Add(15 * time.Second)); err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, fmt.Errorf("Failed to set client deadline: %v", err))
+		return
+	}
+
 	backend := pgproto3.NewBackend(conn, conn)
 	startup, err := getStartupMessage(conn, backend)
 	if err != nil {
@@ -74,6 +79,11 @@ func connectionHandler(ctx context.Context, config *Config, conn net.Conn) {
 		return
 	}
 	if startup == nil {
+		return
+	}
+
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, fmt.Errorf("Failed to clear client deadline: %v", err))
 		return
 	}
 

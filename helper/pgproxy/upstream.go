@@ -25,6 +25,11 @@ func dialUpstream(config *Config, startup *pgproto3.StartupMessage) (*Upstream, 
 		return nil, fmt.Errorf("Failed to dial upstream %s: %v", addr, err)
 	}
 
+	if err := conn.SetDeadline(time.Now().Add(15 * time.Second)); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("Failed to set upstream deadline: %v", err)
+	}
+
 	active, err := negotiateUpstreamSSL(conn, config.DatabaseHost)
 	if err != nil {
 		_ = conn.Close()
@@ -36,6 +41,11 @@ func dialUpstream(config *Config, startup *pgproto3.StartupMessage) (*Upstream, 
 	if err := frontend.Flush(); err != nil {
 		_ = active.Close()
 		return nil, fmt.Errorf("Failed to send StartupMessage upstream: %v", err)
+	}
+
+	if err := active.SetDeadline(time.Time{}); err != nil {
+		_ = active.Close()
+		return nil, fmt.Errorf("Failed to clear upstream deadline: %v", err)
 	}
 
 	return &Upstream{Conn: active, Frontend: frontend}, nil
