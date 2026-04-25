@@ -38,7 +38,7 @@ func StartServer(ctx context.Context, config Config) error {
 	}
 }
 
-func getStartupMessage(conn net.Conn, backend *pgproto3.Backend) (*pgproto3.StartupMessage, error) {
+func handleStartupMessage(conn net.Conn, config *Config, backend *pgproto3.Backend) (*pgproto3.StartupMessage, error) {
 	for {
 		msg, err := backend.ReceiveStartupMessage()
 		if err != nil {
@@ -55,7 +55,7 @@ func getStartupMessage(conn net.Conn, backend *pgproto3.Backend) (*pgproto3.Star
 				return nil, fmt.Errorf("Failed to write to client connection: %v", err)
 			}
 		case *pgproto3.CancelRequest:
-			return nil, nil
+			return nil, forwardCancelRequest(config, msg.(*pgproto3.CancelRequest))
 		case *pgproto3.StartupMessage:
 			return msg.(*pgproto3.StartupMessage), nil
 		default:
@@ -73,7 +73,7 @@ func connectionHandler(ctx context.Context, config *Config, conn net.Conn) {
 	}
 
 	backend := pgproto3.NewBackend(conn, conn)
-	startup, err := getStartupMessage(conn, backend)
+	startup, err := handleStartupMessage(conn, config, backend)
 	if err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, err)
 		return
