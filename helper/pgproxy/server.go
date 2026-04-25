@@ -100,5 +100,20 @@ func connectionHandler(ctx context.Context, config *Config, conn net.Conn) {
 	defer upstream.Conn.Close()
 
 	_, _ = fmt.Fprintf(os.Stdout, "Upstream connected to %s:%s\n", config.DatabaseHost, config.DatabasePort)
-	_ = upstream
+
+	// Cancel logic
+	done := make(chan struct{})
+	defer close(done)
+
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = conn.Close()
+			_ = upstream.Conn.Close()
+		case <-done:
+		}
+	}()
+
+	// Start to pump connections
+	pumpConnection(backend, upstream)
 }
