@@ -69,7 +69,10 @@ func reset(cmd *cobra.Command, args []string) error {
 
 	// Apply the migrations
 	ctx := cmd.Context()
-	migrationHandler := migration.GetMigrationHandler(dbConfig, conn)
+	migrationHandler, err := migration.GetMigrationHandler(dbConfig, &conn)
+	if err != nil {
+		ErrorAndExit(err, dbOutput, dbName)
+	}
 	migrationMessage, err := ApplyMigration(ctx, migrationHandler, &conn)
 	if err != nil {
 		dbOutput.Migration = migrationHandler.GetOutput()

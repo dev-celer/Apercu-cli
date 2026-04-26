@@ -1,6 +1,8 @@
 package migration
 
 import (
+	"apercu-cli/helper"
+	"apercu-cli/helper/docker"
 	"apercu-cli/output"
 	"bytes"
 	"context"
@@ -16,6 +18,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
+	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 	_ "github.com/lib/pq"
@@ -27,18 +30,18 @@ type DockerHandler struct {
 	env         map[string]string
 	workDir     string
 	localFolder string
-	databaseUrl string
+	database    *helper.ConnectionFields
 	output      *output.OutputDatabaseMigration
 }
 
-func NewDockerHandler(image string, command []string, env map[string]string, workDir string, localFolder string, databaseUrl string) *DockerHandler {
+func NewDockerHandler(image string, command []string, env map[string]string, workDir string, localFolder string, database *helper.ConnectionFields) *DockerHandler {
 	return &DockerHandler{
 		image:       image,
 		command:     command,
 		env:         env,
 		workDir:     workDir,
 		localFolder: localFolder,
-		databaseUrl: databaseUrl,
+		database:    database,
 		output:      output.NewMigrationOutput(),
 	}
 }
@@ -70,7 +73,7 @@ func (h *DockerHandler) getMigrationTableName(db *sql.DB) (string, error) {
 
 func (h *DockerHandler) getCount() (int, error) {
 	slog.Debug("Connect to database")
-	db, err := sql.Open("postgres", h.databaseUrl)
+	db, err := sql.Open("postgres", h.database.Url)
 	if err != nil {
 		return 0, errors.New(fmt.Sprintf("Failed to connect to database: %v", err))
 	}
@@ -118,6 +121,33 @@ func (h *DockerHandler) Apply(ctx context.Context) error {
 	}
 	defer func() { _ = cli.Close() }()
 
+	// Create docker network
+	networkName, err := docker.CreateNetwork(cli)
+	if err != nil {
+		return err
+	}
+
+	// Start pgproxy
+	pgproxy, err := docker.StartPgProxy(cli, networkName, h.database)
+	if err != nil {
+		return err
+	}
+
+	// Read pgproxy logs
+	pgproxyLogs, err := cli.ContainerLogs(ctx, pgproxy, container.LogsOptions{ShowStdout: true, ShowStderr: true, Follow: true})
+	if err != nil {
+		return errors.New(fmt.Sprintf("Failed to read docker container logs: %v", err))
+	}
+	defer func() { _ = pgproxyLogs.Close() }()
+
+	var pgproxyBuffer bytes.Buffer
+	go func() {
+		_, err := stdcopy.StdCopy(&pgproxyBuffer, &pgproxyBuffer, pgproxyLogs)
+		if err != nil {
+			slog.Error("Failed to read docker container logs", "error", err)
+		}
+	}()
+
 	// Pull docker image
 	slog.Debug("Pulling docker image", "image", h.image)
 	readCloser, err := cli.ImagePull(ctx, h.image, image.PullOptions{})
@@ -151,13 +181,18 @@ func (h *DockerHandler) Apply(ctx context.Context) error {
 		Binds:         []string{path + ":" + h.workDir},
 		RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyDisabled},
 	}
+	networkConfig := network.NetworkingConfig{
+		EndpointsConfig: map[string]*network.EndpointSettings{
+			networkName: {},
+		},
+	}
 
 	// Create container
 	resp, err := cli.ContainerCreate(
 		ctx,
 		&containerConfig,
 		&hostConfig,
-		nil,
+		&networkConfig,
 		nil,
 		"",
 	)
@@ -212,6 +247,19 @@ func (h *DockerHandler) Apply(ctx context.Context) error {
 	slog.Debug("Cleanup docker container")
 	if err := cli.ContainerRemove(ctx, resp.ID, container.RemoveOptions{Force: true}); err != nil {
 		slog.Error("Failed to cleanup docker container", "error", err)
+	}
+
+	// Cleanup pgproxy
+	if err := docker.CleanupContainer(cli, pgproxy); err != nil {
+		return err
+	}
+	slog.Debug("----- PgProxy logs -----")
+	slog.Debug(pgproxyBuffer.String())
+	slog.Debug("------------------------")
+
+	// Cleanup docker network
+	if err := docker.CleanupNetwork(cli, networkName); err != nil {
+		return err
 	}
 
 	// Get the new migration count

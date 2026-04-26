@@ -3,10 +3,11 @@ package migration
 import (
 	"apercu-cli/config"
 	"apercu-cli/helper"
+	"apercu-cli/helper/database_url"
 	"apercu-cli/output"
 	"context"
+	"fmt"
 	"log/slog"
-	"strconv"
 )
 
 type HandlerInterface interface {
@@ -14,19 +15,24 @@ type HandlerInterface interface {
 	GetOutput() *output.OutputDatabaseMigration
 }
 
-func GetMigrationHandler(dbConfig config.Database, connection helper.ConnectionFields) HandlerInterface {
+func GetMigrationHandler(dbConfig config.Database, connection *helper.ConnectionFields) (HandlerInterface, error) {
 	if dbConfig.Migration == nil {
 		slog.Debug("No migration specified")
-		return nil
+		return nil, nil
 	}
 
+	proxyHost, proxyPort := "apercu-pgproxy", "5432"
+	proxyUrl, err := database_url.RewriteDatabaseUrlHostAndPort(connection.Url, proxyHost, proxyPort)
+	if err != nil {
+		return nil, fmt.Errorf("could not rewrite database url: %w", err)
+	}
 	internalEnv := map[string]string{
-		"PREVIEW_DATABASE_URL": connection.Url,
+		"PREVIEW_DATABASE_URL": proxyUrl,
 		"PREVIEW_USER":         connection.User,
 		"PREVIEW_PASSWORD":     connection.Password,
-		"PREVIEW_HOST":         connection.Host,
+		"PREVIEW_HOST":         proxyHost,
 		"PREVIEW_DATABASE":     connection.Database,
-		"PREVIEW_PORT":         strconv.Itoa(connection.Port),
+		"PREVIEW_PORT":         proxyPort,
 	}
 
 	commands := make([]string, len(dbConfig.Migration.Command))
@@ -50,6 +56,6 @@ func GetMigrationHandler(dbConfig config.Database, connection helper.ConnectionF
 		env,
 		workDir,
 		config.ReplaceVariables(dbConfig.Migration.LocalDir, internalEnv),
-		connection.Url,
-	)
+		connection,
+	), nil
 }
