@@ -233,6 +233,20 @@ func (h *DockerHandler) Apply(ctx context.Context) error {
 	case status := <-statusCh:
 		if status.StatusCode != 0 {
 			h.output.Logs = new(buffer.String())
+
+			// Cleanup pgproxy
+			if err := docker.CleanupContainer(cli, pgproxy); err != nil {
+				return err
+			}
+			slog.Debug("----- PgProxy logs -----")
+			slog.Debug(pgproxyBuffer.String())
+			slog.Debug("------------------------")
+
+			// Cleanup docker network
+			if err := docker.CleanupNetwork(cli, networkName); err != nil {
+				return err
+			}
+
 			return errors.New(fmt.Sprintf("Docker container exited with status code: %d", status.StatusCode))
 		}
 	}
