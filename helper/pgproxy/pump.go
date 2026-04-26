@@ -94,6 +94,10 @@ func pumpUpstreamToClient(backend *pgproto3.Backend, upstream *Upstream, state *
 			return fmt.Errorf("receive from upstream: %v", err)
 		}
 
+		if err := syncAuthType(backend, msg); err != nil {
+			return fmt.Errorf("sync auth type: %v", err)
+		}
+
 		observeUpstream(msg, state)
 
 		backend.Send(msg)
@@ -101,6 +105,28 @@ func pumpUpstreamToClient(backend *pgproto3.Backend, upstream *Upstream, state *
 			return fmt.Errorf("send to client: %v", err)
 		}
 	}
+}
+
+func syncAuthType(backend *pgproto3.Backend, msg pgproto3.BackendMessage) error {
+	switch msg.(type) {
+	case *pgproto3.AuthenticationOk:
+		return backend.SetAuthType(pgproto3.AuthTypeOk)
+	case *pgproto3.AuthenticationCleartextPassword:
+		return backend.SetAuthType(pgproto3.AuthTypeCleartextPassword)
+	case *pgproto3.AuthenticationMD5Password:
+		return backend.SetAuthType(pgproto3.AuthTypeMD5Password)
+	case *pgproto3.AuthenticationGSS:
+		return backend.SetAuthType(pgproto3.AuthTypeGSS)
+	case *pgproto3.AuthenticationGSSContinue:
+		return backend.SetAuthType(pgproto3.AuthTypeGSSCont)
+	case *pgproto3.AuthenticationSASL:
+		return backend.SetAuthType(pgproto3.AuthTypeSASL)
+	case *pgproto3.AuthenticationSASLContinue:
+		return backend.SetAuthType(pgproto3.AuthTypeSASLContinue)
+	case *pgproto3.AuthenticationSASLFinal:
+		return backend.SetAuthType(pgproto3.AuthTypeSASLFinal)
+	}
+	return nil
 }
 
 func observeClient(msg pgproto3.FrontendMessage, state *connState) {
