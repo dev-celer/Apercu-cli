@@ -110,7 +110,7 @@ func (h *NeonHandler) GetConnectionFields() (helper.ConnectionFields, error) {
 }
 
 func extractConnectionFieldsFromUrl(databaseUrl string) (helper.ConnectionFields, error) {
-	reg := regexp.MustCompile(`postgresql:\/\/(.+?):(.+?)@(.+?)[\/:](\d*)\/?(.+?)\?`)
+	reg := regexp.MustCompile(`postgresql:\/\/(.+?):(.+?)@(.+?)[\/:](\d*)\/?(.+?)?(?:\?|$)`)
 	matches := reg.FindStringSubmatch(databaseUrl)
 
 	portStr := matches[4]
