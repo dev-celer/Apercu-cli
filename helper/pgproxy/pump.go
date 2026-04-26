@@ -11,15 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgproto3"
 )
 
-type QueryEvent struct {
-	SQL          string
-	StartedAt    time.Time
-	Duration     time.Duration
-	CommandTag   string
-	RowsAffected int64
-	Error        string
-}
-
 type connState struct {
 	mu            sync.Mutex
 	preparedStmts map[string]string
@@ -183,7 +174,7 @@ func observeUpstream(msg pgproto3.BackendMessage, state *connState) {
 		}
 
 		state.ResetPending()
-		emitEvent(ev)
+		handleEvent(ev)
 	}
 }
 
@@ -200,17 +191,4 @@ func parseRowsAffected(tag string) int64 {
 		return -1
 	}
 	return n
-}
-
-func emitEvent(ev QueryEvent) {
-	snippet := strings.ReplaceAll(ev.SQL, "\n", " ")
-	if len(snippet) > 120 {
-		snippet = snippet[:117] + "..."
-	}
-	ms := float64(ev.Duration.Microseconds()) / 1000
-	if ev.Error != "" {
-		_, _ = fmt.Fprintf(os.Stdout, "[%.2fms] ERROR %s | %q\n", ms, ev.Error, snippet)
-		return
-	}
-	_, _ = fmt.Fprintf(os.Stdout, "[%.2fms] %s | rows=%d | %q\n", ms, ev.CommandTag, ev.RowsAffected, snippet)
 }
