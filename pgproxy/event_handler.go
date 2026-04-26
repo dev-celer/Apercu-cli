@@ -1,41 +1,13 @@
 package main
 
 import (
+	"apercu-cli/helper/pgproxy"
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 )
 
-type QueryEvent struct {
-	SQL          string          `json:"sql"`
-	StartedAt    time.Time       `json:"started_at"`
-	Duration     time.Duration   `json:"duration"`
-	CommandTag   string          `json:"command_tag"`
-	RowsAffected int64           `json:"rows_affected"`
-	Error        string          `json:"error,omitempty"`
-	Stats        QueryEventStats `json:"stats,omitempty"`
-}
-
-type QueryEventStats struct {
-	Lock  *QueryLock `json:"lock,omitempty"`
-	Table string     `json:"table,omitempty"`
-}
-
-type QueryLock string
-
-const (
-	QueryLockAccessExclusive      QueryLock = "ACCESS_EXCLUSIVE"
-	QueryLockExclusive            QueryLock = "EXCLUSIVE"
-	QueryLockShareRowExclusive    QueryLock = "SHARE_ROW_EXCLUSIVE"
-	QueryLockShare                QueryLock = "SHARE"
-	QueryLockShareUpdateExclusive QueryLock = "SHARE_UPDATE_EXCLUSIVE"
-	QueryLockRowExclusive         QueryLock = "ROW_EXCLUSIVE"
-	QueryLockRowShare             QueryLock = "ROW_SHARE"
-	QueryLockAccessShare          QueryLock = "ACCESS_SHARE"
-)
-
-func handleEvent(ev QueryEvent) {
+func handleEvent(ev pgproxy.QueryEvent) {
 	ev.SQL = strings.ReplaceAll(ev.SQL, "\n", " ")
 	ev.SQL = stripLeadingComments(ev.SQL)
 	ev.SQL = collapseSpaces(ev.SQL)
@@ -43,7 +15,7 @@ func handleEvent(ev QueryEvent) {
 	lock := getLockType(&ev)
 	table := getAffectedTable(&ev)
 
-	ev.Stats = QueryEventStats{
+	ev.Stats = pgproxy.QueryEventStats{
 		Lock:  lock,
 		Table: table,
 	}
@@ -110,7 +82,7 @@ func collapseSpaces(sql string) string {
 	return b.String()
 }
 
-func getLockType(ev *QueryEvent) *QueryLock {
+func getLockType(ev *pgproxy.QueryEvent) *pgproxy.QueryLock {
 	upper := strings.ToUpper(ev.SQL)
 	if upper == "" {
 		return nil
@@ -122,58 +94,58 @@ func getLockType(ev *QueryEvent) *QueryLock {
 	switch {
 	case hasPrefix("SELECT"), hasPrefix("WITH"), hasPrefix("VALUES"), hasPrefix("TABLE "):
 		if contains(" FOR UPDATE") || contains(" FOR NO KEY UPDATE") || contains(" FOR SHARE") || contains(" FOR KEY SHARE") {
-			return new(QueryLockRowShare)
+			return new(pgproxy.QueryLockRowShare)
 		}
-		return new(QueryLockAccessShare)
+		return new(pgproxy.QueryLockAccessShare)
 
 	case hasPrefix("INSERT"), hasPrefix("UPDATE"), hasPrefix("DELETE"), hasPrefix("MERGE"):
-		return new(QueryLockRowExclusive)
+		return new(pgproxy.QueryLockRowExclusive)
 
 	case hasPrefix("COPY"):
 		// COPY ... TO reads (ACCESS SHARE), COPY ... FROM writes (ROW EXCLUSIVE).
 		if contains(" TO ") && !contains(" FROM ") {
-			return new(QueryLockAccessShare)
+			return new(pgproxy.QueryLockAccessShare)
 		}
-		return new(QueryLockRowExclusive)
+		return new(pgproxy.QueryLockRowExclusive)
 
 	case hasPrefix("TRUNCATE"), hasPrefix("CLUSTER"):
-		return new(QueryLockAccessExclusive)
+		return new(pgproxy.QueryLockAccessExclusive)
 
 	case hasPrefix("VACUUM"):
 		if contains(" FULL") {
-			return new(QueryLockAccessExclusive)
+			return new(pgproxy.QueryLockAccessExclusive)
 		}
-		return new(QueryLockShareUpdateExclusive)
+		return new(pgproxy.QueryLockShareUpdateExclusive)
 
 	case hasPrefix("ANALYZE"), hasPrefix("CREATE STATISTICS"), hasPrefix("COMMENT ON"):
-		return new(QueryLockShareUpdateExclusive)
+		return new(pgproxy.QueryLockShareUpdateExclusive)
 
 	case hasPrefix("REINDEX"):
 		if contains(" CONCURRENTLY") {
-			return new(QueryLockShareUpdateExclusive)
+			return new(pgproxy.QueryLockShareUpdateExclusive)
 		}
-		return new(QueryLockAccessExclusive)
+		return new(pgproxy.QueryLockAccessExclusive)
 
 	case hasPrefix("REFRESH MATERIALIZED VIEW"):
 		if contains(" CONCURRENTLY") {
-			return new(QueryLockExclusive)
+			return new(pgproxy.QueryLockExclusive)
 		}
-		return new(QueryLockAccessExclusive)
+		return new(pgproxy.QueryLockAccessExclusive)
 
 	case hasPrefix("CREATE INDEX"), hasPrefix("CREATE UNIQUE INDEX"):
 		if contains(" CONCURRENTLY") {
-			return new(QueryLockShareUpdateExclusive)
+			return new(pgproxy.QueryLockShareUpdateExclusive)
 		}
-		return new(QueryLockShare)
+		return new(pgproxy.QueryLockShare)
 
 	case hasPrefix("CREATE TRIGGER"):
-		return new(QueryLockShareRowExclusive)
+		return new(pgproxy.QueryLockShareRowExclusive)
 
 	case hasPrefix("DROP INDEX"):
 		if contains(" CONCURRENTLY") {
-			return new(QueryLockShareUpdateExclusive)
+			return new(pgproxy.QueryLockShareUpdateExclusive)
 		}
-		return new(QueryLockAccessExclusive)
+		return new(pgproxy.QueryLockAccessExclusive)
 
 	case hasPrefix("DROP TABLE"),
 		hasPrefix("DROP MATERIALIZED VIEW"),
@@ -184,7 +156,7 @@ func getLockType(ev *QueryEvent) *QueryLock {
 		hasPrefix("DROP FUNCTION"),
 		hasPrefix("DROP DOMAIN"),
 		hasPrefix("DROP SCHEMA"):
-		return new(QueryLockAccessExclusive)
+		return new(pgproxy.QueryLockAccessExclusive)
 
 	case hasPrefix("LOCK"):
 		return lockTableMode(upper)
@@ -195,15 +167,15 @@ func getLockType(ev *QueryEvent) *QueryLock {
 	case hasPrefix("ALTER INDEX"):
 		// RENAME and SET STATISTICS take SHARE UPDATE EXCLUSIVE; everything else is ACCESS EXCLUSIVE.
 		if contains(" RENAME ") || contains(" SET STATISTICS") {
-			return new(QueryLockShareUpdateExclusive)
+			return new(pgproxy.QueryLockShareUpdateExclusive)
 		}
-		return new(QueryLockAccessExclusive)
+		return new(pgproxy.QueryLockAccessExclusive)
 	}
 
 	return nil
 }
 
-func alterTableLock(upper string) *QueryLock {
+func alterTableLock(upper string) *pgproxy.QueryLock {
 	contains := func(s string) bool { return strings.Contains(upper, s) }
 
 	switch {
@@ -212,40 +184,40 @@ func alterTableLock(upper string) *QueryLock {
 		contains(" CLUSTER ON"),
 		contains(" SET WITHOUT CLUSTER"),
 		contains(" ATTACH PARTITION"):
-		return new(QueryLockShareUpdateExclusive)
+		return new(pgproxy.QueryLockShareUpdateExclusive)
 	case contains(" DETACH PARTITION") && contains(" CONCURRENTLY"):
-		return new(QueryLockShareUpdateExclusive)
+		return new(pgproxy.QueryLockShareUpdateExclusive)
 	case contains(" ENABLE TRIGGER"),
 		contains(" DISABLE TRIGGER"),
 		contains(" ENABLE REPLICA TRIGGER"),
 		contains(" ENABLE ALWAYS TRIGGER"):
-		return new(QueryLockShareRowExclusive)
+		return new(pgproxy.QueryLockShareRowExclusive)
 	}
-	return new(QueryLockAccessExclusive)
+	return new(pgproxy.QueryLockAccessExclusive)
 }
 
-func lockTableMode(upper string) *QueryLock {
+func lockTableMode(upper string) *pgproxy.QueryLock {
 	// Order matters: longer / more specific modes first.
 	switch {
 	case strings.Contains(upper, "ACCESS EXCLUSIVE"):
-		return new(QueryLockAccessExclusive)
+		return new(pgproxy.QueryLockAccessExclusive)
 	case strings.Contains(upper, "ACCESS SHARE"):
-		return new(QueryLockAccessShare)
+		return new(pgproxy.QueryLockAccessShare)
 	case strings.Contains(upper, "SHARE UPDATE EXCLUSIVE"):
-		return new(QueryLockShareUpdateExclusive)
+		return new(pgproxy.QueryLockShareUpdateExclusive)
 	case strings.Contains(upper, "SHARE ROW EXCLUSIVE"):
-		return new(QueryLockShareRowExclusive)
+		return new(pgproxy.QueryLockShareRowExclusive)
 	case strings.Contains(upper, "ROW EXCLUSIVE"):
-		return new(QueryLockRowExclusive)
+		return new(pgproxy.QueryLockRowExclusive)
 	case strings.Contains(upper, "ROW SHARE"):
-		return new(QueryLockRowShare)
+		return new(pgproxy.QueryLockRowShare)
 	case strings.Contains(upper, "EXCLUSIVE"):
-		return new(QueryLockExclusive)
+		return new(pgproxy.QueryLockExclusive)
 	case strings.Contains(upper, "SHARE"):
-		return new(QueryLockShare)
+		return new(pgproxy.QueryLockShare)
 	}
 	// `LOCK TABLE foo` with no mode defaults to ACCESS EXCLUSIVE.
-	return new(QueryLockAccessExclusive)
+	return new(pgproxy.QueryLockAccessExclusive)
 }
 
 func stripLeadingComments(sql string) string {
@@ -270,7 +242,7 @@ func stripLeadingComments(sql string) string {
 	}
 }
 
-func getAffectedTable(ev *QueryEvent) string {
+func getAffectedTable(ev *pgproxy.QueryEvent) string {
 	upper := strings.ToUpper(ev.SQL)
 
 	prefixes := []string{

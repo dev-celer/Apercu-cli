@@ -1,6 +1,7 @@
 package main
 
 import (
+	"apercu-cli/helper/pgproxy"
 	"fmt"
 	"os"
 	"strconv"
@@ -164,7 +165,7 @@ func observeUpstream(msg pgproto3.BackendMessage, state *connState) {
 		if state.pendingStart.IsZero() {
 			return
 		}
-		ev := QueryEvent{
+		ev := pgproxy.QueryEvent{
 			SQL:          state.pendingSQL,
 			StartedAt:    state.pendingStart,
 			Duration:     time.Since(state.pendingStart),

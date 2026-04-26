@@ -1,11 +1,10 @@
 package main
 
 import (
+	"apercu-cli/helper/pgproxy"
 	"reflect"
 	"testing"
 )
-
-func ptrLock(l QueryLock) *QueryLock { return &l }
 
 func TestStripLeadingComments(t *testing.T) {
 	tests := []struct {
@@ -152,7 +151,7 @@ func TestGetAffectedTable(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			ev := &QueryEvent{SQL: tc.sql}
+			ev := &pgproxy.QueryEvent{SQL: tc.sql}
 			if got := getAffectedTable(ev); got != tc.want {
 				t.Errorf("getAffectedTable(%q) = %q, want %q", tc.sql, got, tc.want)
 			}
@@ -164,7 +163,7 @@ func TestGetLockType(t *testing.T) {
 	tests := []struct {
 		name string
 		sql  string
-		want *QueryLock
+		want *pgproxy.QueryLock
 	}{
 		{"empty returns nil", "", nil},
 		{"begin returns nil", "BEGIN", nil},
@@ -172,78 +171,78 @@ func TestGetLockType(t *testing.T) {
 		{"set returns nil", "SET search_path = public", nil},
 		{"explain returns nil", "EXPLAIN SELECT 1", nil},
 
-		{"select", "SELECT * FROM users", ptrLock(QueryLockAccessShare)},
-		{"select for update", "SELECT * FROM users FOR UPDATE", ptrLock(QueryLockRowShare)},
-		{"select for share", "SELECT * FROM users FOR SHARE", ptrLock(QueryLockRowShare)},
-		{"select for no key update", "SELECT * FROM users FOR NO KEY UPDATE", ptrLock(QueryLockRowShare)},
-		{"select for key share", "SELECT * FROM users FOR KEY SHARE", ptrLock(QueryLockRowShare)},
-		{"with cte select", "WITH x AS (SELECT 1) SELECT * FROM x", ptrLock(QueryLockAccessShare)},
-		{"values", "VALUES (1), (2)", ptrLock(QueryLockAccessShare)},
-		{"table form", "TABLE users", ptrLock(QueryLockAccessShare)},
-		{"lowercase select", "select * from users", ptrLock(QueryLockAccessShare)},
+		{"select", "SELECT * FROM users", new(pgproxy.QueryLockAccessShare)},
+		{"select for update", "SELECT * FROM users FOR UPDATE", new(pgproxy.QueryLockRowShare)},
+		{"select for share", "SELECT * FROM users FOR SHARE", new(pgproxy.QueryLockRowShare)},
+		{"select for no key update", "SELECT * FROM users FOR NO KEY UPDATE", new(pgproxy.QueryLockRowShare)},
+		{"select for key share", "SELECT * FROM users FOR KEY SHARE", new(pgproxy.QueryLockRowShare)},
+		{"with cte select", "WITH x AS (SELECT 1) SELECT * FROM x", new(pgproxy.QueryLockAccessShare)},
+		{"values", "VALUES (1), (2)", new(pgproxy.QueryLockAccessShare)},
+		{"table form", "TABLE users", new(pgproxy.QueryLockAccessShare)},
+		{"lowercase select", "select * from users", new(pgproxy.QueryLockAccessShare)},
 
-		{"insert", "INSERT INTO users (id) VALUES (1)", ptrLock(QueryLockRowExclusive)},
-		{"update", "UPDATE users SET x = 1", ptrLock(QueryLockRowExclusive)},
-		{"delete", "DELETE FROM users", ptrLock(QueryLockRowExclusive)},
-		{"merge", "MERGE INTO users USING src ON ...", ptrLock(QueryLockRowExclusive)},
-		{"copy from", "COPY users FROM stdin", ptrLock(QueryLockRowExclusive)},
-		{"copy to", "COPY users TO stdout", ptrLock(QueryLockAccessShare)},
+		{"insert", "INSERT INTO users (id) VALUES (1)", new(pgproxy.QueryLockRowExclusive)},
+		{"update", "UPDATE users SET x = 1", new(pgproxy.QueryLockRowExclusive)},
+		{"delete", "DELETE FROM users", new(pgproxy.QueryLockRowExclusive)},
+		{"merge", "MERGE INTO users USING src ON ...", new(pgproxy.QueryLockRowExclusive)},
+		{"copy from", "COPY users FROM stdin", new(pgproxy.QueryLockRowExclusive)},
+		{"copy to", "COPY users TO stdout", new(pgproxy.QueryLockAccessShare)},
 
-		{"truncate", "TRUNCATE users", ptrLock(QueryLockAccessExclusive)},
-		{"cluster", "CLUSTER users", ptrLock(QueryLockAccessExclusive)},
-		{"vacuum non-full", "VACUUM users", ptrLock(QueryLockShareUpdateExclusive)},
-		{"vacuum full", "VACUUM FULL users", ptrLock(QueryLockAccessExclusive)},
-		{"analyze", "ANALYZE users", ptrLock(QueryLockShareUpdateExclusive)},
-		{"create statistics", "CREATE STATISTICS s ON x FROM users", ptrLock(QueryLockShareUpdateExclusive)},
-		{"comment on", "COMMENT ON TABLE users IS 'x'", ptrLock(QueryLockShareUpdateExclusive)},
+		{"truncate", "TRUNCATE users", new(pgproxy.QueryLockAccessExclusive)},
+		{"cluster", "CLUSTER users", new(pgproxy.QueryLockAccessExclusive)},
+		{"vacuum non-full", "VACUUM users", new(pgproxy.QueryLockShareUpdateExclusive)},
+		{"vacuum full", "VACUUM FULL users", new(pgproxy.QueryLockAccessExclusive)},
+		{"analyze", "ANALYZE users", new(pgproxy.QueryLockShareUpdateExclusive)},
+		{"create statistics", "CREATE STATISTICS s ON x FROM users", new(pgproxy.QueryLockShareUpdateExclusive)},
+		{"comment on", "COMMENT ON TABLE users IS 'x'", new(pgproxy.QueryLockShareUpdateExclusive)},
 
-		{"reindex", "REINDEX TABLE users", ptrLock(QueryLockAccessExclusive)},
-		{"reindex concurrently", "REINDEX TABLE CONCURRENTLY users", ptrLock(QueryLockShareUpdateExclusive)},
-		{"refresh mv", "REFRESH MATERIALIZED VIEW v", ptrLock(QueryLockAccessExclusive)},
-		{"refresh mv concurrently", "REFRESH MATERIALIZED VIEW CONCURRENTLY v", ptrLock(QueryLockExclusive)},
+		{"reindex", "REINDEX TABLE users", new(pgproxy.QueryLockAccessExclusive)},
+		{"reindex concurrently", "REINDEX TABLE CONCURRENTLY users", new(pgproxy.QueryLockShareUpdateExclusive)},
+		{"refresh mv", "REFRESH MATERIALIZED VIEW v", new(pgproxy.QueryLockAccessExclusive)},
+		{"refresh mv concurrently", "REFRESH MATERIALIZED VIEW CONCURRENTLY v", new(pgproxy.QueryLockExclusive)},
 
-		{"create index", "CREATE INDEX i ON users (id)", ptrLock(QueryLockShare)},
-		{"create unique index", "CREATE UNIQUE INDEX i ON users (id)", ptrLock(QueryLockShare)},
-		{"create index concurrently", "CREATE INDEX CONCURRENTLY i ON users (id)", ptrLock(QueryLockShareUpdateExclusive)},
-		{"create trigger", "CREATE TRIGGER t BEFORE UPDATE ON users EXECUTE FUNCTION f()", ptrLock(QueryLockShareRowExclusive)},
+		{"create index", "CREATE INDEX i ON users (id)", new(pgproxy.QueryLockShare)},
+		{"create unique index", "CREATE UNIQUE INDEX i ON users (id)", new(pgproxy.QueryLockShare)},
+		{"create index concurrently", "CREATE INDEX CONCURRENTLY i ON users (id)", new(pgproxy.QueryLockShareUpdateExclusive)},
+		{"create trigger", "CREATE TRIGGER t BEFORE UPDATE ON users EXECUTE FUNCTION f()", new(pgproxy.QueryLockShareRowExclusive)},
 
-		{"drop index", "DROP INDEX i", ptrLock(QueryLockAccessExclusive)},
-		{"drop index concurrently", "DROP INDEX CONCURRENTLY i", ptrLock(QueryLockShareUpdateExclusive)},
-		{"drop table", "DROP TABLE users", ptrLock(QueryLockAccessExclusive)},
-		{"drop view", "DROP VIEW v", ptrLock(QueryLockAccessExclusive)},
-		{"drop materialized view", "DROP MATERIALIZED VIEW v", ptrLock(QueryLockAccessExclusive)},
-		{"drop sequence", "DROP SEQUENCE s", ptrLock(QueryLockAccessExclusive)},
-		{"drop schema", "DROP SCHEMA s", ptrLock(QueryLockAccessExclusive)},
+		{"drop index", "DROP INDEX i", new(pgproxy.QueryLockAccessExclusive)},
+		{"drop index concurrently", "DROP INDEX CONCURRENTLY i", new(pgproxy.QueryLockShareUpdateExclusive)},
+		{"drop table", "DROP TABLE users", new(pgproxy.QueryLockAccessExclusive)},
+		{"drop view", "DROP VIEW v", new(pgproxy.QueryLockAccessExclusive)},
+		{"drop materialized view", "DROP MATERIALIZED VIEW v", new(pgproxy.QueryLockAccessExclusive)},
+		{"drop sequence", "DROP SEQUENCE s", new(pgproxy.QueryLockAccessExclusive)},
+		{"drop schema", "DROP SCHEMA s", new(pgproxy.QueryLockAccessExclusive)},
 
-		{"lock default", "LOCK TABLE users", ptrLock(QueryLockAccessExclusive)},
-		{"lock access exclusive", "LOCK TABLE users IN ACCESS EXCLUSIVE MODE", ptrLock(QueryLockAccessExclusive)},
-		{"lock access share", "LOCK TABLE users IN ACCESS SHARE MODE", ptrLock(QueryLockAccessShare)},
-		{"lock row share", "LOCK TABLE users IN ROW SHARE MODE", ptrLock(QueryLockRowShare)},
-		{"lock row exclusive", "LOCK TABLE users IN ROW EXCLUSIVE MODE", ptrLock(QueryLockRowExclusive)},
-		{"lock share update exclusive", "LOCK TABLE users IN SHARE UPDATE EXCLUSIVE MODE", ptrLock(QueryLockShareUpdateExclusive)},
-		{"lock share row exclusive", "LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE", ptrLock(QueryLockShareRowExclusive)},
-		{"lock share", "LOCK TABLE users IN SHARE MODE", ptrLock(QueryLockShare)},
-		{"lock exclusive", "LOCK TABLE users IN EXCLUSIVE MODE", ptrLock(QueryLockExclusive)},
+		{"lock default", "LOCK TABLE users", new(pgproxy.QueryLockAccessExclusive)},
+		{"lock access exclusive", "LOCK TABLE users IN ACCESS EXCLUSIVE MODE", new(pgproxy.QueryLockAccessExclusive)},
+		{"lock access share", "LOCK TABLE users IN ACCESS SHARE MODE", new(pgproxy.QueryLockAccessShare)},
+		{"lock row share", "LOCK TABLE users IN ROW SHARE MODE", new(pgproxy.QueryLockRowShare)},
+		{"lock row exclusive", "LOCK TABLE users IN ROW EXCLUSIVE MODE", new(pgproxy.QueryLockRowExclusive)},
+		{"lock share update exclusive", "LOCK TABLE users IN SHARE UPDATE EXCLUSIVE MODE", new(pgproxy.QueryLockShareUpdateExclusive)},
+		{"lock share row exclusive", "LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE", new(pgproxy.QueryLockShareRowExclusive)},
+		{"lock share", "LOCK TABLE users IN SHARE MODE", new(pgproxy.QueryLockShare)},
+		{"lock exclusive", "LOCK TABLE users IN EXCLUSIVE MODE", new(pgproxy.QueryLockExclusive)},
 
-		{"alter table default", "ALTER TABLE users ADD COLUMN x int", ptrLock(QueryLockAccessExclusive)},
-		{"alter table validate constraint", "ALTER TABLE users VALIDATE CONSTRAINT c", ptrLock(QueryLockShareUpdateExclusive)},
-		{"alter table set statistics", "ALTER TABLE users ALTER COLUMN x SET STATISTICS 100", ptrLock(QueryLockShareUpdateExclusive)},
-		{"alter table cluster on", "ALTER TABLE users CLUSTER ON i", ptrLock(QueryLockShareUpdateExclusive)},
-		{"alter table set without cluster", "ALTER TABLE users SET WITHOUT CLUSTER", ptrLock(QueryLockShareUpdateExclusive)},
-		{"alter table attach partition", "ALTER TABLE users ATTACH PARTITION p FOR VALUES IN (1)", ptrLock(QueryLockShareUpdateExclusive)},
-		{"alter table detach partition", "ALTER TABLE users DETACH PARTITION p", ptrLock(QueryLockAccessExclusive)},
-		{"alter table detach partition concurrently", "ALTER TABLE users DETACH PARTITION p CONCURRENTLY", ptrLock(QueryLockShareUpdateExclusive)},
-		{"alter table enable trigger", "ALTER TABLE users ENABLE TRIGGER t", ptrLock(QueryLockShareRowExclusive)},
-		{"alter table disable trigger", "ALTER TABLE users DISABLE TRIGGER t", ptrLock(QueryLockShareRowExclusive)},
+		{"alter table default", "ALTER TABLE users ADD COLUMN x int", new(pgproxy.QueryLockAccessExclusive)},
+		{"alter table validate constraint", "ALTER TABLE users VALIDATE CONSTRAINT c", new(pgproxy.QueryLockShareUpdateExclusive)},
+		{"alter table set statistics", "ALTER TABLE users ALTER COLUMN x SET STATISTICS 100", new(pgproxy.QueryLockShareUpdateExclusive)},
+		{"alter table cluster on", "ALTER TABLE users CLUSTER ON i", new(pgproxy.QueryLockShareUpdateExclusive)},
+		{"alter table set without cluster", "ALTER TABLE users SET WITHOUT CLUSTER", new(pgproxy.QueryLockShareUpdateExclusive)},
+		{"alter table attach partition", "ALTER TABLE users ATTACH PARTITION p FOR VALUES IN (1)", new(pgproxy.QueryLockShareUpdateExclusive)},
+		{"alter table detach partition", "ALTER TABLE users DETACH PARTITION p", new(pgproxy.QueryLockAccessExclusive)},
+		{"alter table detach partition concurrently", "ALTER TABLE users DETACH PARTITION p CONCURRENTLY", new(pgproxy.QueryLockShareUpdateExclusive)},
+		{"alter table enable trigger", "ALTER TABLE users ENABLE TRIGGER t", new(pgproxy.QueryLockShareRowExclusive)},
+		{"alter table disable trigger", "ALTER TABLE users DISABLE TRIGGER t", new(pgproxy.QueryLockShareRowExclusive)},
 
-		{"alter index rename", "ALTER INDEX i RENAME TO j", ptrLock(QueryLockShareUpdateExclusive)},
-		{"alter index set statistics", "ALTER INDEX i ALTER COLUMN x SET STATISTICS 100", ptrLock(QueryLockShareUpdateExclusive)},
-		{"alter index set tablespace", "ALTER INDEX i SET TABLESPACE foo", ptrLock(QueryLockAccessExclusive)},
+		{"alter index rename", "ALTER INDEX i RENAME TO j", new(pgproxy.QueryLockShareUpdateExclusive)},
+		{"alter index set statistics", "ALTER INDEX i ALTER COLUMN x SET STATISTICS 100", new(pgproxy.QueryLockShareUpdateExclusive)},
+		{"alter index set tablespace", "ALTER INDEX i SET TABLESPACE foo", new(pgproxy.QueryLockAccessExclusive)},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			ev := &QueryEvent{SQL: tc.sql}
+			ev := &pgproxy.QueryEvent{SQL: tc.sql}
 			got := getLockType(ev)
 			if !reflect.DeepEqual(got, tc.want) {
 				gotStr, wantStr := "<nil>", "<nil>"
