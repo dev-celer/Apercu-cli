@@ -1,9 +1,11 @@
 package output
 
 import (
+	"apercu-cli/helper/pgproxy"
 	"bytes"
 	"fmt"
 	"text/template"
+	"time"
 )
 
 type PreviewOutput struct {
@@ -25,27 +27,76 @@ func NewPreviewOutputDatabase() *PreviewOutputDatabase {
 }
 
 type OutputDatabaseMigration struct {
-	Logs       *string                       `yaml:"logs,omitempty" json:"logs,omitempty"`
-	Count      int                           `yaml:"count" json:"count"`
-	Duration   string                        `yaml:"duration" json:"duration"`
-	SchemaDiff *string                       `yaml:"schema_diff,omitempty" json:"schema_diff,omitempty"`
-	Stats      *OutputDatabaseMigrationStats `yaml:"stats,omitempty" json:"stats,omitempty"`
-	Warnings   []string                      `yaml:"warnings,omitempty" json:"warnings,omitempty"`
-	Errors     []string                      `yaml:"errors,omitempty" json:"errors,omitempty"`
+	Logs        *string                       `yaml:"logs,omitempty" json:"logs,omitempty"`
+	Count       int                           `yaml:"count" json:"count"`
+	Duration    string                        `yaml:"duration" json:"duration"`
+	SchemaDiff  *string                       `yaml:"schema_diff,omitempty" json:"schema_diff,omitempty"`
+	Stats       *OutputDatabaseMigrationStats `yaml:"stats,omitempty" json:"stats,omitempty"`
+	PgProxyLogs []pgproxy.QueryEvent          `yaml:"pg_proxy_logs,omitempty" json:"pg_proxy_logs,omitempty"`
+	Warnings    []string                      `yaml:"warnings,omitempty" json:"warnings,omitempty"`
+	Errors      []string                      `yaml:"errors,omitempty" json:"errors,omitempty"`
 }
 
 type OutputDatabaseMigrationStats struct {
-	InitialSize int64 `yaml:"initial_size" json:"initial_size"`
-	FinalSize   int64 `yaml:"final_size" json:"final_size"`
-	SizeDelta   int64 `yaml:"size_delta" json:"size_delta"`
+	InitialSize int64                                                             `yaml:"initial_size" json:"initial_size"`
+	FinalSize   int64                                                             `yaml:"final_size" json:"final_size"`
+	SizeDelta   int64                                                             `yaml:"size_delta" json:"size_delta"`
+	LockStats   map[pgproxy.QueryLock]map[string]OutputDatabaseMigrationLockStats `yaml:"lock_stats,omitempty" json:"lock_stats,omitempty"`
 }
 
-func NewOutputDatabaseMigrationStats(initialSize int64, finalSize int64) *OutputDatabaseMigrationStats {
+func NewOutputDatabaseMigrationStats(initialSize int64, finalSize int64, lockStats map[pgproxy.QueryLock]map[string]OutputDatabaseMigrationLockStats) *OutputDatabaseMigrationStats {
 	return &OutputDatabaseMigrationStats{
 		InitialSize: initialSize,
 		FinalSize:   finalSize,
 		SizeDelta:   finalSize - initialSize,
+		LockStats:   lockStats,
 	}
+}
+
+func GetTableLockStats(queries []pgproxy.QueryEvent) map[pgproxy.QueryLock]map[string]OutputDatabaseMigrationLockStats {
+	lockStats := make(map[pgproxy.QueryLock]map[string]OutputDatabaseMigrationLockStats)
+
+	for _, query := range queries {
+		if query.Stats.Lock == nil || query.Stats.Table == "" {
+			continue
+		}
+
+		// Get lock map
+		l, ok := lockStats[*query.Stats.Lock]
+		if !ok {
+			l = make(map[string]OutputDatabaseMigrationLockStats)
+		}
+
+		// Get table map
+		t, ok := l[query.Stats.Table]
+		if !ok {
+			t = OutputDatabaseMigrationLockStats{
+				LockCount:     1,
+				TotalDuration: query.Duration,
+				MeanDuration:  query.Duration,
+				MaxDuration:   query.Duration,
+			}
+		} else {
+			t.LockCount++
+			t.TotalDuration += query.Duration
+			t.MeanDuration = t.TotalDuration / time.Duration(t.LockCount)
+			if t.MaxDuration < query.Duration {
+				t.MaxDuration = query.Duration
+			}
+		}
+
+		l[query.Stats.Table] = t
+		lockStats[*query.Stats.Lock] = l
+	}
+
+	return lockStats
+}
+
+type OutputDatabaseMigrationLockStats struct {
+	LockCount     int64         `yaml:"lock_count" json:"lock_count"`
+	TotalDuration time.Duration `yaml:"total_duration" json:"total_duration"`
+	MeanDuration  time.Duration `yaml:"mean_duration" json:"mean_duration"`
+	MaxDuration   time.Duration `yaml:"max_duration" json:"max_duration"`
 }
 
 func NewMigrationOutput() *OutputDatabaseMigration {

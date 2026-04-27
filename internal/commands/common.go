@@ -99,7 +99,11 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 		if err != nil {
 			return "", err
 		}
-		migrationOutput.Stats = output.NewOutputDatabaseMigrationStats(initialSize, finalSize)
+
+		// Get Locks metrics
+		locks := output.GetTableLockStats(migrationOutput.PgProxyLogs)
+
+		migrationOutput.Stats = output.NewOutputDatabaseMigrationStats(initialSize, finalSize, locks)
 	}
 
 	// Generate the migration message

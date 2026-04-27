@@ -1,6 +1,11 @@
 package pgproxy
 
-import "time"
+import (
+	"encoding/json"
+	"log/slog"
+	"strings"
+	"time"
+)
 
 type QueryEvent struct {
 	SQL          string          `json:"sql"`
@@ -29,3 +34,20 @@ const (
 	QueryLockRowShare             QueryLock = "ROW_SHARE"
 	QueryLockAccessShare          QueryLock = "ACCESS_SHARE"
 )
+
+func ParseQueriesFromLogs(logs string) []QueryEvent {
+	queries := make([]QueryEvent, 0)
+
+	for line := range strings.Lines(logs) {
+		query := QueryEvent{}
+		err := json.Unmarshal([]byte(line), &query)
+		if err != nil {
+			slog.Debug("Error parsing query line", "line", line, "error", err)
+			continue
+		}
+
+		queries = append(queries, query)
+	}
+
+	return queries
+}
