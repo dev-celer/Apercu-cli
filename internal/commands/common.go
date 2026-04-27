@@ -115,6 +115,11 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 		locks := output.GetTableLockStats(migrationOutput.PgProxyLogs)
 
 		migrationOutput.Stats = output.NewOutputDatabaseMigrationStats(initialSize, finalSize, initialWALSize, finalWALSize, locks)
+
+		// Handle Warnings
+		if migrationOutput.Stats.WALDelta > 1024*1024*1024 {
+			migrationOutput.Warnings = append(migrationOutput.Warnings, "WAL size generated over 1GB, risk of replication lag")
+		}
 	}
 
 	// Generate the migration message
