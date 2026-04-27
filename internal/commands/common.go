@@ -55,6 +55,7 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 
 	var initialSchema map[string]schema_diff.Schema
 	var initialSize int64
+	var initialWALSize int64
 	if databaseConn != nil {
 		var err error
 		initialSchema, err = schema_diff.GetSchema(databaseConn.Url)
@@ -62,6 +63,10 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 			return "", err
 		}
 		initialSize, err = metrics.GetDatabaseStorageInBytes(databaseConn.Database, databaseConn.Url)
+		if err != nil {
+			return "", err
+		}
+		initialWALSize, err = metrics.GetWALBytes(databaseConn.Url)
 		if err != nil {
 			return "", err
 		}
@@ -100,10 +105,16 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 			return "", err
 		}
 
+		// Get WAL Size metrics
+		finalWALSize, err := metrics.GetWALBytes(databaseConn.Url)
+		if err != nil {
+			return "", err
+		}
+
 		// Get Locks metrics
 		locks := output.GetTableLockStats(migrationOutput.PgProxyLogs)
 
-		migrationOutput.Stats = output.NewOutputDatabaseMigrationStats(initialSize, finalSize, locks)
+		migrationOutput.Stats = output.NewOutputDatabaseMigrationStats(initialSize, finalSize, initialWALSize, finalWALSize, locks)
 	}
 
 	// Generate the migration message

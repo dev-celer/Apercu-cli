@@ -38,18 +38,24 @@ type OutputDatabaseMigration struct {
 }
 
 type OutputDatabaseMigrationStats struct {
-	InitialSize int64                                                             `yaml:"initial_size" json:"initial_size"`
-	FinalSize   int64                                                             `yaml:"final_size" json:"final_size"`
-	SizeDelta   int64                                                             `yaml:"size_delta" json:"size_delta"`
-	LockStats   map[pgproxy.QueryLock]map[string]OutputDatabaseMigrationLockStats `yaml:"lock_stats,omitempty" json:"lock_stats,omitempty"`
+	InitialSize    int64                                                             `yaml:"initial_size" json:"initial_size"`
+	FinalSize      int64                                                             `yaml:"final_size" json:"final_size"`
+	SizeDelta      int64                                                             `yaml:"size_delta" json:"size_delta"`
+	InitialWALSize int64                                                             `yaml:"initial_wal_size" json:"initial_wal_size"`
+	FinalWALSize   int64                                                             `yaml:"final_wal_size" json:"final_wal_size"`
+	WALDelta       int64                                                             `yaml:"wal_delta" json:"wal_delta"`
+	LockStats      map[pgproxy.QueryLock]map[string]OutputDatabaseMigrationLockStats `yaml:"lock_stats,omitempty" json:"lock_stats,omitempty"`
 }
 
-func NewOutputDatabaseMigrationStats(initialSize int64, finalSize int64, lockStats map[pgproxy.QueryLock]map[string]OutputDatabaseMigrationLockStats) *OutputDatabaseMigrationStats {
+func NewOutputDatabaseMigrationStats(initialSize int64, finalSize int64, initialWalSize int64, finalWalSize int64, lockStats map[pgproxy.QueryLock]map[string]OutputDatabaseMigrationLockStats) *OutputDatabaseMigrationStats {
 	return &OutputDatabaseMigrationStats{
-		InitialSize: initialSize,
-		FinalSize:   finalSize,
-		SizeDelta:   finalSize - initialSize,
-		LockStats:   lockStats,
+		InitialSize:    initialSize,
+		FinalSize:      finalSize,
+		SizeDelta:      finalSize - initialSize,
+		InitialWALSize: initialWalSize,
+		FinalWALSize:   finalWalSize,
+		WALDelta:       finalWalSize - initialWalSize,
+		LockStats:      lockStats,
 	}
 }
 
@@ -208,6 +214,10 @@ var markdownTmpl = template.Must(template.New("markdown").Funcs(templateFuncs).P
 Before Migration Size: {{size_pretty $db.Migration.Stats.InitialSize}}
 After Migration Size: {{size_pretty $db.Migration.Stats.FinalSize}}
 Size Delta: {{size_pretty $db.Migration.Stats.SizeDelta}}
+--- WAL Detail ---
+Before Migration WAL Size: {{size_pretty $db.Migration.Stats.InitialWALSize}}
+After Migration WAL Size: {{size_pretty $db.Migration.Stats.FinalWALSize}}
+WAL Size Delta: {{size_pretty $db.Migration.Stats.WALDelta}}
 --- Locks detail ---
 {{- if $db.Migration.Stats.LockStats}}
 {{range $lockType, $tables := $db.Migration.Stats.LockStats}}{{$lockType}}:
