@@ -204,9 +204,16 @@ var markdownTmpl = template.Must(template.New("markdown").Funcs(templateFuncs).P
 <summary>Stats</summary>
 
 ` + "```" + `
+--- Size detail ---
 Before Migration Size: {{size_pretty $db.Migration.Stats.InitialSize}}
 After Migration Size: {{size_pretty $db.Migration.Stats.FinalSize}}
 Size Delta: {{size_pretty $db.Migration.Stats.SizeDelta}}
+--- Locks detail ---
+{{- if $db.Migration.Stats.LockStats}}
+{{range $lockType, $tables := $db.Migration.Stats.LockStats}}{{$lockType}}:
+{{range $table, $stats := $tables}}{{$table}} | count {{$stats.LockCount}} | mean {{$stats.MeanDuration}} | max {{$stats.MaxDuration}}
+{{end}}{{end}}
+{{- end}}
 ` + "```" + `
 
 </details>
