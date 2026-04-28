@@ -31,6 +31,9 @@ func TestLoadConfig_Valid(t *testing.T) {
 	assert.Equal(t, []string{"migrate"}, db.Migration.Command)
 	assert.Equal(t, "./migrations", db.Migration.LocalDir)
 
+	assert.Equal(t, len(db.ExplainQuery), 1)
+	assert.Equal(t, "./queries/test-queries.sql", db.ExplainQuery[0])
+
 	assert.Equal(t, []DatabaseSeed{{Path: "./seeds/data.sql", SeedOn: DatabaseSeedTypeAlways}}, db.Seed)
 }
 

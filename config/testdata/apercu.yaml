@@ -24,3 +24,5 @@ databases:
     seed:
       - path: "./seeds/data.sql"
         seed_on: "always"
+    explain_query:
+      - "./queries/test-queries.sql"

@@ -55,6 +55,7 @@ type Database struct {
 	Anonymization *DatabaseAnonymization `yaml:"anonymization,omitempty"`
 	Migration     *DatabaseMigration     `yaml:"migration,omitempty"`
 	Seed          []DatabaseSeed         `yaml:"seed,omitempty"`
+	ExplainQuery  []string               `yaml:"explain_query,omitempty"`
 }
 
 type DatabaseSource struct {
