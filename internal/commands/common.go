@@ -3,6 +3,7 @@ package commands
 import (
 	"apercu-cli/helper"
 	"apercu-cli/helper/metrics"
+	"apercu-cli/helper/pgproxy"
 	"apercu-cli/helper/schema_diff"
 	"apercu-cli/internal/migration"
 	"apercu-cli/internal/seeding"
@@ -14,6 +15,7 @@ import (
 	"log"
 	"log/slog"
 	"os"
+	"time"
 )
 
 func ApplySeeding(seedHandler seeding.HandlerInterface) string {
@@ -119,6 +121,15 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 		// Handle Warnings
 		if migrationOutput.Stats.WALDelta > 1024*1024*1024 {
 			migrationOutput.Warnings = append(migrationOutput.Warnings, "WAL size generated over 1GB, risk of replication lag")
+		}
+
+		AELocks, ok := migrationOutput.Stats.LockStats[pgproxy.QueryLockAccessExclusive]
+		if ok {
+			for table, lock := range AELocks {
+				if lock.MaxDuration >= time.Second {
+					migrationOutput.Warnings = append(migrationOutput.Warnings, fmt.Sprintf("Access Exclusive lock on table %s exceeded 1 second", table))
+				}
+			}
 		}
 	}
 
