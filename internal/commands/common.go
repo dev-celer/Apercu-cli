@@ -9,6 +9,7 @@ import (
 	"apercu-cli/internal/seeding"
 	"apercu-cli/output"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,8 @@ import (
 	"log/slog"
 	"os"
 	"time"
+
+	_ "github.com/lib/pq"
 )
 
 func ApplySeeding(seedHandler seeding.HandlerInterface) string {
@@ -59,16 +62,21 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 	var initialSize int64
 	var initialWALSize int64
 	if databaseConn != nil {
-		var err error
-		initialSchema, err = schema_diff.GetSchema(databaseConn.Url)
+		db, err := sql.Open("postgres", databaseConn.Url)
+		if err != nil {
+			return "", errors.New(fmt.Sprintf("Failed to connect to database: %v", err))
+		}
+		defer func() { _ = db.Close() }()
+
+		initialSchema, err = schema_diff.GetSchema(db)
 		if err != nil {
 			return "", err
 		}
-		initialSize, err = metrics.GetDatabaseStorageInBytes(databaseConn.Database, databaseConn.Url)
+		initialSize, err = metrics.GetDatabaseStorageInBytes(db, databaseConn.Database)
 		if err != nil {
 			return "", err
 		}
-		initialWALSize, err = metrics.GetWALBytes(databaseConn.Url)
+		initialWALSize, err = metrics.GetWALBytes(db)
 		if err != nil {
 			return "", err
 		}
@@ -94,21 +102,27 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 	}
 
 	if databaseConn != nil && migrationOutput != nil {
+		db, err := sql.Open("postgres", databaseConn.Url)
+		if err != nil {
+			return "", errors.New(fmt.Sprintf("Failed to connect to database: %v", err))
+		}
+		defer func() { _ = db.Close() }()
+
 		// Get schema diff
-		finalSchema, err := schema_diff.GetSchema(databaseConn.Url)
+		finalSchema, err := schema_diff.GetSchema(db)
 		if err != nil {
 			return "", err
 		}
 		migrationOutput.SchemaDiff = schema_diff.GetSchemaDiffText(initialSchema, finalSchema)
 
 		// Get Database size metrics
-		finalSize, err := metrics.GetDatabaseStorageInBytes(databaseConn.Database, databaseConn.Url)
+		finalSize, err := metrics.GetDatabaseStorageInBytes(db, databaseConn.Database)
 		if err != nil {
 			return "", err
 		}
 
 		// Get WAL Size metrics
-		finalWALSize, err := metrics.GetWALBytes(databaseConn.Url)
+		finalWALSize, err := metrics.GetWALBytes(db)
 		if err != nil {
 			return "", err
 		}

@@ -9,15 +9,9 @@ import (
 	_ "github.com/lib/pq"
 )
 
-func GetWALBytes(databaseUrl string) (int64, error) {
-	db, err := sql.Open("postgres", databaseUrl)
-	if err != nil {
-		return 0, fmt.Errorf("failed to connect to database: %v", err)
-	}
-	defer func() { _ = db.Close() }()
-
+func GetWALBytes(db *sql.DB) (int64, error) {
 	var wal_lsn string
-	err = db.QueryRow("SELECT pg_current_wal_lsn()").Scan(&wal_lsn)
+	err := db.QueryRow("SELECT pg_current_wal_lsn()").Scan(&wal_lsn)
 	if err != nil {
 		return 0, fmt.Errorf("failed to query database for WAL LSN: %v", err)
 	}

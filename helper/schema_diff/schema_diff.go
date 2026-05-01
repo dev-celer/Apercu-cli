@@ -260,13 +260,7 @@ func (d *SchemaDiff) GenerateText() string {
 	return text
 }
 
-func getColumns(databaseUrl string) ([]rawColumn, error) {
-	db, err := sql.Open("postgres", databaseUrl)
-	if err != nil {
-		return nil, errors.New(fmt.Sprintf("Failed to connect to database: %v", err))
-	}
-	defer func() { _ = db.Close() }()
-
+func getColumns(db *sql.DB) ([]rawColumn, error) {
 	rows, err := db.Query("SELECT table_schema, table_name, column_name, data_type FROM information_schema.columns WHERE table_schema NOT IN ('information_schema', 'pg_catalog')")
 	if err != nil {
 		return nil, errors.New(fmt.Sprintf("Failed to query database for schema: %v", err))
@@ -285,8 +279,8 @@ func getColumns(databaseUrl string) ([]rawColumn, error) {
 	return columns, nil
 }
 
-func GetSchema(databaseUrl string) (map[string]Schema, error) {
-	columns, err := getColumns(databaseUrl)
+func GetSchema(db *sql.DB) (map[string]Schema, error) {
+	columns, err := getColumns(db)
 	if err != nil {
 		return nil, err
 	}
