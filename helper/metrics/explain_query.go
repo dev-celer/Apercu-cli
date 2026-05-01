@@ -18,9 +18,12 @@ func ExtractQueriesFromFile(path string) ([]string, error) {
 
 	queries := strings.Split(string(content), ";")
 
-	result := make([]string, len(queries))
-	for i, query := range queries {
-		result[i] = strings.TrimSpace(query)
+	result := make([]string, 0)
+	for _, query := range queries {
+		if query == "" {
+			continue
+		}
+		result = append(result, strings.TrimSpace(query))
 	}
 
 	slog.Debug("Extracted queries from file", "file_path", path, "queries_found", len(result))
