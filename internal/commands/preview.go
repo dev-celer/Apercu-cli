@@ -96,7 +96,7 @@ func preview(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		ErrorAndExit(err, dbOutput, dbName)
 	}
-	migrationMessage, err := ApplyMigration(ctx, migrationHandler, &conn)
+	migrationMessage, err := ApplyMigration(ctx, migrationHandler, &conn, dbConfig.ExplainQuery)
 	if err != nil {
 		dbOutput.Migration = migrationHandler.GetOutput()
 		ErrorAndExit(err, dbOutput, dbName)

@@ -16,6 +16,7 @@ import (
 	"log"
 	"log/slog"
 	"os"
+	"slices"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -51,12 +52,20 @@ func ApplySeeding(seedHandler seeding.HandlerInterface) string {
 	return seedingMessage
 }
 
-func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInterface, databaseConn *helper.ConnectionFields) (string, error) {
+func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInterface, databaseConn *helper.ConnectionFields, explainQuery []string) (string, error) {
 	if migrationHandler == nil {
 		return "", nil
 	}
 
 	migrationOutput := migrationHandler.GetOutput()
+
+	queriesExtractOutput, err := metrics.ExtractAllQueriesToExplain(explainQuery)
+	if err != nil {
+		migrationOutput.Errors = append(migrationOutput.Errors, err.Error())
+		return "", err
+	}
+	migrationOutput.Warnings = append(migrationOutput.Warnings, queriesExtractOutput.Warnings...)
+	explainQueriesStats := make([]output.OutputDatabaseMigrationExplainQuery, 0)
 
 	var initialSchema map[string]schema_diff.Schema
 	var initialSize int64
@@ -79,6 +88,27 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 		initialWALSize, err = metrics.GetWALBytes(db)
 		if err != nil {
 			return "", err
+		}
+
+		for file, queries := range queriesExtractOutput.Queries {
+			for _, query := range queries {
+				explainResult, err := metrics.ExplainQuery(db, query)
+				run := output.OutputDatabaseMigrationExplainQueryRun{}
+
+				if err != nil {
+					run.Error = new(err.Error())
+				} else {
+					run.ExplainedQuery = explainResult
+					run.PlannedTime = new(time.Duration(explainResult.PlanningTime))
+					run.RealTime = new(time.Duration(explainResult.ExecutionTime))
+				}
+
+				explainQueriesStats = append(explainQueriesStats, output.OutputDatabaseMigrationExplainQuery{
+					File:            file,
+					Query:           query,
+					PreMigrationRun: &run,
+				})
+			}
 		}
 	}
 
@@ -130,7 +160,32 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 		// Get Locks metrics
 		locks := output.GetTableLockStats(migrationOutput.PgProxyLogs)
 
-		migrationOutput.Stats = output.NewOutputDatabaseMigrationStats(initialSize, finalSize, initialWALSize, finalWALSize, locks)
+		// Get Explain queries stats
+		for file, queries := range queriesExtractOutput.Queries {
+			for _, query := range queries {
+				idx := slices.IndexFunc(explainQueriesStats, func(s output.OutputDatabaseMigrationExplainQuery) bool {
+					return s.Query == query && s.File == file
+				})
+				if idx == -1 {
+					continue
+				}
+
+				explainResult, err := metrics.ExplainQuery(db, query)
+				run := output.OutputDatabaseMigrationExplainQueryRun{}
+
+				if err != nil {
+					run.Error = new(err.Error())
+				} else {
+					run.ExplainedQuery = explainResult
+					run.PlannedTime = new(time.Duration(explainResult.PlanningTime))
+					run.RealTime = new(time.Duration(explainResult.ExecutionTime))
+				}
+
+				explainQueriesStats[idx].PostMigrationRun = &run
+			}
+		}
+
+		migrationOutput.Stats = output.NewOutputDatabaseMigrationStats(initialSize, finalSize, initialWALSize, finalWALSize, locks, explainQueriesStats)
 
 		// Handle Warnings
 		if migrationOutput.Stats.WALDelta > 1024*1024*1024 {

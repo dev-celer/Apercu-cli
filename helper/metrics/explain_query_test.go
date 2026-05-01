@@ -57,7 +57,7 @@ func TestExtractQueriesFromFile(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			path := writeQueryFile(t, tt.content)
-			got, err := ExtractQueriesFromFile(path)
+			got, err := extractQueriesFromFile(path)
 			if err != nil {
 				t.Fatalf("ExtractQueriesFromFile() error = %v", err)
 			}
@@ -69,7 +69,7 @@ func TestExtractQueriesFromFile(t *testing.T) {
 }
 
 func TestExtractQueriesFromFile_MissingFile(t *testing.T) {
-	_, err := ExtractQueriesFromFile(filepath.Join(t.TempDir(), "does-not-exist.sql"))
+	_, err := extractQueriesFromFile(filepath.Join(t.TempDir(), "does-not-exist.sql"))
 	if err == nil {
 		t.Fatal("expected error for missing file, got nil")
 	}

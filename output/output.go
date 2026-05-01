@@ -1,6 +1,7 @@
 package output
 
 import (
+	"apercu-cli/helper/metrics"
 	"apercu-cli/helper/pgproxy"
 	"bytes"
 	"fmt"
@@ -43,15 +44,31 @@ type OutputDatabaseMigrationStats struct {
 	SizeDelta   int64                                                             `yaml:"size_delta" json:"size_delta"`
 	WALDelta    int64                                                             `yaml:"wal_delta" json:"wal_delta"`
 	LockStats   map[pgproxy.QueryLock]map[string]OutputDatabaseMigrationLockStats `yaml:"lock_stats,omitempty" json:"lock_stats,omitempty"`
+	Explains    []OutputDatabaseMigrationExplainQuery                             `yaml:"explains,omitempty" json:"explains,omitempty"`
 }
 
-func NewOutputDatabaseMigrationStats(initialSize int64, finalSize int64, initialWalSize int64, finalWalSize int64, lockStats map[pgproxy.QueryLock]map[string]OutputDatabaseMigrationLockStats) *OutputDatabaseMigrationStats {
+type OutputDatabaseMigrationExplainQuery struct {
+	File             string                                  `yaml:"file" json:"file"`
+	Query            string                                  `yaml:"query" json:"query"`
+	PreMigrationRun  *OutputDatabaseMigrationExplainQueryRun `yaml:"pre_migration_run,omitempty" json:"pre_migration_run,omitempty"`
+	PostMigrationRun *OutputDatabaseMigrationExplainQueryRun `yaml:"post_migration_run,omitempty" json:"post_migration_run,omitempty"`
+}
+
+type OutputDatabaseMigrationExplainQueryRun struct {
+	PlannedTime    *time.Duration         `yaml:"planned_cost,omitempty" json:"planned_cost,omitempty"`
+	RealTime       *time.Duration         `yaml:"real_cost,omitempty" json:"real_cost,omitempty"`
+	ExplainedQuery *metrics.ExplainResult `yaml:"explained_query,omitempty" json:"explained_query,omitempty"`
+	Error          *string                `yaml:"error,omitempty" json:"error,omitempty"`
+}
+
+func NewOutputDatabaseMigrationStats(initialSize int64, finalSize int64, initialWalSize int64, finalWalSize int64, lockStats map[pgproxy.QueryLock]map[string]OutputDatabaseMigrationLockStats, explainQueries []OutputDatabaseMigrationExplainQuery) *OutputDatabaseMigrationStats {
 	return &OutputDatabaseMigrationStats{
 		InitialSize: initialSize,
 		FinalSize:   finalSize,
 		SizeDelta:   finalSize - initialSize,
 		WALDelta:    finalWalSize - initialWalSize,
 		LockStats:   lockStats,
+		Explains:    explainQueries,
 	}
 }
 
