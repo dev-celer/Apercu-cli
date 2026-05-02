@@ -5,6 +5,7 @@ import (
 	"apercu-cli/helper/pgproxy"
 	"bytes"
 	"fmt"
+	"slices"
 	"text/template"
 	"time"
 )
@@ -183,6 +184,44 @@ var templateFuncs = template.FuncMap{
 		}
 		return fmt.Sprintf("%.2f TB", float64(i)/1024/1024/1024/1024)
 	},
+	"print_explain": func(e []OutputDatabaseMigrationExplainQuery) string {
+		displayedFile := make([]string, 0)
+		var outputStr string
+
+		for _, explain := range e {
+			if slices.Contains(displayedFile, explain.File) {
+				continue
+			}
+			currentFile := explain.File
+			displayedFile = append(displayedFile, currentFile)
+			outputStr += fmt.Sprintf("--- %s ---\n", currentFile)
+
+			for _, explain := range e {
+				if explain.File != currentFile {
+					continue
+				}
+
+				outputStr += fmt.Sprintf("%s\n", explain.Query)
+				if explain.PreMigrationRun != nil {
+					outputStr += fmt.Sprintf("Pre migration:\n")
+					if explain.PreMigrationRun.Error != nil {
+						outputStr += fmt.Sprintf("ERROR: %s\n", *explain.PreMigrationRun.Error)
+					} else if explain.PreMigrationRun.ExplainedQuery != nil {
+						outputStr += explain.PreMigrationRun.ExplainedQuery.String()
+					}
+				}
+				if explain.PostMigrationRun != nil {
+					outputStr += fmt.Sprintf("Post migration:\n")
+					if explain.PostMigrationRun.Error != nil {
+						outputStr += fmt.Sprintf("ERROR: %s\n", *explain.PostMigrationRun.Error)
+					} else if explain.PostMigrationRun.ExplainedQuery != nil {
+						outputStr += explain.PostMigrationRun.ExplainedQuery.String()
+					}
+				}
+			}
+		}
+		return outputStr
+	},
 }
 
 var markdownTmpl = template.Must(template.New("markdown").Funcs(templateFuncs).Parse(
@@ -229,11 +268,15 @@ After Migration Size: {{size_pretty $db.Migration.Stats.FinalSize}}
 Size Delta: {{size_pretty $db.Migration.Stats.SizeDelta}}
 --- WAL Detail ---
 WAL Size Delta: {{size_pretty $db.Migration.Stats.WALDelta}}
---- Locks detail ---
 {{- if $db.Migration.Stats.LockStats}}
+--- Locks detail ---
 {{range $lockType, $tables := $db.Migration.Stats.LockStats}}{{$lockType}}:
 {{range $table, $stats := $tables}}{{$table}} | count {{$stats.LockCount}} | mean {{$stats.MeanDuration}} | max {{$stats.MaxDuration}}
 {{end}}{{end}}
+{{- end}}
+{{- if $db.Migration.Stats.Explains}}
+--- Explains queries ---
+{{print_explain $db.Migration.Stats.Explains}}
 {{- end}}
 ` + "```" + `
 
