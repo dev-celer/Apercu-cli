@@ -63,20 +63,20 @@ func ExtractAllQueriesToExplain(paths []string) (*ExtractQueriesOutput, error) {
 				}
 
 				if !d.IsDir() && filepath.Ext(p) == ".sql" {
-					slog.Debug("Found explain query file", "file", p)
-					queries, err := extractQueriesFromFile(path)
+					slog.Debug("Found explain query file", "file_path", p)
+					queries, err := extractQueriesFromFile(p)
 					if err != nil {
-						outputData.Warnings = append(outputData.Warnings, fmt.Sprintf("Failed to get queries from file %s: %v", path, err))
-						_, _ = fmt.Fprintf(log.Writer(), "Failed to get queries from file %s: %v\n", path, err)
+						outputData.Warnings = append(outputData.Warnings, fmt.Sprintf("Failed to get queries from file %s: %v", p, err))
+						_, _ = fmt.Fprintf(log.Writer(), "Failed to get queries from file %s: %v\n", p, err)
 						return nil
 					}
 					if len(queries) == 0 {
-						outputData.Warnings = append(outputData.Warnings, fmt.Sprintf("No queries found in file %s", path))
-						_, _ = fmt.Fprintf(log.Writer(), "No queries found in file %s\n", path)
+						outputData.Warnings = append(outputData.Warnings, fmt.Sprintf("No queries found in file %s", p))
+						_, _ = fmt.Fprintf(log.Writer(), "No queries found in file %s\n", p)
 						return nil
 					}
 
-					outputData.Queries[path] = queries
+					outputData.Queries[filepath.Base(p)] = queries
 				}
 
 				return nil
