@@ -5,6 +5,7 @@ import (
 	"apercu-cli/helper/metrics"
 	"apercu-cli/helper/pgproxy"
 	"apercu-cli/helper/schema_diff"
+	warningshelper "apercu-cli/helper/warnings"
 	"apercu-cli/internal/migration"
 	"apercu-cli/internal/seeding"
 	"apercu-cli/output"
@@ -99,8 +100,8 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 					run.Error = new(err.Error())
 				} else {
 					run.ExplainedQuery = explainResult
-					run.PlannedTime = new(time.Duration(explainResult.PlanningTime))
-					run.RealTime = new(time.Duration(explainResult.ExecutionTime))
+					run.PlannedTime = new(time.Duration(explainResult.PlanningTime * float64(time.Millisecond)))
+					run.RealTime = new(time.Duration(explainResult.ExecutionTime * float64(time.Millisecond)))
 				}
 
 				explainQueriesStats = append(explainQueriesStats, output.OutputDatabaseMigrationExplainQuery{
@@ -177,11 +178,25 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 					run.Error = new(err.Error())
 				} else {
 					run.ExplainedQuery = explainResult
-					run.PlannedTime = new(time.Duration(explainResult.PlanningTime))
-					run.RealTime = new(time.Duration(explainResult.ExecutionTime))
+					run.PlannedTime = new(time.Duration(explainResult.PlanningTime * float64(time.Millisecond)))
+					run.RealTime = new(time.Duration(explainResult.ExecutionTime * float64(time.Millisecond)))
 				}
 
 				explainQueriesStats[idx].PostMigrationRun = &run
+
+				if explainQueriesStats[idx].PreMigrationRun == nil || explainQueriesStats[idx].PostMigrationRun == nil ||
+					explainQueriesStats[idx].PreMigrationRun.Error != nil || explainQueriesStats[idx].PostMigrationRun.Error != nil {
+					continue
+				}
+				if len(query) > 120 {
+					query = query[:120] + "..."
+				}
+
+				// Generate warnings
+				if warningText := warningshelper.GenerateExecutionTimeWarnings(explainQueriesStats[idx].PreMigrationRun, explainQueriesStats[idx].PostMigrationRun, file, query); warningText != "" {
+					_, _ = fmt.Fprintln(log.Writer(), fmt.Sprintf("WARNING: %s", warningText))
+					explainQueriesStats[idx].Warnings = append(explainQueriesStats[idx].Warnings, warningText)
+				}
 			}
 		}
 

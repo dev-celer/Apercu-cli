@@ -51,6 +51,7 @@ type OutputDatabaseMigrationStats struct {
 type OutputDatabaseMigrationExplainQuery struct {
 	File             string                                  `yaml:"file" json:"file"`
 	Query            string                                  `yaml:"query" json:"query"`
+	Warnings         []string                                `yaml:"warnings,omitempty" json:"warnings,omitempty"`
 	PreMigrationRun  *OutputDatabaseMigrationExplainQueryRun `yaml:"pre_migration_run,omitempty" json:"pre_migration_run,omitempty"`
 	PostMigrationRun *OutputDatabaseMigrationExplainQueryRun `yaml:"post_migration_run,omitempty" json:"post_migration_run,omitempty"`
 }
@@ -202,6 +203,9 @@ var templateFuncs = template.FuncMap{
 				}
 
 				outputStr += fmt.Sprintf("**%s**\n", explain.Query)
+				for _, warning := range explain.Warnings {
+					outputStr += fmt.Sprintf("**WARNING**: %s\n", warning)
+				}
 				if explain.PreMigrationRun != nil {
 					outputStr += fmt.Sprintf("**Pre migration:**\n")
 					if explain.PreMigrationRun.Error != nil {
