@@ -203,7 +203,7 @@ var templateFuncs = template.FuncMap{
 
 				outputStr += fmt.Sprintf("**%s**\n", explain.Query)
 				if explain.PreMigrationRun != nil {
-					outputStr += fmt.Sprintf("Pre migration:\n")
+					outputStr += fmt.Sprintf("**Pre migration:**\n")
 					if explain.PreMigrationRun.Error != nil {
 						outputStr += fmt.Sprintf("ERROR: %s\n", *explain.PreMigrationRun.Error)
 					} else if explain.PreMigrationRun.ExplainedQuery != nil {
@@ -211,7 +211,7 @@ var templateFuncs = template.FuncMap{
 					}
 				}
 				if explain.PostMigrationRun != nil {
-					outputStr += fmt.Sprintf("Post migration:\n")
+					outputStr += fmt.Sprintf("**Post migration:**\n")
 					if explain.PostMigrationRun.Error != nil {
 						outputStr += fmt.Sprintf("ERROR: %s\n", *explain.PostMigrationRun.Error)
 					} else if explain.PostMigrationRun.ExplainedQuery != nil {
