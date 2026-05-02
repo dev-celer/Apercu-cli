@@ -163,6 +163,7 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 
 		// Get Explain queries stats
 		for file, queries := range queriesExtractOutput.Queries {
+			regressionWarningInFile := 0
 			for _, query := range queries {
 				idx := slices.IndexFunc(explainQueriesStats, func(s output.OutputDatabaseMigrationExplainQuery) bool {
 					return s.Query == query && s.File == file
@@ -193,10 +194,16 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 				}
 
 				// Generate warnings
-				if warningText := warningshelper.GenerateExecutionTimeWarnings(explainQueriesStats[idx].PreMigrationRun, explainQueriesStats[idx].PostMigrationRun, file, query); warningText != "" {
-					_, _ = fmt.Fprintln(log.Writer(), fmt.Sprintf("WARNING: %s", warningText))
+				if warningText := warningshelper.GenerateExecutionTimeWarnings(explainQueriesStats[idx].PreMigrationRun, explainQueriesStats[idx].PostMigrationRun); warningText != "" {
+					_, _ = fmt.Fprintln(log.Writer(), fmt.Sprintf("WARNING: %s\nfile:%s\nquery:%s", warningText, file, query))
 					explainQueriesStats[idx].Warnings = append(explainQueriesStats[idx].Warnings, warningText)
+					regressionWarningInFile++
 				}
+			}
+			// Add top level migration warning if a regression warning has been issued in this file
+			if regressionWarningInFile > 0 {
+				warningText := fmt.Sprintf("Regression warning for %d queries inside this file %s, see migration stats for more details", regressionWarningInFile, file)
+				migrationOutput.Warnings = append(migrationOutput.Warnings, warningText)
 			}
 		}
 
