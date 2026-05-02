@@ -93,21 +93,10 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 
 		for file, queries := range queriesExtractOutput.Queries {
 			for _, query := range queries {
-				explainResult, err := metrics.ExplainQuery(db, query)
-				run := output.OutputDatabaseMigrationExplainQueryRun{}
-
-				if err != nil {
-					run.Error = new(err.Error())
-				} else {
-					run.ExplainedQuery = explainResult
-					run.PlannedTime = new(time.Duration(explainResult.PlanningTime * float64(time.Millisecond)))
-					run.RealTime = new(time.Duration(explainResult.ExecutionTime * float64(time.Millisecond)))
-				}
-
 				explainQueriesStats = append(explainQueriesStats, output.OutputDatabaseMigrationExplainQuery{
 					File:            file,
 					Query:           query,
-					PreMigrationRun: &run,
+					PreMigrationRun: new(generateQueryRun(db, query)),
 				})
 			}
 		}
@@ -172,18 +161,7 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 					continue
 				}
 
-				explainResult, err := metrics.ExplainQuery(db, query)
-				run := output.OutputDatabaseMigrationExplainQueryRun{}
-
-				if err != nil {
-					run.Error = new(err.Error())
-				} else {
-					run.ExplainedQuery = explainResult
-					run.PlannedTime = new(time.Duration(explainResult.PlanningTime * float64(time.Millisecond)))
-					run.RealTime = new(time.Duration(explainResult.ExecutionTime * float64(time.Millisecond)))
-				}
-
-				explainQueriesStats[idx].PostMigrationRun = &run
+				explainQueriesStats[idx].PostMigrationRun = new(generateQueryRun(db, query))
 
 				if explainQueriesStats[idx].PreMigrationRun == nil || explainQueriesStats[idx].PostMigrationRun == nil ||
 					explainQueriesStats[idx].PreMigrationRun.Error != nil || explainQueriesStats[idx].PostMigrationRun.Error != nil {
@@ -202,7 +180,7 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 			}
 			// Add top level migration warning if a regression warning has been issued in this file
 			if regressionWarningInFile > 0 {
-				warningText := fmt.Sprintf("Regression warning for %d queries inside this file %s, see migration stats for more details", regressionWarningInFile, file)
+				warningText := fmt.Sprintf("Regression detected for %d queries inside this file %s, see migration stats for more details", regressionWarningInFile, file)
 				migrationOutput.Warnings = append(migrationOutput.Warnings, warningText)
 			}
 		}
@@ -232,6 +210,61 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 	migrationMessage += fmt.Sprintf(", %d migrations applied", migrationOutput.Count)
 
 	return migrationMessage, nil
+}
+
+func generateQueryRun(db *sql.DB, query string) output.OutputDatabaseMigrationExplainQueryRun {
+	explainQueryResults := make([]*metrics.ExplainResult, 5)
+
+	run := output.OutputDatabaseMigrationExplainQueryRun{}
+
+	// Run the query 5 time
+	for i := range explainQueryResults {
+		explainResult, err := metrics.ExplainQuery(db, query)
+		if err != nil {
+			run.Error = new(err.Error())
+			return run
+		}
+
+		explainQueryResults[i] = explainResult
+	}
+
+	// Discard first query as it may a served to wake up the instance or warm the cache
+	explainQueryResults = explainQueryResults[1:]
+
+	// Get average plannedTime and realTime
+	avgPlannedTime := time.Duration(0)
+	avgRealTime := time.Duration(0)
+	for _, explainResult := range explainQueryResults {
+		avgPlannedTime += time.Duration(explainResult.PlanningTime * float64(time.Millisecond))
+		avgRealTime += time.Duration(explainResult.ExecutionTime * float64(time.Millisecond))
+	}
+	avgPlannedTime /= time.Duration(len(explainQueryResults))
+	avgRealTime /= time.Duration(len(explainQueryResults))
+
+	// Select result closest to average real time
+	var closestResult *metrics.ExplainResult
+	var closestDiff time.Duration
+	for _, explainResult := range explainQueryResults {
+		diff := avgRealTime - time.Duration(explainResult.ExecutionTime*float64(time.Millisecond))
+		if diff < 0 {
+			diff = diff * -1
+		}
+
+		if closestResult == nil {
+			closestResult = explainResult
+			closestDiff = diff
+		} else {
+			if diff < closestDiff {
+				closestResult = explainResult
+				closestDiff = diff
+			}
+		}
+	}
+
+	run.ExplainedQuery = closestResult
+	run.PlannedTime = &avgPlannedTime
+	run.RealTime = &avgRealTime
+	return run
 }
 
 func SaveOutputInFile(path string, output *output.PreviewOutput) error {
