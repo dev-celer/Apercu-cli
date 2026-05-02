@@ -56,7 +56,7 @@ func ExtractAllQueriesToExplain(paths []string) (*ExtractQueriesOutput, error) {
 		}
 
 		if info.IsDir() {
-			slog.Debug("Explain query path if a directory, finding all .sql files", "path", path)
+			slog.Debug("Explain query path is a directory, finding all .sql files", "path", path)
 			if err := filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
 				if err != nil {
 					return err
