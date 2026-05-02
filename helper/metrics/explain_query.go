@@ -23,7 +23,7 @@ func extractQueriesFromFile(path string) ([]string, error) {
 
 	result := make([]string, 0)
 	for _, query := range queries {
-		if query == "" {
+		if strings.TrimSpace(query) == "" {
 			continue
 		}
 		result = append(result, strings.TrimSpace(query))

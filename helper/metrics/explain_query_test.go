@@ -52,6 +52,11 @@ func TestExtractQueriesFromFile(t *testing.T) {
 			content: "",
 			want:    []string{},
 		},
+		{
+			name:    "Empty last line",
+			content: "SELECT 1;\n\n",
+			want:    []string{"SELECT 1"},
+		},
 	}
 
 	for _, tt := range tests {
