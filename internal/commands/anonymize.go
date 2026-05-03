@@ -36,9 +36,13 @@ func anonymize(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get the databases handlers
-	sourceHandler, storageHandler, err := database.GetAnonymizationDatabaseHandlers(dbConfig)
+	sourceConn, storageHandler, err := database.GetAnonymizationDatabaseHandlers(dbConfig)
 	if err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if sourceConn == nil || storageHandler == nil {
+		_, _ = fmt.Fprintln(os.Stderr, "No anonymization configuration specified")
 		os.Exit(1)
 	}
 
@@ -55,12 +59,7 @@ func anonymize(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Get the databases connection fields
-	sourceConn, err := sourceHandler.GetConnectionFields()
-	if err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+	// Get the database connection fields
 	storageConn, err := storageHandler.GetConnectionFields()
 	if err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, err)
@@ -68,7 +67,7 @@ func anonymize(cmd *cobra.Command, args []string) error {
 	}
 
 	// Anonymize the database
-	handler := anonymization.GetDatabaseAnonymizer(dbConfig, sourceConn, storageConn)
+	handler := anonymization.GetDatabaseAnonymizer(dbConfig, *sourceConn, storageConn)
 	if err := handler.Anonymize(cmd.Context()); err != nil {
 		if handler.GetOutput() != nil && handler.GetOutput().Logs != nil {
 			_, _ = fmt.Println(log.Writer(), "-------Greenmask output-------")

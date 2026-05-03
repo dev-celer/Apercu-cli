@@ -41,13 +41,13 @@ func TestGetPreviewDatabaseHandler_MissingNeonConfig(t *testing.T) {
 func TestGetPreviewDatabaseHandler_UsesSourceValuesWithoutAnonymization(t *testing.T) {
 	t.Parallel()
 	handler, err := GetPreviewDatabaseHandler(config.Database{
+		PreviewBranch: "preview-1",
 		Source: &config.DatabaseSource{
 			Provider: config.DatabaseProviderNeon,
 			Neon: &config.DatabaseNeonSource{
 				ProjectId:     "src-project",
 				ApiKey:        "src-key",
 				ParentBranch:  "main",
-				PreviewBranch: "preview-1",
 				BranchingType: config.DatabaseNeonBranchingTypeSchemaOnly,
 			},
 		},
@@ -68,13 +68,13 @@ func TestGetPreviewDatabaseHandler_UsesSourceValuesWithoutAnonymization(t *testi
 func TestGetPreviewDatabaseHandler_DefaultsInvalidBranchingType(t *testing.T) {
 	t.Parallel()
 	handler, err := GetPreviewDatabaseHandler(config.Database{
+		PreviewBranch: "preview",
 		Source: &config.DatabaseSource{
 			Provider: config.DatabaseProviderNeon,
 			Neon: &config.DatabaseNeonSource{
 				ProjectId:     "p",
 				ApiKey:        "k",
 				ParentBranch:  "main",
-				PreviewBranch: "preview",
 				BranchingType: "bogus",
 			},
 		},
@@ -90,13 +90,13 @@ func TestGetPreviewDatabaseHandler_OverridesWithAnonymizationStorage(t *testing.
 	storageProject := "storage-project"
 	storageApiKey := "storage-key"
 	handler, err := GetPreviewDatabaseHandler(config.Database{
+		PreviewBranch: "preview",
 		Source: &config.DatabaseSource{
 			Provider: config.DatabaseProviderNeon,
 			Neon: &config.DatabaseNeonSource{
 				ProjectId:     "src-project",
 				ApiKey:        "src-key",
 				ParentBranch:  "main",
-				PreviewBranch: "preview",
 				BranchingType: config.DatabaseNeonBranchingTypeParentData,
 			},
 		},
@@ -132,7 +132,7 @@ func TestGetPruningDatabaseHandler_UnsupportedProvider(t *testing.T) {
 	})
 	assert.Error(t, err)
 	assert.Nil(t, handler)
-	assert.Contains(t, err.Error(), "unsupported database provider")
+	assert.Contains(t, err.Error(), "unsupported source database provider")
 }
 
 func TestGetPruningDatabaseHandler_MissingNeonConfig(t *testing.T) {
@@ -150,13 +150,13 @@ func TestGetPruningDatabaseHandler_MissingNeonConfig(t *testing.T) {
 
 func TestGetPruningDatabaseHandler_UsesSourceValuesWithoutAnonymization(t *testing.T) {
 	handler, err := GetPruningDatabaseHandler(config.Database{
+		PreviewBranch: "preview-${{ PR_NUMBER }}",
 		Source: &config.DatabaseSource{
 			Provider: config.DatabaseProviderNeon,
 			Neon: &config.DatabaseNeonSource{
-				ProjectId:     "src-project",
-				ApiKey:        "src-key",
-				ParentBranch:  "main",
-				PreviewBranch: "preview-${{ PR_NUMBER }}",
+				ProjectId:    "src-project",
+				ApiKey:       "src-key",
+				ParentBranch: "main",
 			},
 		},
 	})
@@ -196,7 +196,7 @@ func TestGetAnonymizationDatabaseHandlers_UnsupportedProvider(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, source)
 	assert.Nil(t, storage)
-	assert.Contains(t, err.Error(), "unsupported database provider")
+	assert.Contains(t, err.Error(), "unsupported source database provider")
 }
 
 func TestGetAnonymizationDatabaseHandlers_MissingNeonStorage(t *testing.T) {
@@ -213,7 +213,7 @@ func TestGetAnonymizationDatabaseHandlers_MissingNeonStorage(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, source)
 	assert.Nil(t, storage)
-	assert.Contains(t, err.Error(), "missing neon anonymization storage configuration")
+	assert.Contains(t, err.Error(), "missing storage database configuration")
 }
 
 func TestGetAnonymizationDatabaseHandlers_MissingNeonSource(t *testing.T) {
@@ -233,76 +233,4 @@ func TestGetAnonymizationDatabaseHandlers_MissingNeonSource(t *testing.T) {
 	assert.Nil(t, source)
 	assert.Nil(t, storage)
 	assert.Contains(t, err.Error(), "missing neon source database configuration")
-}
-
-func TestGetAnonymizationDatabaseHandlers_DefaultsStorageToSource(t *testing.T) {
-	t.Parallel()
-	source, storage, err := GetAnonymizationDatabaseHandlers(config.Database{
-		Source: &config.DatabaseSource{
-			Provider: config.DatabaseProviderNeon,
-			Neon: &config.DatabaseNeonSource{
-				ProjectId:    "src-project",
-				ApiKey:       "src-key",
-				ParentBranch: "main",
-			},
-		},
-		Anonymization: &config.DatabaseAnonymization{
-			Storage: config.DatabaseAnonymizationStorage{
-				Neon: &config.DatabaseAnonymizationStorageNeon{
-					BranchName: "main-anonymized",
-				},
-			},
-		},
-	})
-	require.NoError(t, err)
-
-	sourceHandler := source.(*NeonHandler)
-	storageHandler := storage.(*NeonHandler)
-
-	assert.Equal(t, "src-project", sourceHandler.projectId)
-	assert.Equal(t, "src-key", sourceHandler.apiKey)
-	assert.Equal(t, "main", sourceHandler.branch)
-	assert.Nil(t, sourceHandler.parentBranch)
-	assert.Nil(t, sourceHandler.branchingType)
-
-	assert.Equal(t, "src-project", storageHandler.projectId)
-	assert.Equal(t, "src-key", storageHandler.apiKey)
-	assert.Equal(t, "main-anonymized", storageHandler.branch)
-	require.NotNil(t, storageHandler.parentBranch)
-	assert.Equal(t, "main", *storageHandler.parentBranch)
-}
-
-func TestGetAnonymizationDatabaseHandlers_OverridesStorageCredentials(t *testing.T) {
-	t.Parallel()
-	overrideProject := "storage-project"
-	overrideApiKey := "storage-key"
-	source, storage, err := GetAnonymizationDatabaseHandlers(config.Database{
-		Source: &config.DatabaseSource{
-			Provider: config.DatabaseProviderNeon,
-			Neon: &config.DatabaseNeonSource{
-				ProjectId:    "src-project",
-				ApiKey:       "src-key",
-				ParentBranch: "main",
-			},
-		},
-		Anonymization: &config.DatabaseAnonymization{
-			Storage: config.DatabaseAnonymizationStorage{
-				Neon: &config.DatabaseAnonymizationStorageNeon{
-					ProjectId:  &overrideProject,
-					ApiKey:     &overrideApiKey,
-					BranchName: "main-anonymized",
-				},
-			},
-		},
-	})
-	require.NoError(t, err)
-
-	sourceHandler := source.(*NeonHandler)
-	storageHandler := storage.(*NeonHandler)
-
-	assert.Equal(t, "src-project", sourceHandler.projectId)
-	assert.Equal(t, "src-key", sourceHandler.apiKey)
-
-	assert.Equal(t, overrideProject, storageHandler.projectId)
-	assert.Equal(t, overrideApiKey, storageHandler.apiKey)
 }

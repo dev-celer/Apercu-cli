@@ -23,6 +23,40 @@ func GetPreviewDatabaseHandler(dbConfig config.Database) (HandlerInterface, erro
 		return nil, nil
 	}
 
+	// If anonymization is enabled, use the storage database information
+	if dbConfig.Anonymization != nil {
+		if dbConfig.Anonymization.Storage.Neon == nil {
+			return nil, fmt.Errorf("no storage Neon configuration specified")
+		}
+
+		branchParent := config.ReplaceVariables(dbConfig.Anonymization.Storage.Neon.BranchName, nil)
+		apiKey := dbConfig.Anonymization.Storage.Neon.ApiKey
+		projectId := dbConfig.Anonymization.Storage.Neon.ProjectId
+
+		// If projectId or ApiKey are nil, try to retrieve them from neon source configuration
+		if apiKey == nil || projectId == nil {
+			if dbConfig.Source.Provider != config.DatabaseProviderNeon || dbConfig.Source.Neon == nil {
+				return nil, fmt.Errorf("missing neon ApiKey / ProjectId configuration in anonymization")
+			}
+
+			if apiKey == nil {
+				apiKey = new(dbConfig.Source.Neon.ApiKey)
+			}
+			if projectId == nil {
+				projectId = new(dbConfig.Source.Neon.ProjectId)
+			}
+		}
+
+		return NewNeonHandler(
+			config.ReplaceVariables(*projectId, nil),
+			config.ReplaceVariables(*apiKey, nil),
+			&branchParent,
+			config.ReplaceVariables(dbConfig.PreviewBranch, nil),
+			new(config.DatabaseNeonBranchingTypeParentData),
+		)
+	}
+
+	// No anonymization specified, basing everything on source configuration
 	switch dbConfig.Source.Provider {
 	case config.DatabaseProviderNeon:
 		if dbConfig.Source.Neon == nil {
@@ -30,113 +64,110 @@ func GetPreviewDatabaseHandler(dbConfig config.Database) (HandlerInterface, erro
 		}
 
 		// Prepare branching type
-		branchingTypeStr := config.ReplaceVariables(string(dbConfig.Source.Neon.BranchingType), map[string]string{})
+		branchingTypeStr := config.ReplaceVariables(string(dbConfig.Source.Neon.BranchingType), nil)
 		branchingType := config.DatabaseNeonBranchingType(branchingTypeStr)
 		if !branchingType.Valid() {
 			branchingType = config.DatabaseNeonBranchingTypeParentData
 		}
 
-		var projectId string
-		var apiKey string
-		var parentBranch string
-
-		// If anonymization is configured with storage on neon use those values
-		if dbConfig.Anonymization != nil && dbConfig.Anonymization.Storage.Neon != nil {
-			if dbConfig.Anonymization.Storage.Neon.ProjectId != nil {
-				projectId = config.ReplaceVariables(*dbConfig.Anonymization.Storage.Neon.ProjectId, map[string]string{})
-			} else {
-				projectId = config.ReplaceVariables(dbConfig.Source.Neon.ProjectId, map[string]string{})
-			}
-
-			if dbConfig.Anonymization.Storage.Neon.ApiKey != nil {
-				apiKey = config.ReplaceVariables(*dbConfig.Anonymization.Storage.Neon.ApiKey, map[string]string{})
-			} else {
-				apiKey = config.ReplaceVariables(dbConfig.Source.Neon.ApiKey, map[string]string{})
-			}
-
-			parentBranch = config.ReplaceVariables(dbConfig.Anonymization.Storage.Neon.BranchName, map[string]string{})
-		} else {
-			projectId = config.ReplaceVariables(dbConfig.Source.Neon.ProjectId, map[string]string{})
-			apiKey = config.ReplaceVariables(dbConfig.Source.Neon.ApiKey, map[string]string{})
-			parentBranch = config.ReplaceVariables(dbConfig.Source.Neon.ParentBranch, map[string]string{})
-		}
+		projectId := config.ReplaceVariables(dbConfig.Source.Neon.ProjectId, nil)
+		apiKey := config.ReplaceVariables(dbConfig.Source.Neon.ApiKey, nil)
+		parentBranch := config.ReplaceVariables(dbConfig.Source.Neon.ParentBranch, nil)
 
 		return NewNeonHandler(
 			projectId,
 			apiKey,
 			&parentBranch,
-			config.ReplaceVariables(dbConfig.Source.Neon.PreviewBranch, map[string]string{}),
+			config.ReplaceVariables(dbConfig.PreviewBranch, nil),
 			&branchingType,
 		)
+	case config.DatabaseProviderGeneric:
+		return nil, errors.New("generic provider without anonymization is currently unsupported")
 	}
 
 	return nil, errors.New(fmt.Sprintf("unsupported source database provider: %s", dbConfig.Source.Provider))
 }
 
-// GetAnonymizationDatabaseHandlers return (source, storage, error)
-func GetAnonymizationDatabaseHandlers(dbConfig config.Database) (HandlerInterface, HandlerInterface, error) {
+// GetAnonymizationDatabaseHandlers return (sourceConnection, storage, error)
+func GetAnonymizationDatabaseHandlers(dbConfig config.Database) (*helper.ConnectionFields, HandlerInterface, error) {
 	if dbConfig.Source == nil || dbConfig.Anonymization == nil {
 		slog.Debug("No source database specified")
 		return nil, nil, nil
 	}
 
+	// Getting source database connection
+	var sourceConnection *helper.ConnectionFields
 	switch dbConfig.Source.Provider {
 	case config.DatabaseProviderNeon:
-		if dbConfig.Anonymization.Storage.Neon == nil {
-			return nil, nil, errors.New("missing neon anonymization storage configuration")
-		}
 		if dbConfig.Source.Neon == nil {
-			return nil, nil, errors.New("missing neon source database configuration")
-		}
+			if dbConfig.Source.Neon == nil {
+				return nil, nil, errors.New("missing neon source database configuration")
+			}
 
-		parentProjectId := config.ReplaceVariables(dbConfig.Source.Neon.ProjectId, map[string]string{})
-		var storageProjectId string
-		if dbConfig.Anonymization.Storage.Neon.ProjectId != nil {
-			storageProjectId = config.ReplaceVariables(*dbConfig.Anonymization.Storage.Neon.ProjectId, map[string]string{})
-		} else {
-			storageProjectId = parentProjectId
-		}
+			sourceHandler, err := NewNeonHandler(
+				config.ReplaceVariables(dbConfig.Source.Neon.ProjectId, nil),
+				config.ReplaceVariables(dbConfig.Source.Neon.ApiKey, nil),
+				nil,
+				config.ReplaceVariables(dbConfig.Source.Neon.ParentBranch, nil),
+				nil,
+			)
+			if err != nil {
+				return nil, nil, err
+			}
 
-		sourceApiKey := config.ReplaceVariables(dbConfig.Source.Neon.ApiKey, map[string]string{})
-		var storageApiKey string
-		if dbConfig.Anonymization.Storage.Neon.ApiKey != nil {
-			storageApiKey = config.ReplaceVariables(*dbConfig.Anonymization.Storage.Neon.ApiKey, map[string]string{})
-		} else {
-			storageApiKey = sourceApiKey
+			sourceConn, err := sourceHandler.GetConnectionFields()
+			if err != nil {
+				return nil, nil, err
+			}
+			sourceConnection = &sourceConn
 		}
-
-		env := make(map[string]string, len(dbConfig.Anonymization.Env))
-		for k, v := range dbConfig.Anonymization.Env {
-			env[k] = config.ReplaceVariables(v, map[string]string{})
+	case config.DatabaseProviderGeneric:
+		if dbConfig.Source.Generic == nil {
+			return nil, nil, errors.New("missing generic source database configuration")
 		}
-
-		sourceBranch := config.ReplaceVariables(dbConfig.Source.Neon.ParentBranch, map[string]string{})
-		sourceHandler, err := NewNeonHandler(
-			config.ReplaceVariables(dbConfig.Source.Neon.ProjectId, map[string]string{}),
-			sourceApiKey,
-			nil,
-			sourceBranch,
-			nil,
-		)
+		sourceConn, err := helper.ExtractConnectionFieldsFromUrl(dbConfig.Source.Generic.DatabaseUrl)
 		if err != nil {
 			return nil, nil, err
 		}
-
-		storageHandler, err := NewNeonHandler(
-			storageProjectId,
-			storageApiKey,
-			&sourceBranch,
-			config.ReplaceVariables(dbConfig.Anonymization.Storage.Neon.BranchName, map[string]string{}),
-			new(config.DatabaseNeonBranchingTypeSchemaOnly),
-		)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		return sourceHandler, storageHandler, nil
+		sourceConnection = &sourceConn
+	default:
+		return nil, nil, fmt.Errorf("unsupported source database provider: %s", dbConfig.Source.Provider)
 	}
 
-	return nil, nil, errors.New(fmt.Sprintf("unsupported database provider: %s", dbConfig.Source.Provider))
+	// Get storage database handler
+	if dbConfig.Anonymization.Storage.Neon == nil {
+		return nil, nil, errors.New("missing storage database configuration")
+	}
+
+	apiKey := dbConfig.Anonymization.Storage.Neon.ApiKey
+	projectId := dbConfig.Anonymization.Storage.Neon.ProjectId
+
+	// If projectId or ApiKey are nil, try to retrieve them from neon source configuration
+	if apiKey == nil || projectId == nil {
+		if dbConfig.Source.Provider != config.DatabaseProviderNeon || dbConfig.Source.Neon == nil {
+			return nil, nil, fmt.Errorf("missing neon ApiKey / ProjectId configuration in anonymization")
+		}
+
+		if apiKey == nil {
+			apiKey = new(dbConfig.Source.Neon.ApiKey)
+		}
+		if projectId == nil {
+			projectId = new(dbConfig.Source.Neon.ProjectId)
+		}
+	}
+
+	storageHandler, err := NewNeonHandler(
+		config.ReplaceVariables(*projectId, nil),
+		config.ReplaceVariables(*apiKey, nil),
+		new(config.ReplaceVariables(dbConfig.Anonymization.Storage.Neon.BranchName, nil)),
+		config.ReplaceVariables(dbConfig.PreviewBranch, nil),
+		new(config.DatabaseNeonBranchingTypeParentData),
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return sourceConnection, storageHandler, nil
 }
 
 type PruningHandlerInterface interface {
@@ -150,6 +181,39 @@ func GetPruningDatabaseHandler(dbConfig config.Database) (PruningHandlerInterfac
 		return nil, nil
 	}
 
+	// If anonymization is enabled, use the storage database information
+	if dbConfig.Anonymization != nil {
+		if dbConfig.Anonymization.Storage.Neon == nil {
+			return nil, fmt.Errorf("no storage Neon configuration specified")
+		}
+
+		branchParent := config.ReplaceVariables(dbConfig.Anonymization.Storage.Neon.BranchName, nil)
+		apiKey := dbConfig.Anonymization.Storage.Neon.ApiKey
+		projectId := dbConfig.Anonymization.Storage.Neon.ProjectId
+
+		// If projectId or ApiKey are nil, try to retrieve them from neon source configuration
+		if apiKey == nil || projectId == nil {
+			if dbConfig.Source.Provider != config.DatabaseProviderNeon || dbConfig.Source.Neon == nil {
+				return nil, fmt.Errorf("missing neon ApiKey / ProjectId configuration in anonymization")
+			}
+
+			if apiKey == nil {
+				apiKey = new(dbConfig.Source.Neon.ApiKey)
+			}
+			if projectId == nil {
+				projectId = new(dbConfig.Source.Neon.ProjectId)
+			}
+		}
+
+		return NewNeonPruneHandler(
+			config.ReplaceVariables(*projectId, nil),
+			config.ReplaceVariables(*apiKey, nil),
+			branchParent,
+			dbConfig.PreviewBranch,
+		)
+	}
+
+	// No anonymization specified, basing everything on source configuration
 	switch dbConfig.Source.Provider {
 	case config.DatabaseProviderNeon:
 		if dbConfig.Source.Neon == nil {
@@ -157,44 +221,25 @@ func GetPruningDatabaseHandler(dbConfig config.Database) (PruningHandlerInterfac
 		}
 
 		// Prepare branching type
-		branchingTypeStr := config.ReplaceVariables(string(dbConfig.Source.Neon.BranchingType), map[string]string{})
+		branchingTypeStr := config.ReplaceVariables(string(dbConfig.Source.Neon.BranchingType), nil)
 		branchingType := config.DatabaseNeonBranchingType(branchingTypeStr)
 		if !branchingType.Valid() {
 			branchingType = config.DatabaseNeonBranchingTypeParentData
 		}
 
-		var projectId string
-		var apiKey string
-		var parentBranch string
-
-		// If anonymization is configured with storage on neon use those values
-		if dbConfig.Anonymization != nil && dbConfig.Anonymization.Storage.Neon != nil {
-			if dbConfig.Anonymization.Storage.Neon.ProjectId != nil {
-				projectId = config.ReplaceVariables(*dbConfig.Anonymization.Storage.Neon.ProjectId, map[string]string{})
-			} else {
-				projectId = config.ReplaceVariables(dbConfig.Source.Neon.ProjectId, map[string]string{})
-			}
-
-			if dbConfig.Anonymization.Storage.Neon.ApiKey != nil {
-				apiKey = config.ReplaceVariables(*dbConfig.Anonymization.Storage.Neon.ApiKey, map[string]string{})
-			} else {
-				apiKey = config.ReplaceVariables(dbConfig.Source.Neon.ApiKey, map[string]string{})
-			}
-
-			parentBranch = config.ReplaceVariables(dbConfig.Anonymization.Storage.Neon.BranchName, map[string]string{})
-		} else {
-			projectId = config.ReplaceVariables(dbConfig.Source.Neon.ProjectId, map[string]string{})
-			apiKey = config.ReplaceVariables(dbConfig.Source.Neon.ApiKey, map[string]string{})
-			parentBranch = config.ReplaceVariables(dbConfig.Source.Neon.ParentBranch, map[string]string{})
-		}
+		projectId := config.ReplaceVariables(dbConfig.Source.Neon.ProjectId, nil)
+		apiKey := config.ReplaceVariables(dbConfig.Source.Neon.ApiKey, nil)
+		parentBranch := config.ReplaceVariables(dbConfig.Source.Neon.ParentBranch, nil)
 
 		return NewNeonPruneHandler(
 			projectId,
 			apiKey,
 			parentBranch,
-			dbConfig.Source.Neon.PreviewBranch,
+			dbConfig.PreviewBranch,
 		)
+	case config.DatabaseProviderGeneric:
+		return nil, errors.New("generic provider without anonymization is currently unsupported")
 	}
 
-	return nil, errors.New(fmt.Sprintf("unsupported database provider: %s", dbConfig.Source.Provider))
+	return nil, errors.New(fmt.Sprintf("unsupported source database provider: %s", dbConfig.Source.Provider))
 }

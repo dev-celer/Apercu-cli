@@ -51,6 +51,7 @@ type Config struct {
 }
 
 type Database struct {
+	PreviewBranch string                 `yaml:"preview_branch"`
 	Source        *DatabaseSource        `yaml:"source"`
 	Anonymization *DatabaseAnonymization `yaml:"anonymization,omitempty"`
 	Migration     *DatabaseMigration     `yaml:"migration,omitempty"`
@@ -60,21 +61,26 @@ type Database struct {
 
 type DatabaseSource struct {
 	Provider DatabaseProvider    `yaml:"provider"`
-	Neon     *DatabaseNeonSource `yaml:"neon"`
+	Neon     *DatabaseNeonSource `yaml:"neon,omitempty"`
+	Generic  *GenericSource      `yaml:"generic,omitempty"`
 }
 
 type DatabaseProvider string
 
 const (
-	DatabaseProviderNeon DatabaseProvider = "neon"
+	DatabaseProviderNeon    DatabaseProvider = "neon"
+	DatabaseProviderGeneric DatabaseProvider = "generic"
 )
 
 type DatabaseNeonSource struct {
 	ProjectId     string                    `yaml:"project_id"`
 	ApiKey        string                    `yaml:"api_key"`
 	ParentBranch  string                    `yaml:"parent_branch"`
-	PreviewBranch string                    `yaml:"preview_branch"`
 	BranchingType DatabaseNeonBranchingType `yaml:"branching_type" default:"parent_data"`
+}
+
+type GenericSource struct {
+	DatabaseUrl string `yaml:"database_url"`
 }
 
 type DatabaseNeonBranchingType string

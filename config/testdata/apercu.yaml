@@ -1,12 +1,12 @@
 databases:
   mydb:
+    preview_branch: "preview-${{ PR_NUMBER }}"
     source:
       provider: neon
       neon:
         project_id: "test-project"
         api_key: "test-key"
         parent_branch: "main"
-        preview_branch: "preview-${{ PR_NUMBER }}"
         branching_type: "schema_only"
     anonymization:
       greenmask_config: "./greenmask.yaml"
