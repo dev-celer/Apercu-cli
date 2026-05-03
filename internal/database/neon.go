@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
-	"regexp"
-	"strconv"
 	"time"
 
 	neon "github.com/kislerdm/neon-sdk-go"
@@ -106,31 +104,7 @@ func (h *NeonHandler) GetConnectionFields() (helper.ConnectionFields, error) {
 	slog.Debug("Database url found")
 
 	// Extract values from database url
-	return extractConnectionFieldsFromUrl(resp.URI)
-}
-
-var reg = regexp.MustCompile(`postgresql:\/\/(.+?):(.+?)@(.+?)[\/:](\d*)\/?(.+?)?(?:\?|$)`)
-
-func extractConnectionFieldsFromUrl(databaseUrl string) (helper.ConnectionFields, error) {
-	matches := reg.FindStringSubmatch(databaseUrl)
-
-	portStr := matches[4]
-	if portStr == "" {
-		portStr = "5432"
-	}
-	port, err := strconv.Atoi(portStr)
-	if err != nil {
-		return helper.ConnectionFields{}, errors.New(fmt.Sprintf("Failed to parse port from database url: %v", err))
-	}
-
-	return helper.ConnectionFields{
-		Host:     matches[3],
-		Port:     port,
-		User:     matches[1],
-		Password: matches[2],
-		Database: matches[5],
-		Url:      databaseUrl,
-	}, nil
+	return helper.ExtractConnectionFieldsFromUrl(resp.URI)
 }
 
 func (h *NeonHandler) waitForOperationToComplete(operationId string) error {
