@@ -82,6 +82,12 @@ func reset(cmd *cobra.Command, args []string) error {
 		dbOutput.Migration = migrationHandler.GetOutput()
 	}
 
+	// Generate warnings on schema diff
+	if dbOutput.Migration != nil && len(dbOutput.Migration.SchemaDiff) > 0 {
+		warnings := GenerateWarningsOnSchemaDiff(&dbConfig, dbOutput.Migration.SchemaDiff)
+		dbOutput.Warnings = append(dbOutput.Warnings, warnings...)
+	}
+
 	// Apply the seeding
 	seedHandler, err := seeding.GetSeedingHandler(dbConfig, &dbState, conn)
 	if err != nil {

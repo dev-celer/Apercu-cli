@@ -1,9 +1,12 @@
 package commands
 
 import (
+	"apercu-cli/config"
 	"apercu-cli/helper"
+	greenmaskhelper "apercu-cli/helper/greenmask"
 	"apercu-cli/helper/metrics"
 	"apercu-cli/helper/pgproxy"
+	"apercu-cli/helper/pii"
 	"apercu-cli/helper/schema_diff"
 	warningshelper "apercu-cli/helper/warnings"
 	"apercu-cli/internal/migration"
@@ -104,7 +107,7 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 
 	// Apply the migrations
 	if err := migrationHandler.Apply(ctx); err != nil {
-		if migrationOutput != nil && migrationOutput.Logs != nil {
+		if migrationOutput.Logs != nil {
 			_, _ = fmt.Fprintln(log.Writer(), "\n-----Migration runner output-----")
 			_, _ = fmt.Fprintln(log.Writer(), *migrationOutput.Logs)
 			_, _ = fmt.Fprintln(log.Writer(), "---------------------------------")
@@ -114,14 +117,14 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 	}
 
 	if runnerOutput {
-		if migrationOutput != nil && migrationOutput.Logs != nil {
+		if migrationOutput.Logs != nil {
 			_, _ = fmt.Fprintln(log.Writer(), "\n-----Migration runner output-----")
 			_, _ = fmt.Fprintln(log.Writer(), *migrationOutput.Logs)
 			_, _ = fmt.Fprintln(log.Writer(), "---------------------------------")
 		}
 	}
 
-	if databaseConn != nil && migrationOutput != nil {
+	if databaseConn != nil {
 		db, err := sql.Open("postgres", databaseConn.Url)
 		if err != nil {
 			return "", errors.New(fmt.Sprintf("Failed to connect to database: %v", err))
@@ -133,7 +136,7 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 		if err != nil {
 			return "", err
 		}
-		migrationOutput.SchemaDiff = schema_diff.GetSchemaDiffText(initialSchema, finalSchema)
+		migrationOutput.SchemaDiff = schema_diff.GetSchemasDiff(initialSchema, finalSchema)
 
 		// Get Database size metrics
 		finalSize, err := metrics.GetDatabaseStorageInBytes(db, databaseConn.Database)
@@ -211,6 +214,96 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 	migrationMessage += fmt.Sprintf(", %d migrations applied", migrationOutput.Count)
 
 	return migrationMessage, nil
+}
+
+func GenerateWarningsOnSchemaDiff(dbConfig *config.Database, schemasDiff map[string]*schema_diff.SchemaDiff) []string {
+	if len(schemasDiff) == 0 {
+		return nil
+	}
+
+	// Parse GreenMask config for handled rows
+	modifiedTables := make([]greenmaskhelper.ModifiedTable, 0)
+	if dbConfig != nil && dbConfig.Anonymization != nil && dbConfig.Anonymization.GreenmaskConfig != "" {
+		c, err := greenmaskhelper.ParseConfig(dbConfig.Anonymization.GreenmaskConfig)
+		if err != nil {
+			return []string{
+				err.Error(),
+			}
+		}
+		if c != nil {
+			modifiedTables = c.ModifiedTables()
+		}
+	}
+
+	warnings := make([]string, 0)
+
+	// PII fields added checks
+	piiFields := detectPIIFieldsFromSchemasDiff(schemasDiff)
+	for schema, t := range piiFields {
+		for table, columns := range t {
+			detectedColumns := make([]string, 0)
+			for _, column := range columns {
+				if !greenmaskhelper.IsRowModified(modifiedTables, schema, table, column) {
+					detectedColumns = append(detectedColumns, column)
+				}
+			}
+
+			if len(detectedColumns) > 0 {
+				fullTableName := fmt.Sprintf("%s.%s", schema, table)
+				var columnsList string
+				for i := range detectedColumns {
+					columnsList += detectedColumns[i]
+					if i < len(detectedColumns)-1 {
+						columnsList += ", "
+					}
+				}
+				warnings = append(warnings, fmt.Sprintf("PII fields addition detected without anonymization in table %s (%s)", fullTableName, columnsList))
+			}
+		}
+	}
+
+	return warnings
+}
+
+// detectPIIFieldsFromSchemasDiff return map[Schemas]map[Table][]columns
+func detectPIIFieldsFromSchemasDiff(schemasDiff map[string]*schema_diff.SchemaDiff) map[string]map[string][]string {
+	piiFields := make(map[string]map[string][]string)
+
+	for schema, diff := range schemasDiff {
+		schemaFields := make(map[string][]string)
+
+		// Handle created tables
+		for _, t := range diff.CreatedTables {
+			columns := make([]string, 0)
+			for _, c := range t.Columns {
+				if pii.IsPII(t.Name, c.Name) {
+					columns = append(columns, c.Name)
+				}
+			}
+			if len(columns) > 0 {
+				schemaFields[t.Name] = columns
+			}
+		}
+
+		// Handle updated tables
+		for _, t := range diff.UpdatedTables {
+			columns := make([]string, 0)
+			for _, c := range t.CreatedColumns {
+				if pii.IsPII(t.Name, c.Name) {
+					columns = append(columns, c.Name)
+				}
+			}
+			if len(columns) > 0 {
+				schemaFields[t.Name] = columns
+			}
+		}
+
+		if schemaFields != nil {
+			piiFields[schema] = schemaFields
+		}
+	}
+
+	return piiFields
 }
 
 func generateQueryRun(db *sql.DB, query string) output.OutputDatabaseMigrationExplainQueryRun {

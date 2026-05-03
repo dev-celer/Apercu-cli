@@ -3,6 +3,7 @@ package output
 import (
 	"apercu-cli/helper/metrics"
 	"apercu-cli/helper/pgproxy"
+	"apercu-cli/helper/schema_diff"
 	"bytes"
 	"fmt"
 	"slices"
@@ -32,7 +33,7 @@ type OutputDatabaseMigration struct {
 	Logs        *string                               `yaml:"logs,omitempty" json:"logs,omitempty"`
 	Count       int                                   `yaml:"count" json:"count"`
 	Duration    string                                `yaml:"duration" json:"duration"`
-	SchemaDiff  *string                               `yaml:"schema_diff,omitempty" json:"schema_diff,omitempty"`
+	SchemaDiff  map[string]*schema_diff.SchemaDiff    `yaml:"schema_diff,omitempty" json:"schema_diff,omitempty"`
 	Stats       *OutputDatabaseMigrationStats         `yaml:"stats,omitempty" json:"stats,omitempty"`
 	Explains    []OutputDatabaseMigrationExplainQuery `yaml:"explains,omitempty" json:"explains,omitempty"`
 	PgProxyLogs []pgproxy.QueryEvent                  `yaml:"pg_proxy_logs,omitempty" json:"pg_proxy_logs,omitempty"`
@@ -184,6 +185,13 @@ var templateFuncs = template.FuncMap{
 		}
 		return fmt.Sprintf("%.2f TB", float64(i)/1024/1024/1024/1024)
 	},
+	"print_schemas_diff": func(schemasDiff map[string]*schema_diff.SchemaDiff) string {
+		text := schema_diff.GetSchemasDiffText(schemasDiff)
+		if text == nil {
+			return ""
+		}
+		return *text
+	},
 	"print_explain": func(e []OutputDatabaseMigrationExplainQuery) string {
 		displayedFile := make([]string, 0)
 		var outputStr string
@@ -292,7 +300,7 @@ var markdownTmpl = template.Must(template.New("markdown").Funcs(templateFuncs).P
 <summary><b>Schema Diff</b></summary>
 
 ` + "```diff" + `
-{{deref $db.Migration.SchemaDiff}}
+{{print_schemas_diff $db.Migration.SchemaDiff}}
 ` + "```" + `
 
 </details>

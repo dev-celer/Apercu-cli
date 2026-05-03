@@ -289,13 +289,14 @@ func GetSchema(db *sql.DB) (map[string]Schema, error) {
 	return convertedSchemas, nil
 }
 
-func GetSchemaDiffText(oldSchema, newSchema map[string]Schema) *string {
-	var text string
+func GetSchemasDiff(oldSchema, newSchema map[string]Schema) map[string]*SchemaDiff {
+	diffs := make(map[string]*SchemaDiff)
+
 	// Handle deleted and updated schema
 	for schemaName, schema := range oldSchema {
 		diff := GetSchemaDiff(&schema, new(newSchema[schemaName]))
 		if diff != nil {
-			text += "\n" + schemaName + ":\n" + diff.GenerateText() + "\n"
+			diffs[schemaName] = diff
 		}
 		delete(newSchema, schemaName)
 	}
@@ -304,10 +305,21 @@ func GetSchemaDiffText(oldSchema, newSchema map[string]Schema) *string {
 	for schemaName, schema := range newSchema {
 		diff := GetSchemaDiff(nil, &schema)
 		if diff != nil {
-			text += "\n" + schemaName + ":\n" + diff.GenerateText() + "\n"
+			diffs[schemaName] = diff
 		}
 	}
 
+	return diffs
+}
+
+func GetSchemasDiffText(schemasDiff map[string]*SchemaDiff) *string {
+	var text string
+
+	for schemaName, diff := range schemasDiff {
+		if diff != nil {
+			text += "\n" + schemaName + ":\n" + diff.GenerateText() + "\n"
+		}
+	}
 	if text == "" {
 		return nil
 	}
