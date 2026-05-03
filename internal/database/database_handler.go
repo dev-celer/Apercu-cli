@@ -22,6 +22,10 @@ func GetPreviewDatabaseHandler(dbConfig config.Database) (HandlerInterface, erro
 		slog.Debug("No source database specified")
 		return nil, nil
 	}
+	if dbConfig.PreviewBranch == "" {
+		slog.Debug("No preview branch pattern specified")
+		return nil, nil
+	}
 
 	// If anonymization is enabled, use the storage database information
 	if dbConfig.Anonymization != nil {
@@ -178,6 +182,10 @@ type PruningHandlerInterface interface {
 func GetPruningDatabaseHandler(dbConfig config.Database) (PruningHandlerInterface, error) {
 	if dbConfig.Source == nil {
 		slog.Debug("No source database specified")
+		return nil, nil
+	}
+	if dbConfig.PreviewBranch == "" {
+		slog.Debug("No preview branch pattern specified")
 		return nil, nil
 	}
 
