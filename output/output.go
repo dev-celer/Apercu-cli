@@ -29,14 +29,15 @@ func NewPreviewOutputDatabase() *PreviewOutputDatabase {
 }
 
 type OutputDatabaseMigration struct {
-	Logs        *string                       `yaml:"logs,omitempty" json:"logs,omitempty"`
-	Count       int                           `yaml:"count" json:"count"`
-	Duration    string                        `yaml:"duration" json:"duration"`
-	SchemaDiff  *string                       `yaml:"schema_diff,omitempty" json:"schema_diff,omitempty"`
-	Stats       *OutputDatabaseMigrationStats `yaml:"stats,omitempty" json:"stats,omitempty"`
-	PgProxyLogs []pgproxy.QueryEvent          `yaml:"pg_proxy_logs,omitempty" json:"pg_proxy_logs,omitempty"`
-	Warnings    []string                      `yaml:"warnings,omitempty" json:"warnings,omitempty"`
-	Errors      []string                      `yaml:"errors,omitempty" json:"errors,omitempty"`
+	Logs        *string                               `yaml:"logs,omitempty" json:"logs,omitempty"`
+	Count       int                                   `yaml:"count" json:"count"`
+	Duration    string                                `yaml:"duration" json:"duration"`
+	SchemaDiff  *string                               `yaml:"schema_diff,omitempty" json:"schema_diff,omitempty"`
+	Stats       *OutputDatabaseMigrationStats         `yaml:"stats,omitempty" json:"stats,omitempty"`
+	Explains    []OutputDatabaseMigrationExplainQuery `yaml:"explains,omitempty" json:"explains,omitempty"`
+	PgProxyLogs []pgproxy.QueryEvent                  `yaml:"pg_proxy_logs,omitempty" json:"pg_proxy_logs,omitempty"`
+	Warnings    []string                              `yaml:"warnings,omitempty" json:"warnings,omitempty"`
+	Errors      []string                              `yaml:"errors,omitempty" json:"errors,omitempty"`
 }
 
 type OutputDatabaseMigrationStats struct {
@@ -45,7 +46,6 @@ type OutputDatabaseMigrationStats struct {
 	SizeDelta   int64                                                             `yaml:"size_delta" json:"size_delta"`
 	WALDelta    int64                                                             `yaml:"wal_delta" json:"wal_delta"`
 	LockStats   map[pgproxy.QueryLock]map[string]OutputDatabaseMigrationLockStats `yaml:"lock_stats,omitempty" json:"lock_stats,omitempty"`
-	Explains    []OutputDatabaseMigrationExplainQuery                             `yaml:"explains,omitempty" json:"explains,omitempty"`
 }
 
 type OutputDatabaseMigrationExplainQuery struct {
@@ -63,14 +63,13 @@ type OutputDatabaseMigrationExplainQueryRun struct {
 	Error          *string                `yaml:"error,omitempty" json:"error,omitempty"`
 }
 
-func NewOutputDatabaseMigrationStats(initialSize int64, finalSize int64, initialWalSize int64, finalWalSize int64, lockStats map[pgproxy.QueryLock]map[string]OutputDatabaseMigrationLockStats, explainQueries []OutputDatabaseMigrationExplainQuery) *OutputDatabaseMigrationStats {
+func NewOutputDatabaseMigrationStats(initialSize int64, finalSize int64, initialWalSize int64, finalWalSize int64, lockStats map[pgproxy.QueryLock]map[string]OutputDatabaseMigrationLockStats) *OutputDatabaseMigrationStats {
 	return &OutputDatabaseMigrationStats{
 		InitialSize: initialSize,
 		FinalSize:   finalSize,
 		SizeDelta:   finalSize - initialSize,
 		WALDelta:    finalWalSize - initialWalSize,
 		LockStats:   lockStats,
-		Explains:    explainQueries,
 	}
 }
 
@@ -195,35 +194,72 @@ var templateFuncs = template.FuncMap{
 			}
 			currentFile := explain.File
 			displayedFile = append(displayedFile, currentFile)
-			outputStr += fmt.Sprintf("--- %s ---\n", currentFile)
+			outputStr += "<details>\n"
+
+			// Check if file contain warnings
+			bWarning := false
+			for _, explain := range e {
+				if explain.File == currentFile && len(explain.Warnings) > 0 {
+					bWarning = true
+					break
+				}
+			}
+			if bWarning {
+				outputStr += fmt.Sprintf("<summary><span style=\"color:orange\"><b>%s</b></span></summary>\n", currentFile)
+			} else {
+				outputStr += fmt.Sprintf("<summary><b>%s</b></summary>\n\n", currentFile)
+			}
 
 			for _, explain := range e {
 				if explain.File != currentFile {
 					continue
 				}
 
-				outputStr += fmt.Sprintf("**%s**\n", explain.Query)
-				for _, warning := range explain.Warnings {
-					outputStr += fmt.Sprintf("**WARNING**: %s\n", warning)
+				// Display details header
+				outputStr += "<details>\n"
+				var query string
+				if len(explain.Query) > 120 {
+					query = explain.Query[:120] + "..."
+				} else {
+					query = explain.Query
 				}
+				if len(explain.Warnings) > 0 {
+					outputStr += fmt.Sprintf("<summary><span style=\"color:orange\"><b>%s</b></span></summary>\n", query)
+				} else {
+					outputStr += fmt.Sprintf("<summary><b>%s</b></summary>\n\n", query)
+				}
+
+				// Display warnings
+				if len(explain.Warnings) > 0 {
+					outputStr += "> [!WARNING]\n"
+				}
+				for _, warning := range explain.Warnings {
+					outputStr += fmt.Sprintf("> - %s", warning)
+				}
+
 				if explain.PreMigrationRun != nil {
-					outputStr += fmt.Sprintf("**Pre migration:**\n")
+					outputStr += fmt.Sprintf("**Pre migration:**\n```\n")
 					if explain.PreMigrationRun.Error != nil {
 						outputStr += fmt.Sprintf("ERROR: %s\n", *explain.PreMigrationRun.Error)
 					} else if explain.PreMigrationRun.ExplainedQuery != nil {
 						outputStr += explain.PreMigrationRun.ExplainedQuery.String()
 					}
+					outputStr += "```\n"
 				}
 				if explain.PostMigrationRun != nil {
-					outputStr += fmt.Sprintf("**Post migration:**\n")
+					outputStr += fmt.Sprintf("**Post migration:**\n```\n")
 					if explain.PostMigrationRun.Error != nil {
 						outputStr += fmt.Sprintf("ERROR: %s\n", *explain.PostMigrationRun.Error)
 					} else if explain.PostMigrationRun.ExplainedQuery != nil {
 						outputStr += explain.PostMigrationRun.ExplainedQuery.String()
 					}
+					outputStr += "```\n"
 				}
-				outputStr += "------\n"
+
+				outputStr += "\n</details>\n"
 			}
+
+			outputStr += "\n</details>\n"
 		}
 		return outputStr
 	},
@@ -253,7 +289,7 @@ var markdownTmpl = template.Must(template.New("markdown").Funcs(templateFuncs).P
 {{- if $db.Migration.SchemaDiff }}
 
 <details>
-<summary>Schema Diff</summary>
+<summary><b>Schema Diff</b></summary>
 
 ` + "```diff" + `
 {{deref $db.Migration.SchemaDiff}}
@@ -264,7 +300,7 @@ var markdownTmpl = template.Must(template.New("markdown").Funcs(templateFuncs).P
 {{- if $db.Migration.Stats}}
 
 <details>
-<summary>Stats</summary>
+<summary><b>Stats</b></summary>
 
 ` + "```" + `
 --- Size detail ---
@@ -279,19 +315,24 @@ WAL Size Delta: {{size_pretty $db.Migration.Stats.WALDelta}}
 {{range $table, $stats := $tables}}{{$table}} | count {{$stats.LockCount}} | mean {{$stats.MeanDuration}} | max {{$stats.MaxDuration}}
 {{end}}{{end}}
 {{- end}}
-{{- if $db.Migration.Stats.Explains}}
---- Explains queries ---
-{{print_explain $db.Migration.Stats.Explains}}
-{{- end}}
 ` + "```" + `
 
 </details>
 
-{{- end}}
+{{- end }}
+{{- if $db.Migration.Explains}}
+<details>
+<summary><b>Explained Queries</b></summary>
+
+{{print_explain $db.Migration.Explains}}
+
+</details>
+{{end}}
+
 {{- if $db.Migration.Logs}}
 
 <details>
-<summary>Logs</summary>
+<summary><b>Logs</b></summary>
 
 ` + "```" + `
 {{deref $db.Migration.Logs}}
@@ -320,7 +361,7 @@ WAL Size Delta: {{size_pretty $db.Migration.Stats.WALDelta}}
 {{- if $db.Seeding.Logs}}
 
 <details>
-<summary>Logs</summary>
+<summary><b>Logs</b></summary>
 
 ` + "```" + `
 {{deref $db.Seeding.Logs}}

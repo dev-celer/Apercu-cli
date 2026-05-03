@@ -185,7 +185,8 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 			}
 		}
 
-		migrationOutput.Stats = output.NewOutputDatabaseMigrationStats(initialSize, finalSize, initialWALSize, finalWALSize, locks, explainQueriesStats)
+		migrationOutput.Explains = explainQueriesStats
+		migrationOutput.Stats = output.NewOutputDatabaseMigrationStats(initialSize, finalSize, initialWALSize, finalWALSize, locks)
 
 		// Handle Warnings
 		if migrationOutput.Stats.WALDelta > 1024*1024*1024 {
