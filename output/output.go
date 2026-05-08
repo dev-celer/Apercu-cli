@@ -81,6 +81,14 @@ func GetTableLockStats(queries []pgproxy.QueryEvent) map[pgproxy.QueryLock]map[s
 		if query.Stats.Lock == nil || query.Stats.Table == "" {
 			continue
 		}
+		// Filter locks type
+		switch *query.Stats.Lock {
+		case pgproxy.QueryLockAccessExclusive:
+		case pgproxy.QueryLockShareRowExclusive:
+		case pgproxy.QueryLockShareUpdateExclusive:
+		default:
+			continue
+		}
 
 		// Get lock map
 		l, ok := lockStats[*query.Stats.Lock]
