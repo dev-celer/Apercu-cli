@@ -30,15 +30,16 @@ func NewPreviewOutputDatabase() *PreviewOutputDatabase {
 }
 
 type OutputDatabaseMigration struct {
-	Logs        *string                               `yaml:"logs,omitempty" json:"logs,omitempty"`
-	Count       int                                   `yaml:"count" json:"count"`
-	Duration    string                                `yaml:"duration" json:"duration"`
-	SchemaDiff  map[string]*schema_diff.SchemaDiff    `yaml:"schema_diff,omitempty" json:"schema_diff,omitempty"`
-	Stats       *OutputDatabaseMigrationStats         `yaml:"stats,omitempty" json:"stats,omitempty"`
-	Explains    []OutputDatabaseMigrationExplainQuery `yaml:"explains,omitempty" json:"explains,omitempty"`
-	PgProxyLogs []pgproxy.QueryEvent                  `yaml:"pg_proxy_logs,omitempty" json:"pg_proxy_logs,omitempty"`
-	Warnings    []string                              `yaml:"warnings,omitempty" json:"warnings,omitempty"`
-	Errors      []string                              `yaml:"errors,omitempty" json:"errors,omitempty"`
+	ProdStats   map[string]map[string]metrics.TableStats `yaml:"prod_stats,omitempty" json:"prod_stats,omitempty"`
+	Logs        *string                                  `yaml:"logs,omitempty" json:"logs,omitempty"`
+	Count       int                                      `yaml:"count" json:"count"`
+	Duration    string                                   `yaml:"duration" json:"duration"`
+	SchemaDiff  map[string]*schema_diff.SchemaDiff       `yaml:"schema_diff,omitempty" json:"schema_diff,omitempty"`
+	Stats       *OutputDatabaseMigrationStats            `yaml:"stats,omitempty" json:"stats,omitempty"`
+	Explains    []OutputDatabaseMigrationExplainQuery    `yaml:"explains,omitempty" json:"explains,omitempty"`
+	PgProxyLogs []pgproxy.QueryEvent                     `yaml:"pg_proxy_logs,omitempty" json:"pg_proxy_logs,omitempty"`
+	Warnings    []string                                 `yaml:"warnings,omitempty" json:"warnings,omitempty"`
+	Errors      []string                                 `yaml:"errors,omitempty" json:"errors,omitempty"`
 }
 
 type OutputDatabaseMigrationStats struct {

@@ -1,0 +1,117 @@
+package metrics
+
+import (
+	"database/sql"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/lib/pq"
+)
+
+const AnalyzeDeltaThreshold = time.Hour * 24
+
+type TablePgClassStats struct {
+	RelId           int64
+	TableName       string
+	SchemaName      string
+	RowCount        int64
+	LastAnalyze     time.Time
+	LastAutoAnalyze time.Time
+}
+
+func getPgClassDatabaseStats(db *sql.DB) ([]TablePgClassStats, error) {
+	rows, err := db.Query("select s.relid, c.relname as table_name, s.schemaname as schema_name, c.reltuples::bigint as row_count, s.last_analyze, s.last_autoanalyze from pg_class c inner join pg_stat_user_tables s on s.relname = c.relname where c.relkind = 'r'")
+	if err != nil {
+		return nil, errors.New(fmt.Sprintf("Failed to query prod database for stats: %v", err))
+	}
+	defer func() { _ = rows.Close() }()
+
+	stats := make([]TablePgClassStats, 0)
+	for rows.Next() {
+		var s TablePgClassStats
+		if err := rows.Scan(&s.RelId, &s.TableName, &s.SchemaName, &s.RowCount, &s.LastAnalyze, &s.LastAutoAnalyze); err != nil {
+			return nil, errors.New(fmt.Sprintf("Failed to scan returned rows: %v", err))
+		}
+		stats = append(stats, s)
+	}
+
+	return stats, nil
+}
+
+func getExactRowCount(db *sql.DB, schemaName string, tableName string) (int64, error) {
+	var rowCount int64
+	err := db.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM '%s'.'%s'", schemaName, tableName)).Scan(&rowCount)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get row count for table %s.%s: %v", schemaName, tableName, err)
+	}
+	return rowCount, nil
+}
+
+type TableStats struct {
+	RowCount  int64
+	TableSize int64
+}
+
+func GetDatabaseStats(db *sql.DB) (map[string]map[string]TableStats, error) {
+	stats := make(map[string]map[string]TableStats)
+
+	pgClassStats, err := getPgClassDatabaseStats(db)
+	if err != nil {
+		return nil, err
+	}
+	isReadOnly := false
+	for _, s := range pgClassStats {
+		// Create the map entry if it's missing
+		if _, ok := stats[s.SchemaName]; !ok {
+			stats[s.SchemaName] = make(map[string]TableStats)
+		}
+
+		// If in read only mode, request the row count from SELECT COUNT(*)
+		if isReadOnly {
+			s.RowCount, err = getExactRowCount(db, s.SchemaName, s.TableName)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		// If last analyze delta time exceed threshold, try to call analyze
+		lastAnalyze := min(time.Now().Sub(s.LastAutoAnalyze), time.Now().Sub(s.LastAnalyze))
+		if lastAnalyze.Hours() > AnalyzeDeltaThreshold.Hours() {
+			_, err := db.Exec(fmt.Sprintf("ANALYZE \"%s\".\"%s\"", s.SchemaName, s.TableName))
+			if err != nil {
+				if pqErr, ok := errors.AsType[*pq.Error](err); ok && (pqErr.Code == "25006" || pqErr.Code == "42501") {
+					isReadOnly = true
+					s.RowCount, err = getExactRowCount(db, s.SchemaName, s.TableName)
+					if err != nil {
+						return nil, err
+					}
+				} else {
+					return nil, fmt.Errorf("failed to call ANALYZE on table %s.%s: %v", s.SchemaName, s.TableName, err)
+				}
+			}
+
+			// Recall the pg_class request for row count
+			if !isReadOnly {
+				err = db.QueryRow(fmt.Sprintf("select c.reltuples::bigint as row_count from pg_class c inner join pg_stat_user_tables s on s.relname = c.relname where c.relkind = 'r' and s.relid = '%d'", s.RelId)).Scan(&s.RowCount)
+				if err != nil {
+					return nil, fmt.Errorf("failed to get row count for table %s.%s: %v", s.SchemaName, s.TableName, err)
+				}
+			}
+		}
+
+		// Retrieve the table size
+		var tableSize int64
+		err := db.QueryRow(fmt.Sprintf("SELECT pg_total_relation_size(%d)", s.RelId)).Scan(&tableSize)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get table size for table %s.%s: %v", s.SchemaName, s.TableName, err)
+		}
+
+		stats[s.SchemaName][s.TableName] = TableStats{
+			RowCount:  s.RowCount,
+			TableSize: tableSize,
+		}
+	}
+
+	return stats, nil
+}

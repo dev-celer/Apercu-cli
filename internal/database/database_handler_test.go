@@ -18,7 +18,8 @@ func TestGetPreviewDatabaseHandler_NilSource(t *testing.T) {
 func TestGetPreviewDatabaseHandler_UnsupportedProvider(t *testing.T) {
 	t.Parallel()
 	handler, err := GetPreviewDatabaseHandler(config.Database{
-		Source: &config.DatabaseSource{Provider: "unknown"},
+		Source:        &config.DatabaseSource{Provider: "unknown"},
+		PreviewBranch: "preview-1",
 	})
 	assert.Error(t, err)
 	assert.Nil(t, handler)
@@ -32,6 +33,7 @@ func TestGetPreviewDatabaseHandler_MissingNeonConfig(t *testing.T) {
 			Provider: config.DatabaseProviderNeon,
 			Neon:     nil,
 		},
+		PreviewBranch: "preview-1",
 	})
 	assert.Error(t, err)
 	assert.Nil(t, handler)
@@ -128,7 +130,8 @@ func TestGetPruningDatabaseHandler_NilSource(t *testing.T) {
 func TestGetPruningDatabaseHandler_UnsupportedProvider(t *testing.T) {
 	t.Parallel()
 	handler, err := GetPruningDatabaseHandler(config.Database{
-		Source: &config.DatabaseSource{Provider: "unknown"},
+		Source:        &config.DatabaseSource{Provider: "unknown"},
+		PreviewBranch: "preview-1",
 	})
 	assert.Error(t, err)
 	assert.Nil(t, handler)
@@ -142,6 +145,7 @@ func TestGetPruningDatabaseHandler_MissingNeonConfig(t *testing.T) {
 			Provider: config.DatabaseProviderNeon,
 			Neon:     nil,
 		},
+		PreviewBranch: "preview-1",
 	})
 	assert.Error(t, err)
 	assert.Nil(t, handler)

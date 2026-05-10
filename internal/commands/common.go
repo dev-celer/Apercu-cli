@@ -103,6 +103,12 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 				})
 			}
 		}
+
+		prodStats, err := metrics.GetDatabaseStats(db)
+		if err != nil {
+			return "", err
+		}
+		migrationOutput.ProdStats = prodStats
 	}
 
 	// Apply the migrations
