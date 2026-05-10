@@ -6,9 +6,14 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
+
+	"github.com/montanaflynn/stats"
 )
 
 func extractQueriesFromFile(path string) ([]string, error) {
@@ -107,8 +112,6 @@ func ExtractAllQueriesToExplain(paths []string) (*ExtractQueriesOutput, error) {
 }
 
 func ExplainQuery(db *sql.DB, query string) (*ExplainResult, error) {
-	slog.Debug("Explaining query", "query", query)
-
 	tx, err := db.Begin()
 	if err != nil {
 		return nil, fmt.Errorf("begin transaction: %w", err)
@@ -130,4 +133,31 @@ func ExplainQuery(db *sql.DB, query string) (*ExplainResult, error) {
 	}
 
 	return &out[0], nil
+}
+
+// BootstrapMedianRatio return relative execution time median delta, hi, lo
+func BootstrapMedianRatio(before, after []float64, iters int, confidence float64) (float64, float64, float64) {
+	rng := rand.New(rand.NewPCG(uint64(time.Now().Second()), 1024))
+	deltas := make([]float64, iters)
+
+	resample := func(src []float64) []float64 {
+		out := make([]float64, len(src))
+		for i := range out {
+			out[i] = src[rng.IntN(len(src))]
+		}
+		return out
+	}
+
+	for i := 0; i < iters; i++ {
+		bMedian, _ := stats.Median(resample(before))
+		aMedian, _ := stats.Median(resample(after))
+		deltas[i] = aMedian/bMedian - 1
+	}
+
+	sort.Float64s(deltas)
+	alpha := (1 - confidence) / 2
+	lo := deltas[int(alpha*float64(iters))]
+	hi := deltas[int((1-alpha)*float64(iters))-1]
+	point := deltas[iters/2]
+	return point, hi, lo
 }

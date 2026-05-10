@@ -6,42 +6,37 @@ import (
 	"log/slog"
 )
 
-const ExecutionTimeThreshold = 0.2
+const PlanningTimeThreshold = 0.1
+const ExecutionTimeThreshold = 0.1
 
-func GenerateExecutionTimeWarnings(preMigrationRun *output.OutputDatabaseMigrationExplainQueryRun, postMigrationRun *output.OutputDatabaseMigrationExplainQueryRun) string {
-	// Planned time regression
-	// If planned time increased by more than 20%, warn about query planned time regression
+func GenerateExecutionTimeWarnings(q *output.OutputDatabaseMigrationExplainQuery) string {
 	bPlannedTimeRegression := false
-	prePlannedTime := preMigrationRun.PlannedTime.Microseconds()
-	postPlannedTime := postMigrationRun.PlannedTime.Microseconds()
-	diff := postPlannedTime - prePlannedTime
-	if diff > 0 && diff >= int64(float64(prePlannedTime)*ExecutionTimeThreshold) {
+	bRealTimeRegression := false
+
+	// Check for planned time regression
+	if q.PreMigrationRun.ExplainedQuery.PlanningTime/q.PostMigrationRun.ExplainedQuery.PlanningTime-1 > PlanningTimeThreshold {
 		bPlannedTimeRegression = true
 	}
 
-	// Real time regression
-	// If real time increased by more than 20%, warn about query real time regression
-	bRealTimeRegression := false
-	preRealTime := preMigrationRun.RealTime.Microseconds()
-	postRealTime := postMigrationRun.RealTime.Microseconds()
-	diff = postRealTime - preRealTime
-	if diff > 0 && diff > int64(float64(preRealTime)*ExecutionTimeThreshold) {
+	// Check for execution time regression
+	if q.Lo >= ExecutionTimeThreshold {
 		bRealTimeRegression = true
 	}
 
-	warningText := ""
+	var warningText string
 	if bPlannedTimeRegression && bRealTimeRegression {
-		slog.Debug("Query exceeded time regression threshold", "prePlannedTime", prePlannedTime, "postPlannedTime", postPlannedTime, "preRealTime", preRealTime, "postRealTime", postRealTime)
-		warningText = fmt.Sprintf("Query execution time regression exceeded %d%% threshold", int(ExecutionTimeThreshold*100))
+		slog.Debug("Query exceeded time regression threshold exceeded for planned time and real execution time", "median", q.MedianDelta, "hi", q.Hi, "Lo", q.Lo, "prePlannedTime", q.PreMigrationRun.ExplainedQuery.PlanningTime, "postPlannedTime", q.PostMigrationRun.ExplainedQuery.PlanningTime)
+		warningText = fmt.Sprintf("Query execution time regression exceeded %d%% threshold", int(PlanningTimeThreshold*100))
 	} else {
-		if bRealTimeRegression {
-			slog.Debug("Query exceeded real time regression threshold", "preRealTime", preRealTime, "postRealTime", postRealTime)
-			warningText = fmt.Sprintf("Query real execution time regression exceeded %d%% threshold", int(ExecutionTimeThreshold*100))
-		}
 		if bPlannedTimeRegression {
-			slog.Debug("Query exceeded planned time regression threshold", "prePlannedTime", prePlannedTime, "postPlannedTime", postPlannedTime)
-			warningText = fmt.Sprintf("Query planned execution time regression exceeded %d%% threshold", int(ExecutionTimeThreshold*100))
+			slog.Debug("Query exceeded planned time regression threshold exceeded for planned time", "prePlannedTime", q.PreMigrationRun.ExplainedQuery.PlanningTime, "postPlannedTime", q.PostMigrationRun.ExplainedQuery.PlanningTime)
+			warningText = fmt.Sprintf("Query planned execution time regression exceeded %d%% threshold", int(PlanningTimeThreshold*100))
+		}
+		if bRealTimeRegression {
+			slog.Debug("Query exceeded real time regression threshold exceeded for real time", "median", q.MedianDelta, "hi", q.Hi, "Lo", q.Lo)
+			warningText = fmt.Sprintf("Query real execution time regression exceeded %d%% threshold", int(PlanningTimeThreshold*100))
 		}
 	}
+
 	return warningText
 }

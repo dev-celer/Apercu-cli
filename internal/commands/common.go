@@ -24,6 +24,7 @@ import (
 	"time"
 
 	_ "github.com/lib/pq"
+	"github.com/montanaflynn/stats"
 )
 
 func ApplySeeding(seedHandler seeding.HandlerInterface) string {
@@ -96,10 +97,19 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 
 		for file, queries := range queriesExtractOutput.Queries {
 			for _, query := range queries {
+				queryRun, err := generateQueryRun(db, query)
+				var preMigrationRun output.OutputDatabaseMigrationExplainQueryRun
+				if err != nil {
+					preMigrationRun.Error = err
+				} else {
+					preMigrationRun.ExecutionTimes = queryRun.ExecutionTimes
+					preMigrationRun.ExplainedQuery = queryRun.MedianFullResult
+				}
+
 				explainQueriesStats = append(explainQueriesStats, output.OutputDatabaseMigrationExplainQuery{
 					File:            file,
 					Query:           query,
-					PreMigrationRun: new(generateQueryRun(db, query)),
+					PreMigrationRun: &preMigrationRun,
 				})
 			}
 		}
@@ -170,7 +180,15 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 					continue
 				}
 
-				explainQueriesStats[idx].PostMigrationRun = new(generateQueryRun(db, query))
+				queryRun, err := generateQueryRun(db, query)
+				var postMigrationRun output.OutputDatabaseMigrationExplainQueryRun
+				if err != nil {
+					postMigrationRun.Error = err
+				} else {
+					postMigrationRun.ExecutionTimes = queryRun.ExecutionTimes
+					postMigrationRun.ExplainedQuery = queryRun.MedianFullResult
+				}
+				explainQueriesStats[idx].PostMigrationRun = &postMigrationRun
 
 				if explainQueriesStats[idx].PreMigrationRun == nil || explainQueriesStats[idx].PostMigrationRun == nil ||
 					explainQueriesStats[idx].PreMigrationRun.Error != nil || explainQueriesStats[idx].PostMigrationRun.Error != nil {
@@ -180,8 +198,18 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 					query = query[:120] + "..."
 				}
 
+				// Generation execution time delta values
+				medianDelta, hi, lo := metrics.BootstrapMedianRatio(explainQueriesStats[idx].PreMigrationRun.ExecutionTimes, explainQueriesStats[idx].PostMigrationRun.ExecutionTimes, 10_000, 0.95)
+				explainQueriesStats[idx].MedianDelta = medianDelta
+				explainQueriesStats[idx].Hi = hi
+				explainQueriesStats[idx].Lo = lo
+
+				// Clear execution times pointers to allow GC to cleanup the data
+				explainQueriesStats[idx].PreMigrationRun.ExecutionTimes = nil
+				explainQueriesStats[idx].PostMigrationRun.ExecutionTimes = nil
+
 				// Generate warnings
-				if warningText := warningshelper.GenerateExecutionTimeWarnings(explainQueriesStats[idx].PreMigrationRun, explainQueriesStats[idx].PostMigrationRun); warningText != "" {
+				if warningText := warningshelper.GenerateExecutionTimeWarnings(&explainQueriesStats[idx]); warningText != "" {
 					_, _ = fmt.Fprintln(log.Writer(), fmt.Sprintf("WARNING: %s\nfile:%s\nquery:%s", warningText, file, query))
 					explainQueriesStats[idx].Warnings = append(explainQueriesStats[idx].Warnings, warningText)
 					regressionWarningInFile++
@@ -312,59 +340,75 @@ func detectPIIFieldsFromSchemasDiff(schemasDiff map[string]*schema_diff.SchemaDi
 	return piiFields
 }
 
-func generateQueryRun(db *sql.DB, query string) output.OutputDatabaseMigrationExplainQueryRun {
-	explainQueryResults := make([]*metrics.ExplainResult, 5)
+type QueryRunResult struct {
+	MedianFullResult *metrics.ExplainResult
+	ExecutionTimes   []float64
+}
 
-	run := output.OutputDatabaseMigrationExplainQueryRun{}
+func generateQueryRun(db *sql.DB, query string) (QueryRunResult, error) {
+	slog.Debug("Explaining query", "query", query)
+	explainQueryResults := make([]*metrics.ExplainResult, 100)
 
-	// Run the query 5 time
+	// Run the query 100 time
 	for i := range explainQueryResults {
 		explainResult, err := metrics.ExplainQuery(db, query)
 		if err != nil {
-			run.Error = new(err.Error())
-			return run
+			return QueryRunResult{}, err
 		}
 
 		explainQueryResults[i] = explainResult
 	}
 
-	// Discard first query as it may a served to wake up the instance or warm the cache
-	explainQueryResults = explainQueryResults[1:]
+	// Discard first queries as it may a served to wake up the instance or warm the cache
+	explainQueryResults = explainQueryResults[5:]
 
-	// Get average plannedTime and realTime
-	avgPlannedTime := time.Duration(0)
-	avgRealTime := time.Duration(0)
-	for _, explainResult := range explainQueryResults {
-		avgPlannedTime += time.Duration(explainResult.PlanningTime * float64(time.Millisecond))
-		avgRealTime += time.Duration(explainResult.ExecutionTime * float64(time.Millisecond))
+	// Extract all execution times
+	executionTimes := make([]float64, len(explainQueryResults))
+	for i, explainResult := range explainQueryResults {
+		executionTimes[i] = explainResult.ExecutionTime
 	}
-	avgPlannedTime /= time.Duration(len(explainQueryResults))
-	avgRealTime /= time.Duration(len(explainQueryResults))
 
-	// Select result closest to average real time
-	var closestResult *metrics.ExplainResult
-	var closestDiff time.Duration
+	// Get median execution time
+	median, err := stats.Median(executionTimes)
+	if err != nil {
+		return QueryRunResult{}, fmt.Errorf("error calculating median of explain results: %w", err)
+	}
+
+	// Select median result
+	var medianQueryResult *metrics.ExplainResult
+	var closestDiff float64
 	for _, explainResult := range explainQueryResults {
-		diff := avgRealTime - time.Duration(explainResult.ExecutionTime*float64(time.Millisecond))
+		diff := explainResult.ExecutionTime - median
 		if diff < 0 {
-			diff = diff * -1
+			diff *= -1
 		}
 
-		if closestResult == nil {
-			closestResult = explainResult
+		if medianQueryResult == nil {
+			medianQueryResult = explainResult
 			closestDiff = diff
-		} else {
-			if diff < closestDiff {
-				closestResult = explainResult
-				closestDiff = diff
+			if explainResult.ExecutionTime == median {
+				break
 			}
+			continue
+		}
+
+		// If explainQuery is the median exit loop
+		if explainResult.ExecutionTime == median {
+			medianQueryResult = explainResult
+			break
+		}
+
+		// If the query is closer to the median update the medianQueryResult pointer
+		if diff < closestDiff {
+			closestDiff = diff
+			medianQueryResult = explainResult
 		}
 	}
 
-	run.ExplainedQuery = closestResult
-	run.PlannedTime = &avgPlannedTime
-	run.RealTime = &avgRealTime
-	return run
+	return QueryRunResult{
+		MedianFullResult: medianQueryResult,
+		ExecutionTimes:   executionTimes,
+	}, nil
 }
 
 func SaveOutputInFile(path string, output *output.PreviewOutput) error {

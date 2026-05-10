@@ -54,15 +54,17 @@ type OutputDatabaseMigrationExplainQuery struct {
 	File             string                                  `yaml:"file" json:"file"`
 	Query            string                                  `yaml:"query" json:"query"`
 	Warnings         []string                                `yaml:"warnings,omitempty" json:"warnings,omitempty"`
+	MedianDelta      float64                                 `yaml:"median_delta" json:"median_delta"`
+	Lo               float64                                 `yaml:"lo" json:"lo"`
+	Hi               float64                                 `yaml:"hi" json:"hi"`
 	PreMigrationRun  *OutputDatabaseMigrationExplainQueryRun `yaml:"pre_migration_run,omitempty" json:"pre_migration_run,omitempty"`
 	PostMigrationRun *OutputDatabaseMigrationExplainQueryRun `yaml:"post_migration_run,omitempty" json:"post_migration_run,omitempty"`
 }
 
 type OutputDatabaseMigrationExplainQueryRun struct {
-	PlannedTime    *time.Duration         `yaml:"planned_cost,omitempty" json:"planned_cost,omitempty"`
-	RealTime       *time.Duration         `yaml:"real_cost,omitempty" json:"real_cost,omitempty"`
+	ExecutionTimes []float64
 	ExplainedQuery *metrics.ExplainResult `yaml:"explained_query,omitempty" json:"explained_query,omitempty"`
-	Error          *string                `yaml:"error,omitempty" json:"error,omitempty"`
+	Error          error                  `yaml:"error,omitempty" json:"error,omitempty"`
 }
 
 func NewOutputDatabaseMigrationStats(initialSize int64, finalSize int64, initialWalSize int64, finalWalSize int64, lockStats map[pgproxy.QueryLock]map[string]OutputDatabaseMigrationLockStats) *OutputDatabaseMigrationStats {
@@ -254,10 +256,16 @@ var templateFuncs = template.FuncMap{
 					outputStr += fmt.Sprintf("> - %s", warning)
 				}
 
+				// Display delta
+				if explain.MedianDelta != 0 && explain.Hi != 0 && explain.Lo != 0 {
+					outputStr += fmt.Sprintf("median %+.1f (95%% CI: %+.1f to %+.1f)", explain.MedianDelta*100, explain.Lo*100, explain.Hi*100)
+				}
+
+				// Display explained query
 				if explain.PreMigrationRun != nil {
 					outputStr += fmt.Sprintf("**Pre migration:**\n```\n")
 					if explain.PreMigrationRun.Error != nil {
-						outputStr += fmt.Sprintf("ERROR: %s\n", *explain.PreMigrationRun.Error)
+						outputStr += fmt.Sprintf("ERROR: %s\n", explain.PreMigrationRun.Error)
 					} else if explain.PreMigrationRun.ExplainedQuery != nil {
 						outputStr += explain.PreMigrationRun.ExplainedQuery.String()
 					}
@@ -266,7 +274,7 @@ var templateFuncs = template.FuncMap{
 				if explain.PostMigrationRun != nil {
 					outputStr += fmt.Sprintf("**Post migration:**\n```\n")
 					if explain.PostMigrationRun.Error != nil {
-						outputStr += fmt.Sprintf("ERROR: %s\n", *explain.PostMigrationRun.Error)
+						outputStr += fmt.Sprintf("ERROR: %s\n", explain.PostMigrationRun.Error)
 					} else if explain.PostMigrationRun.ExplainedQuery != nil {
 						outputStr += explain.PostMigrationRun.ExplainedQuery.String()
 					}
