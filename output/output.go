@@ -18,6 +18,7 @@ type PreviewOutput struct {
 type PreviewOutputDatabase struct {
 	Migration *OutputDatabaseMigration `yaml:"migration,omitempty" json:"migration,omitempty"`
 	Seeding   *OutputDatabaseSeeding   `yaml:"seeding,omitempty" json:"seeding,omitempty"`
+	Metrics   *OutputDatabaseMetrics   `yaml:"metrics,omitempty" json:"metrics,omitempty"`
 	Warnings  []string                 `yaml:"warnings,omitempty" json:"warnings,omitempty"`
 	Errors    []string                 `yaml:"errors,omitempty" json:"errors,omitempty"`
 }
@@ -27,6 +28,13 @@ func NewPreviewOutputDatabase() *PreviewOutputDatabase {
 		Warnings: make([]string, 0),
 		Errors:   make([]string, 0),
 	}
+}
+
+type OutputDatabaseMetrics struct {
+}
+
+func NewOutputDatabaseMetrics() *OutputDatabaseMetrics {
+	return &OutputDatabaseMetrics{}
 }
 
 type OutputDatabaseMigration struct {
