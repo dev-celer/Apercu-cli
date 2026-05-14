@@ -1,6 +1,7 @@
 package engines
 
 import (
+	"apercu-cli/helper/warning"
 	"apercu-cli/output"
 	"database/sql"
 	"fmt"
@@ -57,6 +58,10 @@ func (e *SizeEngine) StoreMetricsToOutput(metrics *output.OutputDatabaseMetrics)
 		SizeDelta:   e.finalSize - e.initialSize,
 		WALDelta:    e.finalWALSize - e.initialWALSize,
 	}
+	return nil
+}
+
+func (e *SizeEngine) GetWarnings() []warning.Warning {
 	return nil
 }
 

@@ -4,6 +4,7 @@ import (
 	"apercu-cli/config"
 	"apercu-cli/helper"
 	"apercu-cli/internal/database"
+	"apercu-cli/internal/metrics"
 	"apercu-cli/internal/migration"
 	"apercu-cli/internal/seeding"
 	"apercu-cli/output"
@@ -96,7 +97,14 @@ func preview(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		ErrorAndExit(err, dbOutput, dbName)
 	}
-	migrationMessage, err := ApplyMigration(ctx, migrationHandler, *prodConn, previewConn, &dbConfig, &configFile)
+
+	// Initialize metrics handler
+	metricHandler, err := metrics.NewMetricsHandler(prodConn.Url, previewConn.Url, &dbConfig, &configFile)
+	if err != nil {
+		ErrorAndExit(err, dbOutput, dbName)
+	}
+
+	migrationMessage, err := ApplyMigration(ctx, migrationHandler, metricHandler)
 	if err != nil {
 		dbOutput.Migration = migrationHandler.GetOutput()
 		ErrorAndExit(err, dbOutput, dbName)
@@ -104,6 +112,8 @@ func preview(cmd *cobra.Command, args []string) error {
 	if migrationHandler != nil {
 		dbOutput.Migration = migrationHandler.GetOutput()
 	}
+
+	dbOutput.Warnings = append(dbOutput.Warnings, metricHandler.GetWarnings()...)
 
 	// Apply the seeding
 	seedHandler, err := seeding.GetSeedingHandler(dbConfig, &dbState, previewConn)

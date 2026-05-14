@@ -1,8 +1,6 @@
 package commands
 
 import (
-	"apercu-cli/config"
-	"apercu-cli/helper"
 	"apercu-cli/internal/metrics"
 	"apercu-cli/internal/migration"
 	"apercu-cli/internal/seeding"
@@ -48,16 +46,12 @@ func ApplySeeding(seedHandler seeding.HandlerInterface) string {
 	return seedingMessage
 }
 
-func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInterface, prodConn, previewConn helper.ConnectionFields, dbConfig *config.Database, fullConfig *config.Config) (string, error) {
+func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInterface, metricHandler *metrics.MetricsHandler) (string, error) {
 	if migrationHandler == nil {
 		return "", nil
 	}
 
-	// Initialize metrics handler
-	metricHandler, err := metrics.NewMetricsHandler(prodConn.Url, previewConn.Url, dbConfig, fullConfig)
-	if err != nil {
-		return "", err
-	}
+	// Get pre migration metrics
 	if err := metricHandler.CollectPreMigrationMetrics(); err != nil {
 		return "", err
 	}

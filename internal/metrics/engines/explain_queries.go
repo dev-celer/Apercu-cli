@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"maps"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
@@ -21,13 +22,13 @@ import (
 	"github.com/montanaflynn/stats"
 )
 
-const PlanningTimeThreshold = 0.1
 const ExecutionTimeThreshold = 0.1
 
 type ExplainQueryEngine struct {
-	db      *sql.DB
-	queries *ExtractQueriesOutput
-	output  []output.OutputDatabaseExplainQuery
+	db       *sql.DB
+	queries  *ExtractQueriesOutput
+	output   []output.OutputDatabaseExplainQuery
+	warnings map[warning.Code]warning.Warning
 }
 
 type ExtractQueriesOutput struct {
@@ -132,9 +133,10 @@ func NewExplainQueryEngine(db *sql.DB, dbConfig *config.Database) (*ExplainQuery
 	}
 
 	return &ExplainQueryEngine{
-		db:      db,
-		queries: queries,
-		output:  make([]output.OutputDatabaseExplainQuery, 0),
+		db:       db,
+		queries:  queries,
+		output:   make([]output.OutputDatabaseExplainQuery, 0),
+		warnings: make(map[warning.Code]warning.Warning),
 	}, nil
 }
 
@@ -206,6 +208,14 @@ func (e *ExplainQueryEngine) CollectPostMigrationMetrics() error {
 			if w := generateExecutionTimeWarnings(&e.output[idx]); w != nil {
 				e.output[idx].Warnings = append(e.output[idx].Warnings, w)
 				warning.PrintWarning(w)
+				// Update top level warning count
+				if topWarning, ok := e.warnings[w.GetWarningCode()]; ok {
+					t, ok := topWarning.(warning.ExplainQueryCount)
+					if ok {
+						t.Count++
+						e.warnings[w.GetWarningCode()] = t
+					}
+				}
 			}
 		}
 	}
@@ -220,6 +230,10 @@ func (e *ExplainQueryEngine) StoreMetricsToOutput(metrics *output.OutputDatabase
 	}
 
 	return nil
+}
+
+func (e *ExplainQueryEngine) GetWarnings() []warning.Warning {
+	return slices.Collect(maps.Values(e.warnings))
 }
 
 type QueryRunResult struct {
@@ -350,7 +364,7 @@ func generateExecutionTimeWarnings(q *output.OutputDatabaseExplainQuery) warning
 		if q.ExecutionDelta.Lo > ExecutionTimeThreshold*3 {
 			level = warning.WarningLevelMedium
 		}
-		return &warning.ExplainQuery{
+		return &warning.ExplainQueryTime{
 			Hi:    q.ExecutionDelta.Hi,
 			Lo:    q.ExecutionDelta.Lo,
 			Med:   q.ExecutionDelta.Median,

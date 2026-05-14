@@ -3,6 +3,7 @@ package metrics
 import (
 	"apercu-cli/config"
 	metricshelper "apercu-cli/helper/metrics"
+	"apercu-cli/helper/warning"
 	"apercu-cli/internal/metrics/engines"
 	"apercu-cli/output"
 	"database/sql"
@@ -107,4 +108,12 @@ func (h *MetricsHandler) GetOutput() (*output.OutputDatabaseMetrics, error) {
 		}
 	}
 	return h.output, nil
+}
+
+func (h *MetricsHandler) GetWarnings() []warning.Warning {
+	warnings := make([]warning.Warning, 0)
+	for _, engine := range h.engines {
+		warnings = append(warnings, engine.GetWarnings()...)
+	}
+	return warnings
 }
