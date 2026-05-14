@@ -142,6 +142,18 @@ var templateFuncs = template.FuncMap{
 		}
 		return fmt.Sprintf("%.2f TB", float64(i)/1024/1024/1024/1024)
 	},
+	"usize_pretty": func(i uint64) string {
+		if i < 1024 {
+			return fmt.Sprintf("%d B", i)
+		} else if i < 1024*1024 {
+			return fmt.Sprintf("%.2f KB", float64(i)/1024)
+		} else if i < 1024*1024*1024 {
+			return fmt.Sprintf("%.2f MB", float64(i)/1024/1024)
+		} else if i < 1024*1024*1024*1024 {
+			return fmt.Sprintf("%.2f GB", float64(i)/1024/1024/1024)
+		}
+		return fmt.Sprintf("%.2f TB", float64(i)/1024/1024/1024/1024)
+	},
 	"print_schemas_diff": func(schemasDiff map[string]*metricshelper.SchemaDiff) string {
 		text := metricshelper.GetSchemasDiffText(schemasDiff)
 		if text == nil {
@@ -280,7 +292,7 @@ Before Migration Size: {{size_pretty $db.Migration.Metrics.Storage.InitialSize}}
 After Migration Size: {{size_pretty $db.Migration.Metrics.Storage.FinalSize}}
 Size Delta: {{size_pretty $db.Migration.Metrics.Storage.SizeDelta}}
 --- WAL Detail ---
-WAL Size Delta: {{size_pretty $db.Migration.Metrics.Storage.WALDelta}}
+WAL Size Delta: {{usize_pretty $db.Migration.Metrics.Storage.WALDelta}}
 {{- end}}
 {{- if $db.Migration.Metrics.Locks}}
 --- Locks detail ---
