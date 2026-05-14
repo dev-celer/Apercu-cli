@@ -73,11 +73,15 @@ type OutputDatabaseExplainQuery struct {
 	File             string                                  `yaml:"file" json:"file"`
 	Query            string                                  `yaml:"query" json:"query"`
 	Warnings         []warning.Warning                       `yaml:"warnings,omitempty" json:"warnings,omitempty"`
-	MedianDelta      float64                                 `yaml:"median_delta" json:"median_delta"`
-	Lo               float64                                 `yaml:"lo" json:"lo"`
-	Hi               float64                                 `yaml:"hi" json:"hi"`
+	ExecutionDelta   OutputDatabaseExplainQueryDelta         `yaml:"execution_delta,omitempty" json:"execution_delta,omitempty"`
 	PreMigrationRun  *OutputDatabaseMigrationExplainQueryRun `yaml:"pre_migration_run,omitempty" json:"pre_migration_run,omitempty"`
 	PostMigrationRun *OutputDatabaseMigrationExplainQueryRun `yaml:"post_migration_run,omitempty" json:"post_migration_run,omitempty"`
+}
+
+type OutputDatabaseExplainQueryDelta struct {
+	Lo     float64
+	Hi     float64
+	Median float64
 }
 
 type OutputDatabaseMigrationExplainQueryRun struct {
@@ -210,9 +214,7 @@ var templateFuncs = template.FuncMap{
 				}
 
 				// Display delta
-				if explain.MedianDelta != 0 && explain.Hi != 0 && explain.Lo != 0 {
-					outputStr += fmt.Sprintf("median %+.1f (95%% CI: %+.1f to %+.1f)", explain.MedianDelta*100, explain.Lo*100, explain.Hi*100)
-				}
+				outputStr += fmt.Sprintf("execution time delta %+.1f (95%% CI: %+.1f to %+.1f)", explain.ExecutionDelta.Median*100, explain.ExecutionDelta.Lo*100, explain.ExecutionDelta.Hi*100)
 
 				// Display explained query
 				if explain.PreMigrationRun != nil {

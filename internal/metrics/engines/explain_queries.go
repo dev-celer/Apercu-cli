@@ -190,11 +190,13 @@ func (e *ExplainQueryEngine) CollectPostMigrationMetrics() error {
 				query = query[:120] + "..."
 			}
 
-			// Generation execution time delta values
-			medianDelta, hi, lo := bootstrapMedianRatio(e.output[idx].PreMigrationRun.ExecutionTimes, e.output[idx].PostMigrationRun.ExecutionTimes, 10_000, 0.95)
-			e.output[idx].MedianDelta = medianDelta
-			e.output[idx].Hi = hi
-			e.output[idx].Lo = lo
+			// Generating execution time delta values
+			median, hi, lo := bootstrapMedianRatio(e.output[idx].PreMigrationRun.ExecutionTimes, e.output[idx].PostMigrationRun.ExecutionTimes, 10_000, 0.95)
+			e.output[idx].ExecutionDelta = output.OutputDatabaseExplainQueryDelta{
+				Lo:     lo,
+				Hi:     hi,
+				Median: median,
+			}
 
 			// Clear execution times pointers to allow GC to cleanup the data
 			e.output[idx].PreMigrationRun.ExecutionTimes = nil
@@ -266,10 +268,10 @@ func (e *ExplainQueryEngine) generateQueryRun(query string) (QueryRunResult, err
 	// Discard first queries as it may a served to wake up the instance or warm the cache
 	explainQueryResults = explainQueryResults[5:]
 
-	// Extract all execution times
+	// Extract all execution & planning times
 	executionTimes := make([]float64, len(explainQueryResults))
 	for i, explainResult := range explainQueryResults {
-		executionTimes[i] = explainResult.ExecutionTime
+		executionTimes[i] = explainResult.ExecutionTime + explainResult.PlanningTime
 	}
 
 	// Get median execution time
@@ -343,35 +345,18 @@ func bootstrapMedianRatio(before, after []float64, iters int, confidence float64
 }
 
 func generateExecutionTimeWarnings(q *output.OutputDatabaseExplainQuery) warning.Warning {
-	var plannedTime *warning.ExplainQueryPlannedValue
-	var realTime *warning.ExplainQueryRealValue
-
-	// Check for planned time regression
-	if delta := q.PostMigrationRun.ExplainedQuery.PlanningTime/q.PreMigrationRun.ExplainedQuery.PlanningTime - 1; delta > PlanningTimeThreshold {
+	if q.ExecutionDelta.Lo >= ExecutionTimeThreshold {
 		level := warning.WarningLevelLow
-		if delta > PlanningTimeThreshold*3 {
+		if q.ExecutionDelta.Lo > ExecutionTimeThreshold*3 {
 			level = warning.WarningLevelMedium
 		}
-		plannedTime = &warning.ExplainQueryPlannedValue{
-			InitialCost: q.PostMigrationRun.ExplainedQuery.PlanningTime,
-			FinalCost:   q.PostMigrationRun.ExplainedQuery.PlanningTime,
-			Level:       level,
-		}
-	}
-
-	// Check for execution time regression
-	if q.Lo >= ExecutionTimeThreshold {
-		level := warning.WarningLevelLow
-		if q.Lo > ExecutionTimeThreshold*3 {
-			level = warning.WarningLevelMedium
-		}
-		realTime = &warning.ExplainQueryRealValue{
-			Lo:    q.Lo,
-			Hi:    q.Hi,
-			Med:   q.MedianDelta,
+		return &warning.ExplainQuery{
+			Hi:    q.ExecutionDelta.Hi,
+			Lo:    q.ExecutionDelta.Lo,
+			Med:   q.ExecutionDelta.Median,
 			Level: level,
 		}
 	}
 
-	return warning.NewExplainQueryWarning(plannedTime, realTime)
+	return nil
 }
