@@ -1,6 +1,7 @@
 package output
 
 import (
+	metricshelper "apercu-cli/helper/metrics"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -28,6 +29,18 @@ func TestRenderMarkdown_MigrationAndSeeding(t *testing.T) {
 					Logs:     strPtr("running migration 1\nrunning migration 2"),
 					Warnings: []string{"deprecated column"},
 					Errors:   []string{},
+					Metrics: &OutputDatabaseMetrics{
+						Prod:       nil,
+						SchemaDiff: make(map[string]*metricshelper.SchemaDiff),
+						Locks:      map[metricshelper.QueryLock]map[string]metricshelper.LockMetrics{},
+						Explains:   make([]OutputDatabaseExplainQuery, 0),
+						Storage: &OutputDatabaseStorageMetrics{
+							InitialSize: 10,
+							FinalSize:   20,
+							SizeDelta:   10,
+							WALDelta:    5,
+						},
+					},
 				},
 				Seeding: &OutputDatabaseSeeding{
 					SuccessCount: 4,

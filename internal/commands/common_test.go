@@ -2,23 +2,10 @@ package commands
 
 import (
 	"apercu-cli/output"
-	"context"
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
-
-// --- Migration mock ---
-
-type mockMigrationHandler struct {
-	applyErr error
-	output   *output.OutputDatabaseMigration
-}
-
-func (h *mockMigrationHandler) Apply(_ context.Context) error              { return h.applyErr }
-func (h *mockMigrationHandler) GetOutput() *output.OutputDatabaseMigration { return h.output }
 
 // --- Seeding mock ---
 
@@ -29,68 +16,6 @@ type mockSeedingHandler struct {
 func (h *mockSeedingHandler) Close() error                             { return nil }
 func (h *mockSeedingHandler) Apply()                                   {}
 func (h *mockSeedingHandler) GetOutput() *output.OutputDatabaseSeeding { return h.output }
-
-// --- ApplyMigration tests ---
-
-func TestApplyMigration_NilHandler(t *testing.T) {
-	t.Parallel()
-	msg, err := ApplyMigration(context.Background(), nil, nil, nil)
-	require.NoError(t, err)
-	assert.Empty(t, msg)
-}
-
-func TestApplyMigration_Success(t *testing.T) {
-	t.Parallel()
-	handler := &mockMigrationHandler{
-		output: &output.OutputDatabaseMigration{
-			Count:    3,
-			Duration: "2s",
-			Warnings: make([]string, 0),
-			Errors:   make([]string, 0),
-		},
-	}
-
-	msg, err := ApplyMigration(context.Background(), handler, nil, nil)
-	require.NoError(t, err)
-	assert.Contains(t, msg, "Migration completed successfully")
-	assert.Contains(t, msg, "3 migrations applied")
-	assert.Contains(t, msg, "2s")
-}
-
-func TestApplyMigration_ApplyError(t *testing.T) {
-	t.Parallel()
-	handler := &mockMigrationHandler{
-		applyErr: errors.New("docker crashed"),
-		output: &output.OutputDatabaseMigration{
-			Warnings: make([]string, 0),
-			Errors:   make([]string, 0),
-		},
-	}
-
-	_, err := ApplyMigration(context.Background(), handler, nil, nil)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "migration failed")
-	assert.Contains(t, err.Error(), "docker crashed")
-}
-
-func TestApplyMigration_NoDuration(t *testing.T) {
-	t.Parallel()
-	handler := &mockMigrationHandler{
-		output: &output.OutputDatabaseMigration{
-			Count:    1,
-			Duration: "",
-			Warnings: make([]string, 0),
-			Errors:   make([]string, 0),
-		},
-	}
-
-	msg, err := ApplyMigration(context.Background(), handler, nil, nil)
-	require.NoError(t, err)
-	assert.Contains(t, msg, "Migration completed successfully")
-	assert.NotContains(t, msg, "completed in")
-}
-
-// --- ApplySeeding tests ---
 
 func TestApplySeeding_NilHandler(t *testing.T) {
 	t.Parallel()

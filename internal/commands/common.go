@@ -3,28 +3,19 @@ package commands
 import (
 	"apercu-cli/config"
 	"apercu-cli/helper"
-	greenmaskhelper "apercu-cli/helper/greenmask"
-	"apercu-cli/helper/metrics"
-	"apercu-cli/helper/pgproxy"
-	"apercu-cli/helper/pii"
-	"apercu-cli/helper/schema_diff"
-	warningshelper "apercu-cli/helper/warnings"
+	"apercu-cli/internal/metrics"
 	"apercu-cli/internal/migration"
 	"apercu-cli/internal/seeding"
 	"apercu-cli/output"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"log/slog"
 	"os"
-	"slices"
-	"time"
 
 	_ "github.com/lib/pq"
-	"github.com/montanaflynn/stats"
 )
 
 func ApplySeeding(seedHandler seeding.HandlerInterface) string {
@@ -57,69 +48,21 @@ func ApplySeeding(seedHandler seeding.HandlerInterface) string {
 	return seedingMessage
 }
 
-func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInterface, databaseConn *helper.ConnectionFields, explainQuery []string) (string, error) {
+func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInterface, prodConn, previewConn helper.ConnectionFields, dbConfig *config.Database, fullConfig *config.Config) (string, error) {
 	if migrationHandler == nil {
 		return "", nil
 	}
 
-	migrationOutput := migrationHandler.GetOutput()
-
-	queriesExtractOutput, err := metrics.ExtractAllQueriesToExplain(explainQuery)
+	// Initialize metrics handler
+	metricHandler, err := metrics.NewMetricsHandler(prodConn.Url, previewConn.Url, dbConfig, fullConfig)
 	if err != nil {
-		migrationOutput.Errors = append(migrationOutput.Errors, err.Error())
 		return "", err
 	}
-	migrationOutput.Warnings = append(migrationOutput.Warnings, queriesExtractOutput.Warnings...)
-	explainQueriesStats := make([]output.OutputDatabaseMigrationExplainQuery, 0)
-
-	var initialSchema map[string]schema_diff.Schema
-	var initialSize int64
-	var initialWALSize int64
-	if databaseConn != nil {
-		db, err := sql.Open("postgres", databaseConn.Url)
-		if err != nil {
-			return "", errors.New(fmt.Sprintf("Failed to connect to database: %v", err))
-		}
-		defer func() { _ = db.Close() }()
-
-		initialSchema, err = schema_diff.GetSchema(db)
-		if err != nil {
-			return "", err
-		}
-		initialSize, err = metrics.GetDatabaseStorageInBytes(db, databaseConn.Database)
-		if err != nil {
-			return "", err
-		}
-		initialWALSize, err = metrics.GetWALBytes(db)
-		if err != nil {
-			return "", err
-		}
-
-		for file, queries := range queriesExtractOutput.Queries {
-			for _, query := range queries {
-				queryRun, err := generateQueryRun(db, query)
-				var preMigrationRun output.OutputDatabaseMigrationExplainQueryRun
-				if err != nil {
-					preMigrationRun.Error = err
-				} else {
-					preMigrationRun.ExecutionTimes = queryRun.ExecutionTimes
-					preMigrationRun.ExplainedQuery = queryRun.MedianFullResult
-				}
-
-				explainQueriesStats = append(explainQueriesStats, output.OutputDatabaseMigrationExplainQuery{
-					File:            file,
-					Query:           query,
-					PreMigrationRun: &preMigrationRun,
-				})
-			}
-		}
-
-		prodStats, err := metrics.GetDatabaseStats(db)
-		if err != nil {
-			return "", err
-		}
-		migrationOutput.ProdStats = prodStats
+	if err := metricHandler.CollectPreMigrationMetrics(); err != nil {
+		return "", err
 	}
+
+	migrationOutput := migrationHandler.GetOutput()
 
 	// Apply the migrations
 	if err := migrationHandler.Apply(ctx); err != nil {
@@ -140,105 +83,16 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 		}
 	}
 
-	if databaseConn != nil {
-		db, err := sql.Open("postgres", databaseConn.Url)
-		if err != nil {
-			return "", errors.New(fmt.Sprintf("Failed to connect to database: %v", err))
-		}
-		defer func() { _ = db.Close() }()
-
-		// Get schema diff
-		finalSchema, err := schema_diff.GetSchema(db)
-		if err != nil {
-			return "", err
-		}
-		migrationOutput.SchemaDiff = schema_diff.GetSchemasDiff(initialSchema, finalSchema)
-
-		// Get Database size metrics
-		finalSize, err := metrics.GetDatabaseStorageInBytes(db, databaseConn.Database)
-		if err != nil {
-			return "", err
-		}
-
-		// Get WAL Size metrics
-		finalWALSize, err := metrics.GetWALBytes(db)
-		if err != nil {
-			return "", err
-		}
-
-		// Get Locks metrics
-		locks := output.GetTableLockStats(migrationOutput.PgProxyLogs)
-
-		// Get Explain queries stats
-		for file, queries := range queriesExtractOutput.Queries {
-			regressionWarningInFile := 0
-			for _, query := range queries {
-				idx := slices.IndexFunc(explainQueriesStats, func(s output.OutputDatabaseMigrationExplainQuery) bool {
-					return s.Query == query && s.File == file
-				})
-				if idx == -1 {
-					continue
-				}
-
-				queryRun, err := generateQueryRun(db, query)
-				var postMigrationRun output.OutputDatabaseMigrationExplainQueryRun
-				if err != nil {
-					postMigrationRun.Error = err
-				} else {
-					postMigrationRun.ExecutionTimes = queryRun.ExecutionTimes
-					postMigrationRun.ExplainedQuery = queryRun.MedianFullResult
-				}
-				explainQueriesStats[idx].PostMigrationRun = &postMigrationRun
-
-				if explainQueriesStats[idx].PreMigrationRun == nil || explainQueriesStats[idx].PostMigrationRun == nil ||
-					explainQueriesStats[idx].PreMigrationRun.Error != nil || explainQueriesStats[idx].PostMigrationRun.Error != nil {
-					continue
-				}
-				if len(query) > 120 {
-					query = query[:120] + "..."
-				}
-
-				// Generation execution time delta values
-				medianDelta, hi, lo := metrics.BootstrapMedianRatio(explainQueriesStats[idx].PreMigrationRun.ExecutionTimes, explainQueriesStats[idx].PostMigrationRun.ExecutionTimes, 10_000, 0.95)
-				explainQueriesStats[idx].MedianDelta = medianDelta
-				explainQueriesStats[idx].Hi = hi
-				explainQueriesStats[idx].Lo = lo
-
-				// Clear execution times pointers to allow GC to cleanup the data
-				explainQueriesStats[idx].PreMigrationRun.ExecutionTimes = nil
-				explainQueriesStats[idx].PostMigrationRun.ExecutionTimes = nil
-
-				// Generate warnings
-				if warningText := warningshelper.GenerateExecutionTimeWarnings(&explainQueriesStats[idx]); warningText != "" {
-					_, _ = fmt.Fprintln(log.Writer(), fmt.Sprintf("WARNING: %s\nfile:%s\nquery:%s", warningText, file, query))
-					explainQueriesStats[idx].Warnings = append(explainQueriesStats[idx].Warnings, warningText)
-					regressionWarningInFile++
-				}
-			}
-			// Add top level migration warning if a regression warning has been issued in this file
-			if regressionWarningInFile > 0 {
-				warningText := fmt.Sprintf("Regression detected for %d queries inside this file %s, see migration stats for more details", regressionWarningInFile, file)
-				migrationOutput.Warnings = append(migrationOutput.Warnings, warningText)
-			}
-		}
-
-		migrationOutput.Explains = explainQueriesStats
-		migrationOutput.Stats = output.NewOutputDatabaseMigrationStats(initialSize, finalSize, initialWALSize, finalWALSize, locks)
-
-		// Handle Warnings
-		if migrationOutput.Stats.WALDelta > 1024*1024*1024 {
-			migrationOutput.Warnings = append(migrationOutput.Warnings, "WAL size generated over 1GB, risk of replication lag")
-		}
-
-		AELocks, ok := migrationOutput.Stats.LockStats[pgproxy.QueryLockAccessExclusive]
-		if ok {
-			for table, lock := range AELocks {
-				if lock.MaxDuration >= time.Second {
-					migrationOutput.Warnings = append(migrationOutput.Warnings, fmt.Sprintf("Access Exclusive lock on table %s exceeded 1 second", table))
-				}
-			}
-		}
+	// Collect post migration metrics and output
+	if err := metricHandler.CollectPostMigrationMetrics(migrationOutput.PgProxyLogs); err != nil {
+		return "", err
 	}
+	metricsOutput, err := metricHandler.GetOutput()
+	if err != nil {
+		migrationOutput.Errors = append(migrationOutput.Errors, err.Error())
+	}
+	migrationOutput.Metrics = metricsOutput
+	metricHandler.Close()
 
 	// Generate the migration message
 	migrationMessage := "Migration completed successfully"
@@ -248,167 +102,6 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 	migrationMessage += fmt.Sprintf(", %d migrations applied", migrationOutput.Count)
 
 	return migrationMessage, nil
-}
-
-func GenerateWarningsOnSchemaDiff(dbConfig *config.Database, schemasDiff map[string]*schema_diff.SchemaDiff) []string {
-	if len(schemasDiff) == 0 {
-		return nil
-	}
-
-	// Parse GreenMask config for handled rows
-	modifiedTables := make([]greenmaskhelper.ModifiedTable, 0)
-	if dbConfig != nil && dbConfig.Anonymization != nil && dbConfig.Anonymization.GreenmaskConfig != "" {
-		c, err := greenmaskhelper.ParseConfig(dbConfig.Anonymization.GreenmaskConfig)
-		if err != nil {
-			return []string{
-				err.Error(),
-			}
-		}
-		if c != nil {
-			modifiedTables = c.ModifiedTables()
-		}
-	}
-
-	warnings := make([]string, 0)
-
-	// PII fields added checks
-	piiFields := detectPIIFieldsFromSchemasDiff(schemasDiff)
-	for schema, t := range piiFields {
-		for table, columns := range t {
-			detectedColumns := make([]string, 0)
-			for _, column := range columns {
-				if !greenmaskhelper.IsRowModified(modifiedTables, schema, table, column) {
-					detectedColumns = append(detectedColumns, column)
-				}
-			}
-
-			if len(detectedColumns) > 0 {
-				fullTableName := fmt.Sprintf("%s.%s", schema, table)
-				var columnsList string
-				for i := range detectedColumns {
-					columnsList += detectedColumns[i]
-					if i < len(detectedColumns)-1 {
-						columnsList += ", "
-					}
-				}
-				warnings = append(warnings, fmt.Sprintf("PII fields addition detected without anonymization in table %s (%s)", fullTableName, columnsList))
-			}
-		}
-	}
-
-	return warnings
-}
-
-// detectPIIFieldsFromSchemasDiff return map[Schemas]map[Table][]columns
-func detectPIIFieldsFromSchemasDiff(schemasDiff map[string]*schema_diff.SchemaDiff) map[string]map[string][]string {
-	piiFields := make(map[string]map[string][]string)
-
-	for schema, diff := range schemasDiff {
-		schemaFields := make(map[string][]string)
-
-		// Handle created tables
-		for _, t := range diff.CreatedTables {
-			columns := make([]string, 0)
-			for _, c := range t.Columns {
-				if pii.IsPII(t.Name, c.Name) {
-					columns = append(columns, c.Name)
-				}
-			}
-			if len(columns) > 0 {
-				schemaFields[t.Name] = columns
-			}
-		}
-
-		// Handle updated tables
-		for _, t := range diff.UpdatedTables {
-			columns := make([]string, 0)
-			for _, c := range t.CreatedColumns {
-				if pii.IsPII(t.Name, c.Name) {
-					columns = append(columns, c.Name)
-				}
-			}
-			if len(columns) > 0 {
-				schemaFields[t.Name] = columns
-			}
-		}
-
-		if schemaFields != nil {
-			piiFields[schema] = schemaFields
-		}
-	}
-
-	return piiFields
-}
-
-type QueryRunResult struct {
-	MedianFullResult *metrics.ExplainResult
-	ExecutionTimes   []float64
-}
-
-func generateQueryRun(db *sql.DB, query string) (QueryRunResult, error) {
-	slog.Debug("Explaining query", "query", query)
-	explainQueryResults := make([]*metrics.ExplainResult, 100)
-
-	// Run the query 100 time
-	for i := range explainQueryResults {
-		explainResult, err := metrics.ExplainQuery(db, query)
-		if err != nil {
-			return QueryRunResult{}, err
-		}
-
-		explainQueryResults[i] = explainResult
-	}
-
-	// Discard first queries as it may a served to wake up the instance or warm the cache
-	explainQueryResults = explainQueryResults[5:]
-
-	// Extract all execution times
-	executionTimes := make([]float64, len(explainQueryResults))
-	for i, explainResult := range explainQueryResults {
-		executionTimes[i] = explainResult.ExecutionTime
-	}
-
-	// Get median execution time
-	median, err := stats.Median(executionTimes)
-	if err != nil {
-		return QueryRunResult{}, fmt.Errorf("error calculating median of explain results: %w", err)
-	}
-
-	// Select median result
-	var medianQueryResult *metrics.ExplainResult
-	var closestDiff float64
-	for _, explainResult := range explainQueryResults {
-		diff := explainResult.ExecutionTime - median
-		if diff < 0 {
-			diff *= -1
-		}
-
-		if medianQueryResult == nil {
-			medianQueryResult = explainResult
-			closestDiff = diff
-			if explainResult.ExecutionTime == median {
-				break
-			}
-			continue
-		}
-
-		// If explainQuery is the median exit loop
-		if explainResult.ExecutionTime == median {
-			medianQueryResult = explainResult
-			break
-		}
-
-		// If the query is closer to the median update the medianQueryResult pointer
-		if diff < closestDiff {
-			closestDiff = diff
-			medianQueryResult = explainResult
-		}
-	}
-
-	return QueryRunResult{
-		MedianFullResult: medianQueryResult,
-		ExecutionTimes:   executionTimes,
-	}, nil
 }
 
 func SaveOutputInFile(path string, output *output.PreviewOutput) error {

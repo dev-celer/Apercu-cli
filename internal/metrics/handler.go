@@ -1,7 +1,8 @@
 package metrics
 
 import (
-	helperpgproxy "apercu-cli/helper/pgproxy"
+	"apercu-cli/config"
+	metricshelper "apercu-cli/helper/metrics"
 	"apercu-cli/internal/metrics/engines"
 	"apercu-cli/output"
 	"database/sql"
@@ -12,50 +13,69 @@ import (
 )
 
 type MetricsHandler struct {
-	engines []engines.MetricEngine
-	output  *output.OutputDatabaseMetrics
-	db      *sql.DB
+	engines   []engines.MetricEngine
+	output    *output.OutputDatabaseMetrics
+	prodDb    *sql.DB
+	previewDb *sql.DB
 }
 
-func NewMetricsHandler(databaseUrl string) (*MetricsHandler, error) {
-	db, err := sql.Open("postgres", databaseUrl)
+func NewMetricsHandler(prodDbUrl, previewDbUrl string, dbConfig *config.Database, fullConfig *config.Config) (*MetricsHandler, error) {
+	prodDb, err := sql.Open("postgres", prodDbUrl)
 	if err != nil {
-		return nil, errors.New(fmt.Sprintf("Failed to connect to database: %v", err))
+		return nil, errors.New(fmt.Sprintf("Failed to connect to prod database: %v", err))
 	}
 
-	enginesObj, err := initializeEngines(db)
+	prodMetrics, err := GetDatabaseStats(prodDb)
 	if err != nil {
+		_ = prodDb.Close()
+		return nil, err
+	}
+	metricsOutput := output.NewOutputDatabaseMetrics()
+	metricsOutput.Prod = prodMetrics
+
+	previewDb, err := sql.Open("postgres", previewDbUrl)
+	if err != nil {
+		_ = prodDb.Close()
+		return nil, errors.New(fmt.Sprintf("Failed to connect to preview database: %v", err))
+	}
+	enginesObj, err := initializeEngines(prodDb, previewDb, prodMetrics, dbConfig, fullConfig)
+	if err != nil {
+		_ = prodDb.Close()
+		_ = previewDb.Close()
 		return nil, err
 	}
 
 	return &MetricsHandler{
-		engines: enginesObj,
-		output:  output.NewOutputDatabaseMetrics(),
-		db:      db,
+		engines:   enginesObj,
+		output:    metricsOutput,
+		prodDb:    prodDb,
+		previewDb: previewDb,
 	}, nil
 }
 
 func (h *MetricsHandler) Close() {
-	_ = h.db.Close()
+	_ = h.prodDb.Close()
+	_ = h.previewDb.Close()
 }
 
 // initializeEngines is used to call all constructor for every metrics engines
 // any new metrics engines should be added to this function
-func initializeEngines(db *sql.DB) ([]engines.MetricEngine, error) {
-	return []engines.MetricEngine{}, nil
-}
+func initializeEngines(prodDb, previewDb *sql.DB, prodStats map[string]map[string]metricshelper.TableMetrics, dbConfig *config.Database, fullConfig *config.Config) ([]engines.MetricEngine, error) {
+	enginesList := make([]engines.MetricEngine, 0)
 
-func (h *MetricsHandler) Setup() error {
-	prodMetrics, err := GetDatabaseStats(h.db)
+	enginesList = append(enginesList, engines.NewLocksEngine())
+
+	queryEngine, err := engines.NewExplainQueryEngine(previewDb, dbConfig)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	enginesList = append(enginesList, queryEngine)
 
-	for _, engine := range h.engines {
-		engine.SetDatabase(h.db)
-		engine.SendProdStats(prodMetrics)
-	}
-	return nil
+	enginesList = append(enginesList, engines.NewSchemaDiffEngine(previewDb))
+
+	enginesList = append(enginesList, engines.NewSizeEngine(previewDb))
+
+	return enginesList, nil
 }
 
 func (h *MetricsHandler) CollectPreMigrationMetrics() error {
@@ -68,18 +88,9 @@ func (h *MetricsHandler) CollectPreMigrationMetrics() error {
 	return nil
 }
 
-func (h *MetricsHandler) SendPgProxyEvents(event []helperpgproxy.QueryEvent) error {
+func (h *MetricsHandler) CollectPostMigrationMetrics(pgProxyLogs string) error {
 	for _, engine := range h.engines {
-		err := engine.SendPgProxyEvents(event)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (h *MetricsHandler) CollectPostMigrationMetrics() error {
-	for _, engine := range h.engines {
+		engine.SendPgProxyLogs(pgProxyLogs)
 		err := engine.CollectPostMigrationMetrics()
 		if err != nil {
 			return err

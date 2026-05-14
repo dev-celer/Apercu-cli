@@ -42,15 +42,15 @@ func getPgClassDatabaseStats(db *sql.DB) ([]TablePgClassStats, error) {
 
 func getExactRowCount(db *sql.DB, schemaName string, tableName string) (int64, error) {
 	var rowCount int64
-	err := db.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM '%s'.'%s'", schemaName, tableName)).Scan(&rowCount)
+	err := db.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM \"%s\".\"%s\"", schemaName, tableName)).Scan(&rowCount)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get row count for table %s.%s: %v", schemaName, tableName, err)
 	}
 	return rowCount, nil
 }
 
-func GetDatabaseStats(db *sql.DB) (map[string]map[string]metricshelper.TableStats, error) {
-	stats := make(map[string]map[string]metricshelper.TableStats)
+func GetDatabaseStats(db *sql.DB) (map[string]map[string]metricshelper.TableMetrics, error) {
+	stats := make(map[string]map[string]metricshelper.TableMetrics)
 
 	pgClassStats, err := getPgClassDatabaseStats(db)
 	if err != nil {
@@ -60,7 +60,7 @@ func GetDatabaseStats(db *sql.DB) (map[string]map[string]metricshelper.TableStat
 	for _, s := range pgClassStats {
 		// Create the map entry if it's missing
 		if _, ok := stats[s.SchemaName]; !ok {
-			stats[s.SchemaName] = make(map[string]metricshelper.TableStats)
+			stats[s.SchemaName] = make(map[string]metricshelper.TableMetrics)
 		}
 
 		// If in read only mode, request the row count from SELECT COUNT(*)
@@ -103,7 +103,7 @@ func GetDatabaseStats(db *sql.DB) (map[string]map[string]metricshelper.TableStat
 			return nil, fmt.Errorf("failed to get table size for table %s.%s: %v", s.SchemaName, s.TableName, err)
 		}
 
-		stats[s.SchemaName][s.TableName] = metricshelper.TableStats{
+		stats[s.SchemaName][s.TableName] = metricshelper.TableMetrics{
 			RowCount:  s.RowCount,
 			TableSize: tableSize,
 		}

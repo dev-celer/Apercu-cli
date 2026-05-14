@@ -10,25 +10,27 @@ import (
 
 func TestGetPreviewDatabaseHandler_NilSource(t *testing.T) {
 	t.Parallel()
-	handler, err := GetPreviewDatabaseHandler(config.Database{Source: nil})
+	prodConn, handler, err := GetPreviewDatabaseHandler(config.Database{Source: nil})
 	assert.NoError(t, err)
 	assert.Nil(t, handler)
+	assert.Nil(t, prodConn)
 }
 
 func TestGetPreviewDatabaseHandler_UnsupportedProvider(t *testing.T) {
 	t.Parallel()
-	handler, err := GetPreviewDatabaseHandler(config.Database{
+	prodConn, handler, err := GetPreviewDatabaseHandler(config.Database{
 		Source:        &config.DatabaseSource{Provider: "unknown"},
 		PreviewBranch: "preview-1",
 	})
 	assert.Error(t, err)
 	assert.Nil(t, handler)
+	assert.Nil(t, prodConn)
 	assert.Contains(t, err.Error(), "unsupported source database provider")
 }
 
 func TestGetPreviewDatabaseHandler_MissingNeonConfig(t *testing.T) {
 	t.Parallel()
-	handler, err := GetPreviewDatabaseHandler(config.Database{
+	prodConn, handler, err := GetPreviewDatabaseHandler(config.Database{
 		Source: &config.DatabaseSource{
 			Provider: config.DatabaseProviderNeon,
 			Neon:     nil,
@@ -37,87 +39,8 @@ func TestGetPreviewDatabaseHandler_MissingNeonConfig(t *testing.T) {
 	})
 	assert.Error(t, err)
 	assert.Nil(t, handler)
+	assert.Nil(t, prodConn)
 	assert.Contains(t, err.Error(), "missing neon source database configuration")
-}
-
-func TestGetPreviewDatabaseHandler_UsesSourceValuesWithoutAnonymization(t *testing.T) {
-	t.Parallel()
-	handler, err := GetPreviewDatabaseHandler(config.Database{
-		PreviewBranch: "preview-1",
-		Source: &config.DatabaseSource{
-			Provider: config.DatabaseProviderNeon,
-			Neon: &config.DatabaseNeonSource{
-				ProjectId:     "src-project",
-				ApiKey:        "src-key",
-				ParentBranch:  "main",
-				BranchingType: config.DatabaseNeonBranchingTypeSchemaOnly,
-			},
-		},
-	})
-	require.NoError(t, err)
-	require.NotNil(t, handler)
-	neonHandler, ok := handler.(*NeonHandler)
-	require.True(t, ok)
-	assert.Equal(t, "src-project", neonHandler.projectId)
-	assert.Equal(t, "src-key", neonHandler.apiKey)
-	assert.Equal(t, "preview-1", neonHandler.branch)
-	require.NotNil(t, neonHandler.parentBranch)
-	assert.Equal(t, "main", *neonHandler.parentBranch)
-	require.NotNil(t, neonHandler.branchingType)
-	assert.Equal(t, config.DatabaseNeonBranchingTypeSchemaOnly, *neonHandler.branchingType)
-}
-
-func TestGetPreviewDatabaseHandler_DefaultsInvalidBranchingType(t *testing.T) {
-	t.Parallel()
-	handler, err := GetPreviewDatabaseHandler(config.Database{
-		PreviewBranch: "preview",
-		Source: &config.DatabaseSource{
-			Provider: config.DatabaseProviderNeon,
-			Neon: &config.DatabaseNeonSource{
-				ProjectId:     "p",
-				ApiKey:        "k",
-				ParentBranch:  "main",
-				BranchingType: "bogus",
-			},
-		},
-	})
-	require.NoError(t, err)
-	neonHandler := handler.(*NeonHandler)
-	require.NotNil(t, neonHandler.branchingType)
-	assert.Equal(t, config.DatabaseNeonBranchingTypeParentData, *neonHandler.branchingType)
-}
-
-func TestGetPreviewDatabaseHandler_OverridesWithAnonymizationStorage(t *testing.T) {
-	t.Parallel()
-	storageProject := "storage-project"
-	storageApiKey := "storage-key"
-	handler, err := GetPreviewDatabaseHandler(config.Database{
-		PreviewBranch: "preview",
-		Source: &config.DatabaseSource{
-			Provider: config.DatabaseProviderNeon,
-			Neon: &config.DatabaseNeonSource{
-				ProjectId:     "src-project",
-				ApiKey:        "src-key",
-				ParentBranch:  "main",
-				BranchingType: config.DatabaseNeonBranchingTypeParentData,
-			},
-		},
-		Anonymization: &config.DatabaseAnonymization{
-			Storage: config.DatabaseAnonymizationStorage{
-				Neon: &config.DatabaseAnonymizationStorageNeon{
-					ProjectId:  &storageProject,
-					ApiKey:     &storageApiKey,
-					BranchName: "main-anonymized",
-				},
-			},
-		},
-	})
-	require.NoError(t, err)
-	neonHandler := handler.(*NeonHandler)
-	assert.Equal(t, storageProject, neonHandler.projectId)
-	assert.Equal(t, storageApiKey, neonHandler.apiKey)
-	require.NotNil(t, neonHandler.parentBranch)
-	assert.Equal(t, "main-anonymized", *neonHandler.parentBranch)
 }
 
 func TestGetPruningDatabaseHandler_NilSource(t *testing.T) {

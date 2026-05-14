@@ -3,7 +3,6 @@ package migration
 import (
 	"apercu-cli/helper"
 	"apercu-cli/helper/docker"
-	pgproxyhelper "apercu-cli/helper/pgproxy"
 	"apercu-cli/output"
 	"bytes"
 	"context"
@@ -278,7 +277,7 @@ func (h *DockerHandler) Apply(ctx context.Context) error {
 	}
 
 	// Store PgProxy query logs
-	h.output.PgProxyLogs = pgproxyhelper.ParseQueriesFromLogs(pgproxyBuffer.String())
+	h.output.PgProxyLogs = pgproxyBuffer.String()
 
 	// Get the new migration count
 	finalCount, finalCountErr := h.getCount()

@@ -1,6 +1,6 @@
 package metrics
 
-type TableStats struct {
+type TableMetrics struct {
 	RowCount  int64
 	TableSize int64
 }

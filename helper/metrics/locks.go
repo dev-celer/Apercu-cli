@@ -1,11 +1,6 @@
-package pgproxy
+package metrics
 
-import (
-	"encoding/json"
-	"log/slog"
-	"strings"
-	"time"
-)
+import "time"
 
 type QueryEvent struct {
 	SQL          string          `json:"sql"`
@@ -35,19 +30,9 @@ const (
 	QueryLockAccessShare          QueryLock = "ACCESS_SHARE"
 )
 
-func ParseQueriesFromLogs(logs string) []QueryEvent {
-	queries := make([]QueryEvent, 0)
-
-	for line := range strings.Lines(logs) {
-		query := QueryEvent{}
-		err := json.Unmarshal([]byte(line), &query)
-		if err != nil {
-			slog.Debug("Error parsing query line", "line", line, "error", err)
-			continue
-		}
-
-		queries = append(queries, query)
-	}
-
-	return queries
+type LockMetrics struct {
+	LockCount     int64         `yaml:"lock_count" json:"lock_count"`
+	TotalDuration time.Duration `yaml:"total_duration" json:"total_duration"`
+	MeanDuration  time.Duration `yaml:"mean_duration" json:"mean_duration"`
+	MaxDuration   time.Duration `yaml:"max_duration" json:"max_duration"`
 }

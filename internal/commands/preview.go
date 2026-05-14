@@ -63,7 +63,7 @@ func preview(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create the preview database if it doesn't exist
-	dbHandler, err := database.GetPreviewDatabaseHandler(dbConfig)
+	prodConn, dbHandler, err := database.GetPreviewDatabaseHandler(dbConfig)
 	if err != nil {
 		dbOutput.Errors = append(dbOutput.Errors, err.Error())
 		ErrorAndExit(err, dbOutput, dbName)
@@ -83,7 +83,7 @@ func preview(cmd *cobra.Command, args []string) error {
 			ErrorAndExit(err, dbOutput, dbName)
 		}
 	}
-	conn, err := dbHandler.GetConnectionFields()
+	previewConn, err := dbHandler.GetConnectionFields()
 	if err != nil {
 		dbOutput.Errors = append(dbOutput.Errors, err.Error())
 		ErrorAndExit(err, dbOutput, dbName)
@@ -92,11 +92,11 @@ func preview(cmd *cobra.Command, args []string) error {
 
 	// Apply the migrations
 	ctx := cmd.Context()
-	migrationHandler, err := migration.GetMigrationHandler(dbConfig, &conn)
+	migrationHandler, err := migration.GetMigrationHandler(dbConfig, &previewConn)
 	if err != nil {
 		ErrorAndExit(err, dbOutput, dbName)
 	}
-	migrationMessage, err := ApplyMigration(ctx, migrationHandler, &conn, dbConfig.ExplainQuery)
+	migrationMessage, err := ApplyMigration(ctx, migrationHandler, *prodConn, previewConn, &dbConfig, &configFile)
 	if err != nil {
 		dbOutput.Migration = migrationHandler.GetOutput()
 		ErrorAndExit(err, dbOutput, dbName)
@@ -105,14 +105,8 @@ func preview(cmd *cobra.Command, args []string) error {
 		dbOutput.Migration = migrationHandler.GetOutput()
 	}
 
-	// Generate warnings on schema diff
-	if dbOutput.Migration != nil && len(dbOutput.Migration.SchemaDiff) > 0 {
-		warnings := GenerateWarningsOnSchemaDiff(&dbConfig, dbOutput.Migration.SchemaDiff)
-		dbOutput.Warnings = append(dbOutput.Warnings, warnings...)
-	}
-
 	// Apply the seeding
-	seedHandler, err := seeding.GetSeedingHandler(dbConfig, &dbState, conn)
+	seedHandler, err := seeding.GetSeedingHandler(dbConfig, &dbState, previewConn)
 	if err != nil {
 		dbOutput.Seeding = output.NewSeedingOutput()
 		dbOutput.Seeding.Errors = append(dbOutput.Seeding.Errors, err.Error())
@@ -168,7 +162,7 @@ func preview(cmd *cobra.Command, args []string) error {
 	if jsonOutput {
 		// Print the connection json output
 		connectionOutput := map[string]helper.ConnectionFields{
-			dbName: conn,
+			dbName: previewConn,
 		}
 		connJsonData, err := json.Marshal(connectionOutput)
 		if err != nil {
@@ -177,7 +171,7 @@ func preview(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Println(fmt.Sprintf("DATABASE_CONNECTIONS=%s", string(connJsonData)))
 	} else {
-		fmt.Println(fmt.Sprintf("DATABASE_URL: %s", conn.Url))
+		fmt.Println(fmt.Sprintf("DATABASE_URL: %s", previewConn.Url))
 	}
 	return nil
 }
