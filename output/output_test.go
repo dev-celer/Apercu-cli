@@ -2,11 +2,38 @@ package output
 
 import (
 	metricshelper "apercu-cli/helper/metrics"
+	"apercu-cli/helper/warning"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type mockedWarning struct {
+	desc string
+}
+
+const (
+	MockedCode warning.Code = "MOCK_WARN"
+)
+
+func (w mockedWarning) GetWarningText() string {
+	return w.desc
+}
+
+func (w mockedWarning) GetWarningLevel() warning.Level {
+	return warning.WarningLevelMedium
+}
+
+func (w mockedWarning) GetWarningCode() warning.Code {
+	return MockedCode
+}
+
+func (w mockedWarning) PrintWarning() {}
+
+func newMockedWarning(desc string) mockedWarning {
+	return mockedWarning{desc: desc}
+}
 
 func strPtr(s string) *string { return &s }
 
@@ -27,7 +54,6 @@ func TestRenderMarkdown_MigrationAndSeeding(t *testing.T) {
 					Count:    3,
 					Duration: "2s",
 					Logs:     strPtr("running migration 1\nrunning migration 2"),
-					Warnings: []string{"deprecated column"},
 					Errors:   []string{},
 					Metrics: &OutputDatabaseMetrics{
 						Prod:       nil,
@@ -47,9 +73,8 @@ func TestRenderMarkdown_MigrationAndSeeding(t *testing.T) {
 					FailedCount:  1,
 					Duration:     "500ms",
 					Errors:       []string{"seed x failed"},
-					Warnings:     []string{},
 				},
-				Warnings: []string{"top-level warn"},
+				Warnings: []warning.Warning{newMockedWarning("test")},
 				Errors:   []string{"top-level error"},
 			},
 		},
@@ -83,7 +108,6 @@ func TestRenderMarkdown_SkipsEmptyLogs(t *testing.T) {
 				Migration: &OutputDatabaseMigration{
 					Count:    1,
 					Duration: "1s",
-					Warnings: []string{},
 					Errors:   []string{},
 				},
 			},
@@ -102,15 +126,12 @@ func TestOutputConstructorsInitializeSlices(t *testing.T) {
 	assert.NotNil(t, preview.Errors)
 
 	migration := NewMigrationOutput()
-	assert.NotNil(t, migration.Warnings)
 	assert.NotNil(t, migration.Errors)
 	assert.Nil(t, migration.Logs)
 
 	seeding := NewSeedingOutput()
-	assert.NotNil(t, seeding.Warnings)
 	assert.NotNil(t, seeding.Errors)
 
 	anon := NewAnonymizationOutput()
-	assert.NotNil(t, anon.Warnings)
 	assert.NotNil(t, anon.Errors)
 }

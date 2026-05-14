@@ -2,6 +2,7 @@ package output
 
 import (
 	metricshelper "apercu-cli/helper/metrics"
+	"apercu-cli/helper/warning"
 	"bytes"
 	"fmt"
 	"slices"
@@ -15,13 +16,13 @@ type PreviewOutput struct {
 type PreviewOutputDatabase struct {
 	Migration *OutputDatabaseMigration `yaml:"migration,omitempty" json:"migration,omitempty"`
 	Seeding   *OutputDatabaseSeeding   `yaml:"seeding,omitempty" json:"seeding,omitempty"`
-	Warnings  []string                 `yaml:"warnings,omitempty" json:"warnings,omitempty"`
+	Warnings  []warning.Warning        `yaml:"warnings,omitempty" json:"warnings,omitempty"`
 	Errors    []string                 `yaml:"errors,omitempty" json:"errors,omitempty"`
 }
 
 func NewPreviewOutputDatabase() *PreviewOutputDatabase {
 	return &PreviewOutputDatabase{
-		Warnings: make([]string, 0),
+		Warnings: make([]warning.Warning, 0),
 		Errors:   make([]string, 0),
 	}
 }
@@ -31,7 +32,6 @@ type OutputDatabaseMigration struct {
 	Count       int                    `yaml:"count" json:"count"`
 	Duration    string                 `yaml:"duration" json:"duration"`
 	PgProxyLogs string                 `yaml:"pg_proxy_logs,omitempty" json:"pg_proxy_logs,omitempty"`
-	Warnings    []string               `yaml:"warnings,omitempty" json:"warnings,omitempty"`
 	Errors      []string               `yaml:"errors,omitempty" json:"errors,omitempty"`
 	Metrics     *OutputDatabaseMetrics `yaml:"metrics,omitempty" json:"metrics,omitempty"`
 }
@@ -41,7 +41,6 @@ func NewMigrationOutput() *OutputDatabaseMigration {
 		Logs:     nil,
 		Count:    0,
 		Duration: "",
-		Warnings: make([]string, 0),
 		Errors:   make([]string, 0),
 	}
 }
@@ -73,7 +72,7 @@ type OutputDatabaseStorageMetrics struct {
 type OutputDatabaseExplainQuery struct {
 	File             string                                  `yaml:"file" json:"file"`
 	Query            string                                  `yaml:"query" json:"query"`
-	Warnings         []string                                `yaml:"warnings,omitempty" json:"warnings,omitempty"`
+	Warnings         []warning.Warning                       `yaml:"warnings,omitempty" json:"warnings,omitempty"`
 	MedianDelta      float64                                 `yaml:"median_delta" json:"median_delta"`
 	Lo               float64                                 `yaml:"lo" json:"lo"`
 	Hi               float64                                 `yaml:"hi" json:"hi"`
@@ -92,7 +91,6 @@ type OutputDatabaseSeeding struct {
 	SuccessCount int      `yaml:"success_count" json:"success_count"`
 	FailedCount  int      `yaml:"failed_count" json:"failed_count"`
 	Duration     string   `yaml:"duration" json:"duration"`
-	Warnings     []string `yaml:"warnings,omitempty" json:"warnings,omitempty"`
 	Errors       []string `yaml:"errors,omitempty" json:"errors,omitempty"`
 }
 
@@ -102,7 +100,6 @@ func NewSeedingOutput() *OutputDatabaseSeeding {
 		SuccessCount: 0,
 		FailedCount:  0,
 		Duration:     "",
-		Warnings:     make([]string, 0),
 		Errors:       make([]string, 0),
 	}
 }
@@ -110,7 +107,6 @@ func NewSeedingOutput() *OutputDatabaseSeeding {
 type OutputDatabaseAnonymization struct {
 	Logs     *string  `yaml:"logs,omitempty" json:"logs,omitempty"`
 	Duration string   `yaml:"duration" json:"duration"`
-	Warnings []string `yaml:"warnings,omitempty" json:"warnings,omitempty"`
 	Errors   []string `yaml:"errors,omitempty" json:"errors,omitempty"`
 }
 
@@ -118,7 +114,6 @@ func NewAnonymizationOutput() *OutputDatabaseAnonymization {
 	return &OutputDatabaseAnonymization{
 		Logs:     nil,
 		Duration: "",
-		Warnings: make([]string, 0),
 		Errors:   make([]string, 0),
 	}
 }
@@ -211,7 +206,7 @@ var templateFuncs = template.FuncMap{
 					outputStr += "> [!WARNING]\n"
 				}
 				for _, warning := range explain.Warnings {
-					outputStr += fmt.Sprintf("> - %s", warning)
+					outputStr += fmt.Sprintf("> - %s", warning.GetWarningText())
 				}
 
 				// Display delta
@@ -253,16 +248,22 @@ var markdownTmpl = template.Must(template.New("markdown").Funcs(templateFuncs).P
 {{range $name, $db := .Databases}}
 ## {{$name}}
 {{- if $db.Migration}}
+{{- if $db.Warnings}}
+
+> [!WARNING]
+{{range $db.Warnings}}> - {{.}}
+{{end}}
+{{- end}}
+{{- if $db.Errors}}
+
+> [!CAUTION]
+{{range $db.Errors}}> - {{.}}
+{{end}}
+{{- end}}
 
 ### Migration
 
 {{$db.Migration.Count}} migration(s) ran in {{$db.Migration.Duration}}
-{{- if $db.Migration.Warnings}}
-
-> [!WARNING]
-{{range $db.Migration.Warnings}}> - {{.}}
-{{end}}
-{{- end}}
 {{- if $db.Migration.Errors}}
 
 > [!CAUTION]
@@ -332,12 +333,6 @@ WAL Size Delta: {{usize_pretty $db.Migration.Metrics.Storage.WALDelta}}
 ### Seeding
 
 {{$db.Seeding.SuccessCount}} succeeded · {{$db.Seeding.FailedCount}} failed · {{$db.Seeding.Duration}}
-{{- if $db.Seeding.Warnings}}
-
-> [!WARNING]
-{{range $db.Seeding.Warnings}}> - {{.}}
-{{end}}
-{{- end}}
 {{- if $db.Seeding.Errors}}
 
 > [!CAUTION]
@@ -355,18 +350,6 @@ WAL Size Delta: {{usize_pretty $db.Migration.Metrics.Storage.WALDelta}}
 
 </details>
 {{- end}}
-{{- end}}
-{{- if $db.Warnings}}
-
-> [!WARNING]
-{{range $db.Warnings}}> - {{.}}
-{{end}}
-{{- end}}
-{{- if $db.Errors}}
-
-> [!CAUTION]
-{{range $db.Errors}}> - {{.}}
-{{end}}
 {{- end}}
 {{- end}}
 `))

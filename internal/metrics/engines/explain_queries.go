@@ -3,6 +3,7 @@ package engines
 import (
 	"apercu-cli/config"
 	metricshelper "apercu-cli/helper/metrics"
+	"apercu-cli/helper/warning"
 	"apercu-cli/output"
 	"database/sql"
 	"errors"
@@ -200,9 +201,9 @@ func (e *ExplainQueryEngine) CollectPostMigrationMetrics() error {
 			e.output[idx].PostMigrationRun.ExecutionTimes = nil
 
 			// Generate warnings
-			if warningText := generateExecutionTimeWarnings(&e.output[idx]); warningText != "" {
-				_, _ = fmt.Fprintln(log.Writer(), fmt.Sprintf("WARNING: %s\nfile:%s\nquery:%s", warningText, file, query))
-				e.output[idx].Warnings = append(e.output[idx].Warnings, warningText)
+			if w := generateExecutionTimeWarnings(&e.output[idx]); w != nil {
+				e.output[idx].Warnings = append(e.output[idx].Warnings, w)
+				warning.PrintWarning(w)
 			}
 		}
 	}
@@ -341,34 +342,36 @@ func bootstrapMedianRatio(before, after []float64, iters int, confidence float64
 	return point, hi, lo
 }
 
-func generateExecutionTimeWarnings(q *output.OutputDatabaseExplainQuery) string {
-	bPlannedTimeRegression := false
-	bRealTimeRegression := false
+func generateExecutionTimeWarnings(q *output.OutputDatabaseExplainQuery) warning.Warning {
+	var plannedTime *warning.ExplainQueryPlannedValue
+	var realTime *warning.ExplainQueryRealValue
 
 	// Check for planned time regression
-	if q.PostMigrationRun.ExplainedQuery.PlanningTime/q.PreMigrationRun.ExplainedQuery.PlanningTime-1 > PlanningTimeThreshold {
-		bPlannedTimeRegression = true
+	if delta := q.PostMigrationRun.ExplainedQuery.PlanningTime/q.PreMigrationRun.ExplainedQuery.PlanningTime - 1; delta > PlanningTimeThreshold {
+		level := warning.WarningLevelLow
+		if delta > PlanningTimeThreshold*3 {
+			level = warning.WarningLevelMedium
+		}
+		plannedTime = &warning.ExplainQueryPlannedValue{
+			InitialCost: q.PostMigrationRun.ExplainedQuery.PlanningTime,
+			FinalCost:   q.PostMigrationRun.ExplainedQuery.PlanningTime,
+			Level:       level,
+		}
 	}
 
 	// Check for execution time regression
 	if q.Lo >= ExecutionTimeThreshold {
-		bRealTimeRegression = true
-	}
-
-	var warningText string
-	if bPlannedTimeRegression && bRealTimeRegression {
-		slog.Debug("Query exceeded time regression threshold exceeded for planned time and real execution time", "median", q.MedianDelta, "hi", q.Hi, "Lo", q.Lo, "prePlannedTime", q.PreMigrationRun.ExplainedQuery.PlanningTime, "postPlannedTime", q.PostMigrationRun.ExplainedQuery.PlanningTime)
-		warningText = fmt.Sprintf("Query execution time regression exceeded %d%% planning threshold and %d%% execution threshold", int(PlanningTimeThreshold*100), int(ExecutionTimeThreshold*100))
-	} else {
-		if bPlannedTimeRegression {
-			slog.Debug("Query exceeded planned time regression threshold exceeded for planned time", "prePlannedTime", q.PreMigrationRun.ExplainedQuery.PlanningTime, "postPlannedTime", q.PostMigrationRun.ExplainedQuery.PlanningTime)
-			warningText = fmt.Sprintf("Query planned execution time regression exceeded %d%% threshold", int(PlanningTimeThreshold*100))
+		level := warning.WarningLevelLow
+		if q.Lo > ExecutionTimeThreshold*3 {
+			level = warning.WarningLevelMedium
 		}
-		if bRealTimeRegression {
-			slog.Debug("Query exceeded real time regression threshold exceeded for real time", "median", q.MedianDelta, "hi", q.Hi, "Lo", q.Lo)
-			warningText = fmt.Sprintf("Query real execution time regression exceeded %d%% threshold", int(ExecutionTimeThreshold*100))
+		realTime = &warning.ExplainQueryRealValue{
+			Lo:    q.Lo,
+			Hi:    q.Hi,
+			Med:   q.MedianDelta,
+			Level: level,
 		}
 	}
 
-	return warningText
+	return warning.NewExplainQueryWarning(plannedTime, realTime)
 }
