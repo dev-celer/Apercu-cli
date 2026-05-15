@@ -3,6 +3,7 @@ package database
 import (
 	"apercu-cli/config"
 	neonHelper "apercu-cli/helper/neon"
+	"apercu-cli/helper/warning"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -17,7 +18,7 @@ type NeonPruneHandler struct {
 	apiKey        string
 	parentBranch  string
 	branchPattern string
-	warnings      []string
+	warnings      []warning.Warning
 }
 
 func NewNeonPruneHandler(projectId string, apiKey string, parentBranch string, branchPattern string) (*NeonPruneHandler, error) {
@@ -32,11 +33,11 @@ func NewNeonPruneHandler(projectId string, apiKey string, parentBranch string, b
 		apiKey:        apiKey,
 		parentBranch:  parentBranch,
 		branchPattern: branchPattern,
-		warnings:      make([]string, 0),
+		warnings:      make([]warning.Warning, 0),
 	}), nil
 }
 
-func (h *NeonPruneHandler) GetWarnings() []string {
+func (h *NeonPruneHandler) GetWarnings() []warning.Warning {
 	return h.warnings
 }
 

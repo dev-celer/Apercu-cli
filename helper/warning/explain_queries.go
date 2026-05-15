@@ -5,7 +5,7 @@ import (
 )
 
 const (
-	ExplainQueryTimeRegression = "EXPL_QUERY_REGR"
+	CodeExplainQueryTimeRegression Code = "EXPL_QUERY_REGR"
 )
 
 type ExplainQueryTime struct {
@@ -22,7 +22,7 @@ func (w *ExplainQueryTime) GetWarningLevel() Level {
 }
 
 func (w *ExplainQueryTime) GetWarningCode() Code {
-	return ExplainQueryTimeRegression
+	return CodeExplainQueryTimeRegression
 }
 
 type ExplainQueryCount struct {
@@ -39,5 +39,5 @@ func (w ExplainQueryCount) GetWarningLevel() Level {
 }
 
 func (w ExplainQueryCount) GetWarningCode() Code {
-	return ExplainQueryTimeRegression
+	return CodeExplainQueryTimeRegression
 }

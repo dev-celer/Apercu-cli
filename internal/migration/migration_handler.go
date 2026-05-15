@@ -4,6 +4,7 @@ import (
 	"apercu-cli/config"
 	"apercu-cli/helper"
 	"apercu-cli/helper/database_url"
+	"apercu-cli/helper/warning"
 	"apercu-cli/output"
 	"context"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 type HandlerInterface interface {
 	Apply(ctx context.Context) error
 	GetOutput() *output.OutputDatabaseMigration
+	GetWarnings() []warning.Warning
 }
 
 func GetMigrationHandler(dbConfig config.Database, connection *helper.ConnectionFields) (HandlerInterface, error) {

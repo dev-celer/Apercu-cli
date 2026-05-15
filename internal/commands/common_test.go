@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"apercu-cli/helper/warning"
 	"apercu-cli/output"
 	"testing"
 
@@ -16,6 +17,7 @@ type mockSeedingHandler struct {
 func (h *mockSeedingHandler) Close() error                             { return nil }
 func (h *mockSeedingHandler) Apply()                                   {}
 func (h *mockSeedingHandler) GetOutput() *output.OutputDatabaseSeeding { return h.output }
+func (h *mockSeedingHandler) GetWarnings() []warning.Warning           { return make([]warning.Warning, 0) }
 
 func TestApplySeeding_NilHandler(t *testing.T) {
 	t.Parallel()
@@ -30,7 +32,6 @@ func TestApplySeeding_Success(t *testing.T) {
 			SuccessCount: 3,
 			FailedCount:  0,
 			Duration:     "500ms",
-			Warnings:     make([]string, 0),
 			Errors:       make([]string, 0),
 		},
 	}
@@ -47,7 +48,6 @@ func TestApplySeeding_PartialFailures(t *testing.T) {
 		output: &output.OutputDatabaseSeeding{
 			SuccessCount: 2,
 			FailedCount:  1,
-			Warnings:     make([]string, 0),
 			Errors:       make([]string, 0),
 		},
 	}
@@ -63,7 +63,6 @@ func TestApplySeeding_NoDuration(t *testing.T) {
 		output: &output.OutputDatabaseSeeding{
 			SuccessCount: 1,
 			Duration:     "",
-			Warnings:     make([]string, 0),
 			Errors:       make([]string, 0),
 		},
 	}

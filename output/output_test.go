@@ -74,7 +74,7 @@ func TestRenderMarkdown_MigrationAndSeeding(t *testing.T) {
 					Duration:     "500ms",
 					Errors:       []string{"seed x failed"},
 				},
-				Warnings: []warning.Warning{newMockedWarning("test")},
+				Warnings: []warning.Warning{newMockedWarning("top-level warn")},
 				Errors:   []string{"top-level error"},
 			},
 		},
@@ -86,7 +86,6 @@ func TestRenderMarkdown_MigrationAndSeeding(t *testing.T) {
 	assert.Contains(t, md, "## mydb")
 	assert.Contains(t, md, "### Migration")
 	assert.Contains(t, md, "3 migration(s) ran in 2s")
-	assert.Contains(t, md, "deprecated column")
 	assert.Contains(t, md, "running migration 1")
 
 	assert.Contains(t, md, "### Seeding")

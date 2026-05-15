@@ -3,6 +3,7 @@ package seeding
 import (
 	"apercu-cli/config"
 	"apercu-cli/helper"
+	"apercu-cli/helper/warning"
 	"apercu-cli/output"
 	"crypto/md5"
 	"database/sql"
@@ -24,31 +25,39 @@ type DirectSeed struct {
 	db            *sql.DB
 	state         *config.DatabaseState
 	seedFilesPath []string
+	seedFiles     []config.DatabaseSeed
 	output        *output.OutputDatabaseSeeding
+	warnings      []warning.Warning
 }
 
 // Returns true if the content of the seed file matches the hash
-func compareSeedContentFromHash(hash string, filePath string, output *output.OutputDatabaseSeeding) (bool, error) {
+func (h *DirectSeed) compareSeedContentFromHash(hash string, filePath string) (bool, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
-		output.Warnings = append(output.Warnings, fmt.Sprintf("Failed to open seed file: %s", filePath))
-		_, _ = fmt.Fprintln(log.Writer(), "WARNING: Failed to open seed file:", filePath)
-		return false, errors.New(fmt.Sprintf("Failed to read seed file: %v", err))
+		w := warning.NewSeedingError(warning.CodeFailedToOpenSeedFile, filePath)
+		if w != nil {
+			h.warnings = append(h.warnings, w)
+			warning.PrintWarning(w)
+			return false, errors.New(w.GetWarningText())
+		}
 	}
 	defer f.Close()
 
 	hasher := md5.New()
 	if _, err := io.Copy(hasher, f); err != nil {
-		output.Warnings = append(output.Warnings, fmt.Sprintf("Failed to open seed file: %s", filePath))
-		_, _ = fmt.Fprintln(log.Writer(), "WARNING: Failed to read seed file:", filePath)
-		return false, errors.New(fmt.Sprintf("Failed to read seed file: %v", err))
+		w := warning.NewSeedingError(warning.CodeFailedToOpenSeedFile, filePath)
+		if w != nil {
+			h.warnings = append(h.warnings, w)
+			warning.PrintWarning(w)
+			return false, errors.New(w.GetWarningText())
+		}
 	}
 
 	contentHash := hex.EncodeToString(hasher.Sum(nil))
 	return contentHash == hash, nil
 }
 
-func shouldSeedBeApplied(filePath string, seedOn config.DatabaseSeedType, state []config.SeedState, output *output.OutputDatabaseSeeding) (bool, error) {
+func (h *DirectSeed) shouldSeedBeApplied(filePath string, seedOn config.DatabaseSeedType, state []config.SeedState) (bool, error) {
 	if seedOn == config.DatabaseSeedTypeAlways {
 		slog.Debug("Seed on always, applying seed file", "file", filePath)
 		return true, nil
@@ -63,7 +72,7 @@ func shouldSeedBeApplied(filePath string, seedOn config.DatabaseSeedType, state 
 	}
 
 	slog.Debug("Seed file has already been applied, checking content", "file", filePath)
-	seedUnchanged, err := compareSeedContentFromHash(state[seedIndex].Hash, filePath, output)
+	seedUnchanged, err := h.compareSeedContentFromHash(state[seedIndex].Hash, filePath)
 	if err != nil {
 		return false, err
 	}
@@ -75,19 +84,23 @@ func shouldSeedBeApplied(filePath string, seedOn config.DatabaseSeedType, state 
 	return false, nil
 }
 
-func getSeedFilesToApply(seedFiles []config.DatabaseSeed, outputData *output.OutputDatabaseSeeding, state *config.DatabaseState) ([]string, error) {
-	seedFilesToApply := make([]string, 0)
-	for _, seedFile := range seedFiles {
+func (h *DirectSeed) getSeedFilesToApply() {
+	h.seedFilesPath = make([]string, 0)
+	for _, seedFile := range h.seedFiles {
 		slog.Debug("Searching for seed files", "path", seedFile.Path)
 		info, err := os.Stat(seedFile.Path)
 		if err != nil {
+			var w warning.Warning
 			if os.IsNotExist(err) {
-				outputData.Warnings = append(outputData.Warnings, fmt.Sprintf("Seed path not found: %s", seedFile.Path))
-				_, _ = fmt.Fprintln(log.Writer(), "WARNING: Seed path not found:", seedFile.Path)
-				continue
+				w = warning.NewSeedingError(warning.CodeSeedFileNotFound, seedFile.Path)
+			} else {
+				w = warning.NewSeedingError(warning.CodeFailedToOpenSeedFile, seedFile.Path)
 			}
-			outputData.Errors = append(outputData.Errors, fmt.Sprintf("Failed to get seed path: %v", err))
-			return nil, errors.New(fmt.Sprintf("Failed to get seed path: %v", err))
+			if w != nil {
+				h.warnings = append(h.warnings, w)
+				warning.PrintWarning(w)
+			}
+			continue
 		}
 
 		if info.IsDir() {
@@ -98,7 +111,7 @@ func getSeedFilesToApply(seedFiles []config.DatabaseSeed, outputData *output.Out
 				}
 				if !d.IsDir() && filepath.Ext(p) == ".sql" {
 					slog.Debug("Found sql file", "file", p)
-					needApply, err := shouldSeedBeApplied(p, seedFile.SeedOn, state.AppliedSeeds, outputData)
+					needApply, err := h.shouldSeedBeApplied(p, seedFile.SeedOn, h.state.AppliedSeeds)
 					if err != nil {
 						return nil
 					}
@@ -106,27 +119,28 @@ func getSeedFilesToApply(seedFiles []config.DatabaseSeed, outputData *output.Out
 						return nil
 					}
 
-					seedFilesToApply = append(seedFilesToApply, p)
+					h.seedFilesPath = append(h.seedFilesPath, p)
 				}
 				return nil
 			}); err != nil {
-				outputData.Errors = append(outputData.Errors, fmt.Sprintf("Failed to search for sql files inside seed path: %v", err))
-				return nil, errors.New(fmt.Sprintf("Failed to search for sql files inside seed path: %v", err))
+				if w := warning.NewSeedingError(warning.CodeFailedToOpenSeedFile, seedFile.Path); w != nil {
+					h.warnings = append(h.warnings, w)
+					warning.PrintWarning(w)
+					continue
+				}
 			}
 		} else {
 			slog.Debug("Path is a file", "file", seedFile.Path)
-			needApply, err := shouldSeedBeApplied(seedFile.Path, seedFile.SeedOn, state.AppliedSeeds, outputData)
+			needApply, err := h.shouldSeedBeApplied(seedFile.Path, seedFile.SeedOn, h.state.AppliedSeeds)
 			if err != nil {
 				continue
 			}
 			if !needApply {
 				continue
 			}
-			seedFilesToApply = append(seedFilesToApply, seedFile.Path)
+			h.seedFilesPath = append(h.seedFilesPath, seedFile.Path)
 		}
 	}
-
-	return seedFilesToApply, nil
 }
 
 func NewDirectSeed(conn helper.ConnectionFields, seedFiles []config.DatabaseSeed, state *config.DatabaseState) (*DirectSeed, error) {
@@ -137,12 +151,7 @@ func NewDirectSeed(conn helper.ConnectionFields, seedFiles []config.DatabaseSeed
 		return nil, errors.New(fmt.Sprintf("Failed to connect to database: %v", err))
 	}
 
-	seedFilesToApply, err := getSeedFilesToApply(seedFiles, outputData, state)
-	if err != nil {
-		return nil, err
-	}
-
-	return &DirectSeed{db: db, seedFilesPath: seedFilesToApply, state: state, output: outputData}, nil
+	return &DirectSeed{db: db, seedFiles: seedFiles, state: state, output: outputData, warnings: make([]warning.Warning, 0)}, nil
 }
 
 func (h *DirectSeed) Close() error {
@@ -151,6 +160,8 @@ func (h *DirectSeed) Close() error {
 
 func (h *DirectSeed) Apply() {
 	_, _ = fmt.Fprintln(log.Writer(), "Seeding database...")
+
+	h.getSeedFilesToApply()
 
 	// Set start time
 	startTime := time.Now()
@@ -210,3 +221,5 @@ func (h *DirectSeed) Apply() {
 func (h *DirectSeed) GetOutput() *output.OutputDatabaseSeeding {
 	return h.output
 }
+
+func (h *DirectSeed) GetWarnings() []warning.Warning { return h.warnings }

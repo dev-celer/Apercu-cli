@@ -91,7 +91,7 @@ func preview(cmd *cobra.Command, args []string) error {
 	}
 	dbOutput.Warnings = dbHandler.GetWarnings()
 
-	// Apply the migrations
+	// Initialize migration handler
 	ctx := cmd.Context()
 	migrationHandler, err := migration.GetMigrationHandler(dbConfig, &previewConn)
 	if err != nil {
@@ -104,6 +104,7 @@ func preview(cmd *cobra.Command, args []string) error {
 		ErrorAndExit(err, dbOutput, dbName)
 	}
 
+	// Apply migration
 	migrationMessage, err := ApplyMigration(ctx, migrationHandler, metricHandler)
 	if err != nil {
 		dbOutput.Migration = migrationHandler.GetOutput()
@@ -111,6 +112,7 @@ func preview(cmd *cobra.Command, args []string) error {
 	}
 	if migrationHandler != nil {
 		dbOutput.Migration = migrationHandler.GetOutput()
+		dbOutput.Warnings = append(dbOutput.Warnings, migrationHandler.GetWarnings()...)
 	}
 
 	dbOutput.Warnings = append(dbOutput.Warnings, metricHandler.GetWarnings()...)
@@ -136,8 +138,7 @@ func preview(cmd *cobra.Command, args []string) error {
 	state.Databases[dbName] = dbState
 	if statePath != "" {
 		if err := state.Save(statePath); err != nil {
-			dbOutput.Warnings = append(dbOutput.Warnings, err.Error())
-			_, _ = fmt.Fprintln(os.Stderr, err)
+			ErrorAndExit(err, dbOutput, dbName)
 		}
 	}
 

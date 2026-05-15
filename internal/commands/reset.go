@@ -87,6 +87,7 @@ func reset(cmd *cobra.Command, args []string) error {
 	}
 	if migrationHandler != nil {
 		dbOutput.Migration = migrationHandler.GetOutput()
+		dbOutput.Warnings = append(dbOutput.Warnings, migrationHandler.GetWarnings()...)
 	}
 
 	dbOutput.Warnings = append(dbOutput.Warnings, metricHandler.GetWarnings()...)
@@ -113,8 +114,7 @@ func reset(cmd *cobra.Command, args []string) error {
 	state.Databases[dbName] = dbState
 	if statePath != "" {
 		if err := state.Save(statePath); err != nil {
-			dbOutput.Warnings = append(dbOutput.Warnings, err.Error())
-			_, _ = fmt.Fprintln(os.Stderr, err)
+			ErrorAndExit(err, dbOutput, dbName)
 		}
 	}
 

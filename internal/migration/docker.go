@@ -3,6 +3,7 @@ package migration
 import (
 	"apercu-cli/helper"
 	"apercu-cli/helper/docker"
+	"apercu-cli/helper/warning"
 	"apercu-cli/output"
 	"bytes"
 	"context"
@@ -30,6 +31,7 @@ type DockerHandler struct {
 	env         map[string]string
 	workDir     string
 	localFolder string
+	warnings    []warning.Warning
 	database    *helper.ConnectionFields
 	output      *output.OutputDatabaseMigration
 }
@@ -41,6 +43,7 @@ func NewDockerHandler(image string, command []string, env map[string]string, wor
 		env:         env,
 		workDir:     workDir,
 		localFolder: localFolder,
+		warnings:    make([]warning.Warning, 0),
 		database:    database,
 		output:      output.NewMigrationOutput(),
 	}
@@ -283,8 +286,9 @@ func (h *DockerHandler) Apply(ctx context.Context) error {
 	finalCount, finalCountErr := h.getCount()
 	if finalCountErr != nil {
 		if errors.Is(finalCountErr, ErrMigrationTableNotFound) {
-			h.output.Warnings = append(h.output.Warnings, "Migration table not found, cannot determine migration count")
-			_, _ = fmt.Fprintln(log.Writer(), "WARNING: migration table not found, cannot determine migration count")
+			w := warning.MigrationTableNotFound{}
+			h.warnings = append(h.warnings, w)
+			warning.PrintWarning(w)
 		} else {
 			return finalCountErr
 		}
@@ -301,3 +305,5 @@ func (h *DockerHandler) Apply(ctx context.Context) error {
 func (h *DockerHandler) GetOutput() *output.OutputDatabaseMigration {
 	return h.output
 }
+
+func (h *DockerHandler) GetWarnings() []warning.Warning { return h.warnings }

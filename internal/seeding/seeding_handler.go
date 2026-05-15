@@ -3,6 +3,7 @@ package seeding
 import (
 	"apercu-cli/config"
 	"apercu-cli/helper"
+	"apercu-cli/helper/warning"
 	"apercu-cli/output"
 	"log/slog"
 )
@@ -11,6 +12,7 @@ type HandlerInterface interface {
 	Close() error
 	Apply()
 	GetOutput() *output.OutputDatabaseSeeding
+	GetWarnings() []warning.Warning
 }
 
 func GetSeedingHandler(dbConfig config.Database, state *config.DatabaseState, connection helper.ConnectionFields) (HandlerInterface, error) {

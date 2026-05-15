@@ -3,6 +3,7 @@ package database
 import (
 	"apercu-cli/config"
 	"apercu-cli/helper"
+	"apercu-cli/helper/warning"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -14,7 +15,7 @@ type HandlerInterface interface {
 	Delete() error
 	Reset() error
 	GetConnectionFields() (helper.ConnectionFields, error)
-	GetWarnings() []string
+	GetWarnings() []warning.Warning
 }
 
 func getProdDatabaseConn(dbConfig config.Database) (helper.ConnectionFields, error) {
@@ -229,7 +230,7 @@ func GetAnonymizationDatabaseHandlers(dbConfig config.Database) (*helper.Connect
 
 type PruningHandlerInterface interface {
 	Prune([]string) ([]string, error)
-	GetWarnings() []string
+	GetWarnings() []warning.Warning
 }
 
 func GetPruningDatabaseHandler(dbConfig config.Database) (PruningHandlerInterface, error) {

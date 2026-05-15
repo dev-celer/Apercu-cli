@@ -4,6 +4,7 @@ import (
 	"apercu-cli/config"
 	"apercu-cli/helper"
 	neonHelper "apercu-cli/helper/neon"
+	"apercu-cli/helper/warning"
 	"errors"
 	"fmt"
 	"log"
@@ -20,7 +21,7 @@ type NeonHandler struct {
 	branch        string
 	parentBranch  *string
 	branchingType *config.DatabaseNeonBranchingType
-	warnings      []string
+	warnings      []warning.Warning
 }
 
 func NewNeonHandler(projectId string, apiKey string, parentBranch *string, branch string, branchingType *config.DatabaseNeonBranchingType) (*NeonHandler, error) {
@@ -35,7 +36,7 @@ func NewNeonHandler(projectId string, apiKey string, parentBranch *string, branc
 		apiKey:        apiKey,
 		parentBranch:  parentBranch,
 		branch:        branch,
-		warnings:      make([]string, 0),
+		warnings:      make([]warning.Warning, 0),
 		branchingType: branchingType,
 	}, nil
 }
@@ -129,7 +130,7 @@ func (h *NeonHandler) waitForOperationToComplete(operationId string) error {
 	}
 }
 
-func (h *NeonHandler) GetWarnings() []string {
+func (h *NeonHandler) GetWarnings() []warning.Warning {
 	return h.warnings
 }
 
