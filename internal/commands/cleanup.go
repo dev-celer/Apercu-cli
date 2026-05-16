@@ -30,7 +30,7 @@ func cleanup(cmd *cobra.Command, args []string) error {
 		break
 	}
 
-	_, handler, err := database.GetPreviewDatabaseHandler(dbConfig)
+	_, handler, _, err := database.GetPreviewDatabaseHandler(dbConfig)
 	if err != nil {
 		return err
 	}

@@ -3,6 +3,7 @@ package warning
 import (
 	"fmt"
 	"log"
+	"reflect"
 )
 
 type Warning interface {
@@ -34,5 +35,12 @@ const (
 )
 
 func PrintWarning(w Warning) {
+	if w == nil {
+		return
+	}
+	// Guard against a typed-nil pointer wrapped in a non-nil interface
+	if v := reflect.ValueOf(w); v.Kind() == reflect.Ptr && v.IsNil() {
+		return
+	}
 	_, _ = fmt.Fprintln(log.Writer(), fmt.Sprintf("WARNING: %s", w.GetWarningText()))
 }

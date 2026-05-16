@@ -64,12 +64,13 @@ func TestLoadConfig_MalformedYAML(t *testing.T) {
 func TestReplaceVariables(t *testing.T) {
 
 	tests := []struct {
-		name     string
-		input    string
-		vars     map[string]string
-		envKey   string
-		envVal   string
-		expected string
+		name            string
+		input           string
+		vars            map[string]string
+		envKey          string
+		envVal          string
+		expected        string
+		expectedMissing []string
 	}{
 		{
 			name:     "single variable from map",
@@ -100,10 +101,25 @@ func TestReplaceVariables(t *testing.T) {
 			expected: "hello-world",
 		},
 		{
-			name:     "unknown variable returns empty",
-			input:    "prefix-${{ UNKNOWN }}",
-			vars:     map[string]string{},
-			expected: "prefix-",
+			name:            "unknown variable returns in missing",
+			input:           "prefix-${{ UNKNOWN }}",
+			vars:            map[string]string{},
+			expected:        "prefix-",
+			expectedMissing: []string{"UNKNOWN"},
+		},
+		{
+			name:            "multiples unknown variables should return in missing",
+			input:           "prefix-${{ UNKNOWN_A }}-${{ UNKNOWN_B }}",
+			vars:            map[string]string{},
+			expected:        "prefix--",
+			expectedMissing: []string{"UNKNOWN_A", "UNKNOWN_B"},
+		},
+		{
+			name:            "multiples variables with only one missing",
+			input:           "prefix-${{ VAR1 }}-${{ UNKNOWN }}",
+			vars:            map[string]string{"VAR1": "var"},
+			expected:        "prefix-var-",
+			expectedMissing: []string{"UNKNOWN"},
 		},
 		{
 			name:     "no variables in string",
@@ -124,8 +140,13 @@ func TestReplaceVariables(t *testing.T) {
 			if tt.envKey != "" {
 				t.Setenv(tt.envKey, tt.envVal)
 			}
-			result := ReplaceVariables(tt.input, tt.vars)
+			result, m := ReplaceVariables(tt.input, tt.vars)
 			assert.Equal(t, tt.expected, result)
+			if tt.expectedMissing == nil || len(tt.expectedMissing) == 0 {
+				assert.Nil(t, m)
+			} else {
+				assert.Equal(t, tt.expectedMissing, m)
+			}
 		})
 	}
 }

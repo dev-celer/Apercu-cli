@@ -10,27 +10,29 @@ import (
 
 func TestGetPreviewDatabaseHandler_NilSource(t *testing.T) {
 	t.Parallel()
-	prodConn, handler, err := GetPreviewDatabaseHandler(config.Database{Source: nil})
+	prodConn, handler, w, err := GetPreviewDatabaseHandler(config.Database{Source: nil})
 	assert.NoError(t, err)
 	assert.Nil(t, handler)
 	assert.Nil(t, prodConn)
+	assert.Nil(t, w)
 }
 
 func TestGetPreviewDatabaseHandler_UnsupportedProvider(t *testing.T) {
 	t.Parallel()
-	prodConn, handler, err := GetPreviewDatabaseHandler(config.Database{
+	prodConn, handler, w, err := GetPreviewDatabaseHandler(config.Database{
 		Source:        &config.DatabaseSource{Provider: "unknown"},
 		PreviewBranch: "preview-1",
 	})
 	assert.Error(t, err)
 	assert.Nil(t, handler)
 	assert.Nil(t, prodConn)
+	assert.Nil(t, w)
 	assert.Contains(t, err.Error(), "unsupported source database provider")
 }
 
 func TestGetPreviewDatabaseHandler_MissingNeonConfig(t *testing.T) {
 	t.Parallel()
-	prodConn, handler, err := GetPreviewDatabaseHandler(config.Database{
+	prodConn, handler, w, err := GetPreviewDatabaseHandler(config.Database{
 		Source: &config.DatabaseSource{
 			Provider: config.DatabaseProviderNeon,
 			Neon:     nil,
@@ -40,30 +42,33 @@ func TestGetPreviewDatabaseHandler_MissingNeonConfig(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, handler)
 	assert.Nil(t, prodConn)
+	assert.Nil(t, w)
 	assert.Contains(t, err.Error(), "missing neon source database configuration")
 }
 
 func TestGetPruningDatabaseHandler_NilSource(t *testing.T) {
 	t.Parallel()
-	handler, err := GetPruningDatabaseHandler(config.Database{Source: nil})
+	handler, w, err := GetPruningDatabaseHandler(config.Database{Source: nil})
 	assert.NoError(t, err)
 	assert.Nil(t, handler)
+	assert.Nil(t, w)
 }
 
 func TestGetPruningDatabaseHandler_UnsupportedProvider(t *testing.T) {
 	t.Parallel()
-	handler, err := GetPruningDatabaseHandler(config.Database{
+	handler, w, err := GetPruningDatabaseHandler(config.Database{
 		Source:        &config.DatabaseSource{Provider: "unknown"},
 		PreviewBranch: "preview-1",
 	})
 	assert.Error(t, err)
 	assert.Nil(t, handler)
+	assert.Nil(t, w)
 	assert.Contains(t, err.Error(), "unsupported source database provider")
 }
 
 func TestGetPruningDatabaseHandler_MissingNeonConfig(t *testing.T) {
 	t.Parallel()
-	handler, err := GetPruningDatabaseHandler(config.Database{
+	handler, w, err := GetPruningDatabaseHandler(config.Database{
 		Source: &config.DatabaseSource{
 			Provider: config.DatabaseProviderNeon,
 			Neon:     nil,
@@ -72,11 +77,12 @@ func TestGetPruningDatabaseHandler_MissingNeonConfig(t *testing.T) {
 	})
 	assert.Error(t, err)
 	assert.Nil(t, handler)
+	assert.Nil(t, w)
 	assert.Contains(t, err.Error(), "missing neon source database configuration")
 }
 
 func TestGetPruningDatabaseHandler_UsesSourceValuesWithoutAnonymization(t *testing.T) {
-	handler, err := GetPruningDatabaseHandler(config.Database{
+	handler, w, err := GetPruningDatabaseHandler(config.Database{
 		PreviewBranch: "preview-${{ PR_NUMBER }}",
 		Source: &config.DatabaseSource{
 			Provider: config.DatabaseProviderNeon,
@@ -89,6 +95,7 @@ func TestGetPruningDatabaseHandler_UsesSourceValuesWithoutAnonymization(t *testi
 	})
 	require.NoError(t, err)
 	require.NotNil(t, handler)
+	assert.Nil(t, w)
 	pruneHandler, ok := handler.(*NeonPruneHandler)
 	require.True(t, ok)
 	assert.Equal(t, "src-project", pruneHandler.projectId)
@@ -100,35 +107,38 @@ func TestGetPruningDatabaseHandler_UsesSourceValuesWithoutAnonymization(t *testi
 func TestGetAnonymizationDatabaseHandlers_NilSourceOrAnonymization(t *testing.T) {
 	t.Parallel()
 
-	source, storage, err := GetAnonymizationDatabaseHandlers(config.Database{Source: nil})
+	source, storage, w, err := GetAnonymizationDatabaseHandlers(config.Database{Source: nil})
 	assert.NoError(t, err)
 	assert.Nil(t, source)
 	assert.Nil(t, storage)
+	assert.Nil(t, w)
 
-	source, storage, err = GetAnonymizationDatabaseHandlers(config.Database{
+	source, storage, w, err = GetAnonymizationDatabaseHandlers(config.Database{
 		Source:        &config.DatabaseSource{Provider: config.DatabaseProviderNeon},
 		Anonymization: nil,
 	})
 	assert.NoError(t, err)
 	assert.Nil(t, source)
 	assert.Nil(t, storage)
+	assert.Nil(t, w)
 }
 
 func TestGetAnonymizationDatabaseHandlers_UnsupportedProvider(t *testing.T) {
 	t.Parallel()
-	source, storage, err := GetAnonymizationDatabaseHandlers(config.Database{
+	source, storage, w, err := GetAnonymizationDatabaseHandlers(config.Database{
 		Source:        &config.DatabaseSource{Provider: "unknown"},
 		Anonymization: &config.DatabaseAnonymization{},
 	})
 	assert.Error(t, err)
 	assert.Nil(t, source)
 	assert.Nil(t, storage)
+	assert.Nil(t, w)
 	assert.Contains(t, err.Error(), "unsupported source database provider")
 }
 
 func TestGetAnonymizationDatabaseHandlers_MissingNeonStorage(t *testing.T) {
 	t.Parallel()
-	source, storage, err := GetAnonymizationDatabaseHandlers(config.Database{
+	source, storage, w, err := GetAnonymizationDatabaseHandlers(config.Database{
 		Source: &config.DatabaseSource{
 			Provider: config.DatabaseProviderNeon,
 			Neon:     &config.DatabaseNeonSource{},
@@ -140,12 +150,13 @@ func TestGetAnonymizationDatabaseHandlers_MissingNeonStorage(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, source)
 	assert.Nil(t, storage)
+	assert.Nil(t, w)
 	assert.Contains(t, err.Error(), "missing storage database configuration")
 }
 
 func TestGetAnonymizationDatabaseHandlers_MissingNeonSource(t *testing.T) {
 	t.Parallel()
-	source, storage, err := GetAnonymizationDatabaseHandlers(config.Database{
+	source, storage, w, err := GetAnonymizationDatabaseHandlers(config.Database{
 		Source: &config.DatabaseSource{
 			Provider: config.DatabaseProviderNeon,
 			Neon:     nil,
@@ -159,5 +170,6 @@ func TestGetAnonymizationDatabaseHandlers_MissingNeonSource(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, source)
 	assert.Nil(t, storage)
+	assert.Nil(t, w)
 	assert.Contains(t, err.Error(), "missing neon source database configuration")
 }

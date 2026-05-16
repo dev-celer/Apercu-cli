@@ -35,7 +35,7 @@ func anonymize(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get the databases handlers
-	sourceConn, storageHandler, err := database.GetAnonymizationDatabaseHandlers(dbConfig)
+	sourceConn, storageHandler, _, err := database.GetAnonymizationDatabaseHandlers(dbConfig)
 	if err != nil {
 		return err
 	}
@@ -61,7 +61,7 @@ func anonymize(cmd *cobra.Command, args []string) error {
 	}
 
 	// Anonymize the database
-	handler := anonymization.GetDatabaseAnonymizer(dbConfig, *sourceConn, storageConn)
+	handler, _ := anonymization.GetDatabaseAnonymizer(dbConfig, *sourceConn, storageConn)
 	if err := handler.Anonymize(cmd.Context()); err != nil {
 		if handler.GetOutput() != nil && handler.GetOutput().Logs != nil {
 			_, _ = fmt.Println(log.Writer(), "-------Greenmask output-------")

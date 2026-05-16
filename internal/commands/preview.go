@@ -67,7 +67,10 @@ func preview(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create the preview database if it doesn't exist
-	prodConn, dbHandler, err := database.GetPreviewDatabaseHandler(dbConfig)
+	prodConn, dbHandler, w, err := database.GetPreviewDatabaseHandler(dbConfig)
+	if w != nil {
+		w.UpdateGlobalEnvVarsWarning(dbOutput.Warnings)
+	}
 	if err != nil {
 		dbOutput.Errors = append(dbOutput.Errors, err.Error())
 		return ErrorAndExit(err, dbOutput, dbName)
@@ -96,7 +99,10 @@ func preview(cmd *cobra.Command, args []string) error {
 
 	// Initialize migration handler
 	ctx := cmd.Context()
-	migrationHandler, err := migration.GetMigrationHandler(dbConfig, &previewConn)
+	migrationHandler, w, err := migration.GetMigrationHandler(dbConfig, &previewConn)
+	if w != nil {
+		w.UpdateGlobalEnvVarsWarning(dbOutput.Warnings)
+	}
 	if err != nil {
 		return ErrorAndExit(err, dbOutput, dbName)
 	}

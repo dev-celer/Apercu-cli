@@ -61,7 +61,7 @@ func prune(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get database handler
-	databaseHandler, err := database.GetPruningDatabaseHandler(dbConfig)
+	databaseHandler, _, err := database.GetPruningDatabaseHandler(dbConfig)
 	if err != nil {
 		return err
 	}

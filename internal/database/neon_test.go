@@ -1,6 +1,7 @@
 package database
 
 import (
+	"apercu-cli/helper/warning"
 	"regexp"
 	"testing"
 
@@ -92,6 +93,10 @@ func TestFilterBranchesByParentAndPattern_Empty(t *testing.T) {
 func TestSelectBranchesForPruning(t *testing.T) {
 	t.Parallel()
 
+	h := NeonPruneHandler{
+		warnings: make([]warning.Warning, 0),
+	}
+
 	tests := []struct {
 		name           string
 		branches       []neon.Branch
@@ -141,7 +146,7 @@ func TestSelectBranchesForPruning(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			result := selectBranchesForPruning(tt.branches, tt.previewPattern, tt.openPRs)
+			result := h.selectBranchesForPruning(tt.branches, tt.previewPattern, tt.openPRs)
 			names := make([]string, len(result))
 			for i, b := range result {
 				names[i] = b.Name

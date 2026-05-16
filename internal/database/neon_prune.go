@@ -58,7 +58,7 @@ func (h *NeonPruneHandler) Prune(openedPullRequestNumber []string) ([]string, er
 		return nil, err
 	}
 
-	branchesToPrune := selectBranchesForPruning(previewBranches, h.branchPattern, openedPullRequestNumber)
+	branchesToPrune := h.selectBranchesForPruning(previewBranches, h.branchPattern, openedPullRequestNumber)
 
 	prunedBranches := make([]string, 0, len(branchesToPrune))
 	for _, branch := range branchesToPrune {
@@ -104,12 +104,16 @@ func filterBranchesByParentAndPattern(branches []neon.Branch, parentBranchId str
 }
 
 // selectBranchesForPruning returns branches that do not match any open pull request.
-func selectBranchesForPruning(branches []neon.Branch, previewPattern string, openPRNumbers []string) []neon.Branch {
+func (h *NeonPruneHandler) selectBranchesForPruning(branches []neon.Branch, previewPattern string, openPRNumbers []string) []neon.Branch {
 	result := make([]neon.Branch, 0)
 	for _, branch := range branches {
 		matched := false
 		for _, prNumber := range openPRNumbers {
-			prBranchName := config.ReplaceVariables(previewPattern, map[string]string{"PR_NUMBER": prNumber})
+			prBranchName, m := config.ReplaceVariables(previewPattern, map[string]string{"PR_NUMBER": prNumber})
+			w := warning.NewMissingEnvVarsWarning(m...)
+			warning.PrintWarning(w)
+			w.UpdateGlobalEnvVarsWarning(h.warnings)
+
 			if branch.Name == prBranchName {
 				matched = true
 				break

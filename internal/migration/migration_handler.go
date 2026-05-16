@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 )
 
 type HandlerInterface interface {
@@ -17,16 +18,17 @@ type HandlerInterface interface {
 	GetWarnings() []warning.Warning
 }
 
-func GetMigrationHandler(dbConfig config.Database, connection *helper.ConnectionFields) (HandlerInterface, error) {
+// GetMigrationHandler return an migration.HandlerInterface Object, a Missing EnvVars Warning (optionally), or an error
+func GetMigrationHandler(dbConfig config.Database, connection *helper.ConnectionFields) (HandlerInterface, *warning.MissingEnvVarsWarning, error) {
 	if dbConfig.Migration == nil {
 		slog.Debug("No migration specified")
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	proxyHost, proxyPort := "apercu-pgproxy", "5432"
 	proxyUrl, err := database_url.RewriteDatabaseUrlHostAndPort(connection.Url, proxyHost, proxyPort)
 	if err != nil {
-		return nil, fmt.Errorf("could not rewrite database url: %w", err)
+		return nil, nil, fmt.Errorf("could not rewrite database url: %w", err)
 	}
 	internalEnv := map[string]string{
 		"PREVIEW_DATABASE_URL": proxyUrl,
@@ -37,27 +39,38 @@ func GetMigrationHandler(dbConfig config.Database, connection *helper.Connection
 		"PREVIEW_PORT":         proxyPort,
 	}
 
+	m1 := make([]string, 0)
 	commands := make([]string, len(dbConfig.Migration.Command))
 	for i, command := range dbConfig.Migration.Command {
-		commands[i] = config.ReplaceVariables(command, internalEnv)
+		var m []string
+		commands[i], m = config.ReplaceVariables(command, internalEnv)
+		m1 = append(m1, m...)
 	}
 
 	env := make(map[string]string)
 	for k, v := range dbConfig.Migration.Env {
-		env[k] = config.ReplaceVariables(v, internalEnv)
+		var m []string
+		env[k], m = config.ReplaceVariables(v, internalEnv)
+		m1 = append(m1, m...)
 	}
 
 	workDir := "/data"
+	var m2 []string
 	if dbConfig.Migration.WorkDir != nil {
-		workDir = config.ReplaceVariables(*dbConfig.Migration.WorkDir, internalEnv)
+		workDir, m2 = config.ReplaceVariables(*dbConfig.Migration.WorkDir, internalEnv)
 	}
 
+	image, m3 := config.ReplaceVariables(dbConfig.Migration.Image, internalEnv)
+	localDir, m4 := config.ReplaceVariables(dbConfig.Migration.LocalDir, internalEnv)
+	w := warning.NewMissingEnvVarsWarning(slices.Concat(m1, m2, m3, m4)...)
+	warning.PrintWarning(w)
+
 	return NewDockerHandler(
-		config.ReplaceVariables(dbConfig.Migration.Image, internalEnv),
+		image,
 		commands,
 		env,
 		workDir,
-		config.ReplaceVariables(dbConfig.Migration.LocalDir, internalEnv),
+		localDir,
 		connection,
-	), nil
+	), w, nil
 }

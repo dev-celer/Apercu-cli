@@ -28,8 +28,10 @@ func LoadConfig(path string) (Config, error) {
 	return config, nil
 }
 
-func ReplaceVariables(data string, internalVariables map[string]string) string {
-	var reg = regexp.MustCompile(`\${{\s*(\w+)\s*}}`)
+var reg = regexp.MustCompile(`\${{\s*(\w+)\s*}}`)
+
+func ReplaceVariables(data string, internalVariables map[string]string) (string, []string) {
+	var missingVariables []string
 
 	return reg.ReplaceAllStringFunc(data, func(match string) string {
 		submatches := reg.FindStringSubmatch(match)
@@ -39,11 +41,11 @@ func ReplaceVariables(data string, internalVariables map[string]string) string {
 			envValue = os.Getenv(varName)
 		}
 		if envValue == "" {
-			fmt.Println(fmt.Sprintf("WARNING: Variable %s not set", varName))
+			missingVariables = append(missingVariables, varName)
 		}
 
 		return envValue
-	})
+	}), missingVariables
 }
 
 type Config struct {

@@ -11,17 +11,19 @@ import (
 
 func TestGetDatabaseAnonymizer_NilSource(t *testing.T) {
 	t.Parallel()
-	handler := GetDatabaseAnonymizer(config.Database{Source: nil}, helper.ConnectionFields{}, helper.ConnectionFields{})
+	handler, w := GetDatabaseAnonymizer(config.Database{Source: nil}, helper.ConnectionFields{}, helper.ConnectionFields{})
 	assert.Nil(t, handler)
+	assert.Nil(t, w)
 }
 
 func TestGetDatabaseAnonymizer_NilAnonymization(t *testing.T) {
 	t.Parallel()
-	handler := GetDatabaseAnonymizer(config.Database{
+	handler, w := GetDatabaseAnonymizer(config.Database{
 		Source:        &config.DatabaseSource{Provider: config.DatabaseProviderNeon},
 		Anonymization: nil,
 	}, helper.ConnectionFields{}, helper.ConnectionFields{})
 	assert.Nil(t, handler)
+	assert.Nil(t, w)
 }
 
 func TestGetDatabaseAnonymizer_BuildsGreenmaskHandler(t *testing.T) {
@@ -30,7 +32,7 @@ func TestGetDatabaseAnonymizer_BuildsGreenmaskHandler(t *testing.T) {
 	sourceConn := helper.ConnectionFields{Host: "src", Port: 5432, User: "u", Password: "p", Database: "d"}
 	storageConn := helper.ConnectionFields{Host: "dst", Port: 5432, User: "u", Password: "p", Database: "d"}
 
-	handler := GetDatabaseAnonymizer(config.Database{
+	handler, w := GetDatabaseAnonymizer(config.Database{
 		Source: &config.DatabaseSource{Provider: config.DatabaseProviderNeon},
 		Anonymization: &config.DatabaseAnonymization{
 			GreenmaskConfig: "./greenmask.yaml",
@@ -49,4 +51,5 @@ func TestGetDatabaseAnonymizer_BuildsGreenmaskHandler(t *testing.T) {
 	assert.Equal(t, "./greenmask.yaml", greenmask.configPath)
 	assert.Equal(t, "postgres://resolved-url", greenmask.env["DATABASE_URL"])
 	assert.Equal(t, "static-value", greenmask.env["STATIC"])
+	assert.Nil(t, w)
 }
