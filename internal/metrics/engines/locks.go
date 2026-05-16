@@ -21,6 +21,7 @@ func NewLocksEngine() *LocksEngine {
 func (e *LocksEngine) CollectPreMigrationMetrics() error { return nil }
 
 func (e *LocksEngine) SendPgProxyLogs(logs string) {
+	slog.Debug("Start pg proxy logs parsing for locks detection")
 	e.PgProxyEvents = make([]metricshelper.QueryEvent, 0)
 
 	for line := range strings.Lines(logs) {
@@ -45,6 +46,7 @@ func (e *LocksEngine) SendPgProxyLogs(logs string) {
 
 		e.PgProxyEvents = append(e.PgProxyEvents, query)
 	}
+	slog.Debug("Pg proxy logs parsing for locks detection complete", "locks_count", len(e.PgProxyEvents))
 }
 
 func (e *LocksEngine) CollectPostMigrationMetrics() error {

@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 )
 
@@ -22,6 +23,7 @@ func NewSchemaDiffEngine(db *sql.DB) *SchemaDiffEngine {
 }
 
 func (e *SchemaDiffEngine) CollectPreMigrationMetrics() error {
+	slog.Debug("Start to collect pre-migration schema")
 	schema, err := e.getSchema()
 	if err != nil {
 		return err
@@ -33,6 +35,7 @@ func (e *SchemaDiffEngine) CollectPreMigrationMetrics() error {
 func (e *SchemaDiffEngine) SendPgProxyLogs(s string) {}
 
 func (e *SchemaDiffEngine) CollectPostMigrationMetrics() error {
+	slog.Debug("Start to collect post-migration schema")
 	schema, err := e.getSchema()
 	if err != nil {
 		return err

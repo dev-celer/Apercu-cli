@@ -5,6 +5,7 @@ import (
 	"apercu-cli/output"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 )
@@ -22,6 +23,7 @@ func NewSizeEngine(db *sql.DB) *SizeEngine {
 }
 
 func (e *SizeEngine) CollectPreMigrationMetrics() error {
+	slog.Debug("Start to collect pre-migration size metrics")
 	initialSize, err := e.getDatabaseStorageInBytes()
 	if err != nil {
 		return err
@@ -38,6 +40,7 @@ func (e *SizeEngine) CollectPreMigrationMetrics() error {
 func (e *SizeEngine) SendPgProxyLogs(s string) {}
 
 func (e *SizeEngine) CollectPostMigrationMetrics() error {
+	slog.Debug("Start to collect post-migration size metrics")
 	finalSize, err := e.getDatabaseStorageInBytes()
 	if err != nil {
 		return err

@@ -141,6 +141,12 @@ func NewExplainQueryEngine(db *sql.DB, dbConfig *config.Database) (*ExplainQuery
 }
 
 func (e *ExplainQueryEngine) CollectPreMigrationMetrics() error {
+	c := 0
+	for _, query := range e.queries.Queries {
+		c += len(query)
+	}
+	slog.Debug("Collecting pre-migration explain queries results", "queries", c, "files", len(e.queries.Queries))
+
 	for file, queries := range e.queries.Queries {
 		for _, query := range queries {
 			queryRun, err := e.generateQueryRun(query)
@@ -165,6 +171,12 @@ func (e *ExplainQueryEngine) CollectPreMigrationMetrics() error {
 func (e *ExplainQueryEngine) SendPgProxyLogs(s string) {}
 
 func (e *ExplainQueryEngine) CollectPostMigrationMetrics() error {
+	c := 0
+	for _, query := range e.queries.Queries {
+		c += len(query)
+	}
+	slog.Debug("Collecting post-migration explain queries results", "queries", c, "files", len(e.queries.Queries))
+
 	for file, queries := range e.queries.Queries {
 		for _, query := range queries {
 			idx := slices.IndexFunc(e.output, func(s output.OutputDatabaseExplainQuery) bool {
