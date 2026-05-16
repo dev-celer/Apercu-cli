@@ -3,6 +3,7 @@ package commands
 import (
 	"apercu-cli/config"
 	"apercu-cli/helper"
+	"apercu-cli/helper/warning"
 	"apercu-cli/internal/database"
 	"apercu-cli/internal/metrics"
 	"apercu-cli/internal/migration"
@@ -50,8 +51,10 @@ func preview(cmd *cobra.Command, args []string) error {
 	if statePath != "" {
 		state, err = config.GetState(statePath)
 		if err != nil {
-			dbOutput.Errors = append(dbOutput.Errors, err.Error())
-			ErrorAndExit(err, dbOutput, dbName)
+			slog.Debug("Error loading state file", "path", statePath, "error", err)
+			w := warning.NewStateFileWarning(statePath)
+			warning.PrintWarning(w)
+			dbOutput.Warnings = append(dbOutput.Warnings, w)
 		}
 	} else {
 		state = *config.NewState()
