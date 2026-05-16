@@ -30,8 +30,7 @@ func prune(cmd *cobra.Command, args []string) error {
 	// Get config
 	configFile, err := config.LoadConfig(".")
 	if err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return err
 	}
 
 	var dbConfig config.Database
@@ -47,28 +46,24 @@ func prune(cmd *cobra.Command, args []string) error {
 		// Extract owner / repository name from flag argument
 		values := strings.Split(githubRepository, "/")
 		if len(values) != 2 {
-			_, _ = fmt.Fprintln(os.Stderr, "Invalid repository structure, please use owner/repository")
-			os.Exit(1)
+			return fmt.Errorf("invalid repository structure (%s), please use owner/repository", githubRepository)
 		}
 
 		// Retrieve github token
 		ghToken := os.Getenv("GH_TOKEN")
 		if ghToken == "" {
-			_, _ = fmt.Fprintln(os.Stderr, "GH_TOKEN environment variable not set")
-			os.Exit(1)
+			return fmt.Errorf("no GH_TOKEN environment variable set")
 		}
 
 		repositoryHandler = repository.NewGithubHandler(cmd.Context(), ghToken, values[0], values[1])
 	default:
-		_, _ = fmt.Fprintln(os.Stderr, "Missing repository flag, please use --github-repository")
-		os.Exit(1)
+		return fmt.Errorf("missing repository flag, please use --github-repository")
 	}
 
 	// Get database handler
 	databaseHandler, err := database.GetPruningDatabaseHandler(dbConfig)
 	if err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return err
 	}
 
 	_, _ = fmt.Fprintln(log.Writer(), "Pruning databases...")
@@ -76,15 +71,13 @@ func prune(cmd *cobra.Command, args []string) error {
 	// Retrieve the list of opened pull requests
 	prNumbers, err := repositoryHandler.GetOpenedPullRequestsNumber()
 	if err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return err
 	}
 
 	// Prune the database
 	prunedDatabase, err := databaseHandler.Prune(prNumbers)
 	if err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return err
 	}
 
 	_, _ = fmt.Fprintln(log.Writer(), fmt.Sprintf("Pruned %d database(s):\n%s", len(prunedDatabase), strings.Join(prunedDatabase, "\n")))

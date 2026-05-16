@@ -3,8 +3,6 @@ package commands
 import (
 	"apercu-cli/config"
 	"apercu-cli/internal/database"
-	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
 )
@@ -34,21 +32,18 @@ func cleanup(cmd *cobra.Command, args []string) error {
 
 	_, handler, err := database.GetPreviewDatabaseHandler(dbConfig)
 	if err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return err
 	}
 
 	if handler != nil {
 		exist, err := handler.Exists()
 		if err != nil {
-			_, _ = fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+			return err
 		}
 
 		if exist {
 			if err := handler.Delete(); err != nil {
-				_, _ = fmt.Fprintln(os.Stderr, err)
-				os.Exit(1)
+				return err
 			}
 		}
 	}

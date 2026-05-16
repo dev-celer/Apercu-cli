@@ -126,7 +126,7 @@ func SaveMarkdownFile(path string, output *output.PreviewOutput) error {
 	return nil
 }
 
-func ErrorAndExit(err error, dbOutput *output.PreviewOutputDatabase, dbName string) {
+func ErrorAndExit(err error, dbOutput *output.PreviewOutputDatabase, dbName string) error {
 	outputData := output.PreviewOutput{
 		Databases: map[string]output.PreviewOutputDatabase{
 			dbName: *dbOutput,
@@ -141,12 +141,8 @@ func ErrorAndExit(err error, dbOutput *output.PreviewOutputDatabase, dbName stri
 
 	if outputFile != "" {
 		if err := SaveOutputInFile(outputFile, &outputData); err != nil {
-			_, _ = fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+			return err
 		}
-		_, _ = fmt.Fprintln(os.Stderr, err)
-		os.Exit(0)
 	}
-	_, _ = fmt.Fprintln(os.Stderr, err)
-	os.Exit(1)
+	return err
 }

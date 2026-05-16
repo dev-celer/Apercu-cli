@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
-	"os"
 
 	"github.com/spf13/cobra"
 )
@@ -38,32 +37,27 @@ func anonymize(cmd *cobra.Command, args []string) error {
 	// Get the databases handlers
 	sourceConn, storageHandler, err := database.GetAnonymizationDatabaseHandlers(dbConfig)
 	if err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return err
 	}
 	if sourceConn == nil || storageHandler == nil {
-		_, _ = fmt.Fprintln(os.Stderr, "No anonymization configuration specified")
-		os.Exit(1)
+		return fmt.Errorf("no anonymization configuration specified")
 	}
 
 	// Create the storage database if missing
 	exist, err := storageHandler.Exists()
 	if err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return err
 	}
 	if !exist {
 		if err := storageHandler.Create(); err != nil {
-			_, _ = fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+			return err
 		}
 	}
 
 	// Get the database connection fields
 	storageConn, err := storageHandler.GetConnectionFields()
 	if err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return err
 	}
 
 	// Anonymize the database
@@ -75,8 +69,7 @@ func anonymize(cmd *cobra.Command, args []string) error {
 			_, _ = fmt.Println(log.Writer(), "-----------------------------")
 		}
 
-		_, _ = fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return err
 	}
 
 	output := handler.GetOutput()
