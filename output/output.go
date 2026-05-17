@@ -48,7 +48,7 @@ func NewMigrationOutput() *OutputDatabaseMigration {
 }
 
 type OutputDatabaseMetrics struct {
-	Prod           map[string]map[string]metricshelper.TableMetrics                 `yaml:"prod,omitempty" json:"prod,omitempty"`
+	Prod           map[helper.FullTableName]metricshelper.TableMetrics              `yaml:"prod,omitempty" json:"prod,omitempty"`
 	SchemaDiff     map[string]*metricshelper.SchemaDiff                             `yaml:"schema_diff,omitempty" json:"schema_diff,omitempty"`
 	Locks          map[metricshelper.QueryLock]map[string]metricshelper.LockMetrics `yaml:"locks,omitempty" json:"locks,omitempty"`
 	RewrittenTable []helper.FullTableName                                           `yaml:"rewritten_table,omitempty" json:"rewritten_table,omitempty"`
@@ -58,7 +58,7 @@ type OutputDatabaseMetrics struct {
 
 func NewOutputDatabaseMetrics() *OutputDatabaseMetrics {
 	return &OutputDatabaseMetrics{
-		Prod:           make(map[string]map[string]metricshelper.TableMetrics),
+		Prod:           make(map[helper.FullTableName]metricshelper.TableMetrics),
 		SchemaDiff:     make(map[string]*metricshelper.SchemaDiff),
 		RewrittenTable: make([]helper.FullTableName, 0),
 		Locks:          make(map[metricshelper.QueryLock]map[string]metricshelper.LockMetrics),

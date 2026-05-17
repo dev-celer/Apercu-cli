@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"apercu-cli/helper"
 	metricshelper "apercu-cli/helper/metrics"
 	"database/sql"
 	"errors"
@@ -49,8 +50,8 @@ func getExactRowCount(db *sql.DB, schemaName string, tableName string) (int64, e
 	return rowCount, nil
 }
 
-func GetDatabaseStats(db *sql.DB) (map[string]map[string]metricshelper.TableMetrics, error) {
-	stats := make(map[string]map[string]metricshelper.TableMetrics)
+func GetDatabaseStats(db *sql.DB) (map[helper.FullTableName]metricshelper.TableMetrics, error) {
+	stats := make(map[helper.FullTableName]metricshelper.TableMetrics)
 
 	pgClassStats, err := getPgClassDatabaseStats(db)
 	if err != nil {
@@ -58,11 +59,6 @@ func GetDatabaseStats(db *sql.DB) (map[string]map[string]metricshelper.TableMetr
 	}
 	isReadOnly := false
 	for _, s := range pgClassStats {
-		// Create the map entry if it's missing
-		if _, ok := stats[s.SchemaName]; !ok {
-			stats[s.SchemaName] = make(map[string]metricshelper.TableMetrics)
-		}
-
 		// If in read only mode, request the row count from SELECT COUNT(*)
 		if isReadOnly {
 			s.RowCount, err = getExactRowCount(db, s.SchemaName, s.TableName)
@@ -103,7 +99,10 @@ func GetDatabaseStats(db *sql.DB) (map[string]map[string]metricshelper.TableMetr
 			return nil, fmt.Errorf("failed to get table size for table %s.%s: %v", s.SchemaName, s.TableName, err)
 		}
 
-		stats[s.SchemaName][s.TableName] = metricshelper.TableMetrics{
+		stats[helper.FullTableName{
+			Schema: s.SchemaName,
+			Table:  s.TableName,
+		}] = metricshelper.TableMetrics{
 			RowCount:  s.RowCount,
 			TableSize: tableSize,
 		}
