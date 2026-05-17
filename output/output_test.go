@@ -56,7 +56,7 @@ func TestRenderMarkdown_MigrationAndSeeding(t *testing.T) {
 					Logs:     strPtr("running migration 1\nrunning migration 2"),
 					Errors:   []string{},
 					Metrics: &OutputDatabaseMetrics{
-						Prod:       nil,
+						Prod:       metricshelper.DatabaseMetrics{},
 						SchemaDiff: make(map[string]*metricshelper.SchemaDiff),
 						Locks:      map[metricshelper.QueryLock]map[string]metricshelper.LockMetrics{},
 						Explains:   make([]OutputDatabaseExplainQuery, 0),

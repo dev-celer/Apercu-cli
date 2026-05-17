@@ -17,12 +17,14 @@ type SizeEngine struct {
 	initialSize, finalSize           int64
 	initialWAL, finalWAL             int64
 	initialTempBytes, finalTempBytes int64
+	warnings                         []warning.Warning
 }
 
 func NewSizeEngine(db *sql.DB, prodMetrics metrics.DatabaseMetrics) *SizeEngine {
 	return &SizeEngine{
 		db:          db,
 		prodMetrics: prodMetrics,
+		warnings:    make([]warning.Warning, 0),
 	}
 }
 
@@ -80,6 +82,8 @@ func (e *SizeEngine) StoreMetricsToOutput(m *output.OutputDatabaseMetrics) error
 		diffFromProd = 1
 	}
 
+	estimatedProdWALDelta := int64(float64(walDelta) * diffFromProd)
+
 	m.Storage = &output.OutputDatabaseStorageMetrics{
 		InitialSize:            e.initialSize,
 		FinalSize:              e.finalSize,
@@ -87,14 +91,20 @@ func (e *SizeEngine) StoreMetricsToOutput(m *output.OutputDatabaseMetrics) error
 		WALDelta:               walDelta,
 		TempDelta:              tempDelta,
 		EstimatedTempDelta:     int64(float64(tempDelta) * diffFromProd),
-		EstimatedProdWALDelta:  int64(float64(walDelta) * diffFromProd),
+		EstimatedProdWALDelta:  estimatedProdWALDelta,
 		EstimatedProdSizeDelta: int64(float64(sizeDelta) * diffFromProd),
 	}
+
+	walWarning := warning.NewWALSizeWarning(estimatedProdWALDelta, e.prodMetrics.DatabaseSize)
+	if walWarning != nil {
+		e.warnings = append(e.warnings, walWarning)
+	}
+
 	return nil
 }
 
 func (e *SizeEngine) GetWarnings() []warning.Warning {
-	return nil
+	return e.warnings
 }
 
 func (e *SizeEngine) getDatabaseStorageInBytes() (int64, error) {
