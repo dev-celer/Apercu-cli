@@ -14,10 +14,10 @@ type RewriteEngine struct {
 	preMigrationNode  map[databasehelper.FullTableName]uint32
 	postMigrationNode map[databasehelper.FullTableName]uint32
 	warnings          []warning.Warning
-	prodMetrics       map[databasehelper.FullTableName]metricshelper.TableMetrics
+	prodMetrics       metricshelper.DatabaseMetrics
 }
 
-func NewRewriteEngine(db *sql.DB, prodMetrics map[databasehelper.FullTableName]metricshelper.TableMetrics) *RewriteEngine {
+func NewRewriteEngine(db *sql.DB, prodMetrics metricshelper.DatabaseMetrics) *RewriteEngine {
 	return &RewriteEngine{
 		db:                db,
 		preMigrationNode:  make(map[databasehelper.FullTableName]uint32),
@@ -56,7 +56,7 @@ func (e *RewriteEngine) StoreMetricsToOutput(metrics *output.OutputDatabaseMetri
 				metrics.RewrittenTable = append(metrics.RewrittenTable, table)
 
 				// Get prod database metrics
-				prod, ok := e.prodMetrics[table]
+				prod, ok := e.prodMetrics.TablesMetrics[table]
 
 				// Generate warning
 				if ok {

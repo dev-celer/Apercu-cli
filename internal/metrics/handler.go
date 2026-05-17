@@ -2,7 +2,6 @@ package metrics
 
 import (
 	"apercu-cli/config"
-	"apercu-cli/helper"
 	metricshelper "apercu-cli/helper/metrics"
 	"apercu-cli/helper/warning"
 	"apercu-cli/internal/metrics/engines"
@@ -62,7 +61,7 @@ func (h *MetricsHandler) Close() {
 
 // initializeEngines is used to call all constructor for every metrics engines
 // any new metrics engines should be added to this function
-func initializeEngines(prodDb, previewDb *sql.DB, prodStats map[helper.FullTableName]metricshelper.TableMetrics, dbConfig *config.Database, fullConfig *config.Config) ([]engines.MetricEngine, error) {
+func initializeEngines(prodDb, previewDb *sql.DB, prodStats metricshelper.DatabaseMetrics, dbConfig *config.Database, fullConfig *config.Config) ([]engines.MetricEngine, error) {
 	enginesList := make([]engines.MetricEngine, 0)
 
 	enginesList = append(enginesList, engines.NewLocksEngine())
@@ -75,7 +74,7 @@ func initializeEngines(prodDb, previewDb *sql.DB, prodStats map[helper.FullTable
 
 	enginesList = append(enginesList, engines.NewSchemaDiffEngine(previewDb))
 
-	enginesList = append(enginesList, engines.NewSizeEngine(previewDb))
+	enginesList = append(enginesList, engines.NewSizeEngine(previewDb, prodStats))
 
 	enginesList = append(enginesList, engines.NewRewriteEngine(previewDb, prodStats))
 

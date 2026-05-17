@@ -1,6 +1,7 @@
 package engines
 
 import (
+	"apercu-cli/helper/metrics"
 	"apercu-cli/helper/warning"
 	"apercu-cli/output"
 	"database/sql"
@@ -11,14 +12,17 @@ import (
 )
 
 type SizeEngine struct {
-	db                           *sql.DB
-	initialSize, finalSize       int64
-	initialWALSize, finalWALSize uint64
+	db                               *sql.DB
+	prodMetrics                      metrics.DatabaseMetrics
+	initialSize, finalSize           int64
+	initialWAL, finalWAL             int64
+	initialTempBytes, finalTempBytes int64
 }
 
-func NewSizeEngine(db *sql.DB) *SizeEngine {
+func NewSizeEngine(db *sql.DB, prodMetrics metrics.DatabaseMetrics) *SizeEngine {
 	return &SizeEngine{
-		db: db,
+		db:          db,
+		prodMetrics: prodMetrics,
 	}
 }
 
@@ -28,12 +32,17 @@ func (e *SizeEngine) CollectPreMigrationMetrics() error {
 	if err != nil {
 		return err
 	}
-	initialWALSize, err := e.getWALBytes()
+	initialWAL, err := e.getCurrentWALPosition()
+	if err != nil {
+		return err
+	}
+	initialTempBytes, err := e.getTempBytes()
 	if err != nil {
 		return err
 	}
 	e.initialSize = initialSize
-	e.initialWALSize = initialWALSize
+	e.initialWAL = initialWAL
+	e.initialTempBytes = initialTempBytes
 	return nil
 }
 
@@ -45,21 +54,41 @@ func (e *SizeEngine) CollectPostMigrationMetrics() error {
 	if err != nil {
 		return err
 	}
-	finalWALSize, err := e.getWALBytes()
+	finalWAL, err := e.getCurrentWALPosition()
+	if err != nil {
+		return err
+	}
+	finalTempBytes, err := e.getTempBytes()
 	if err != nil {
 		return err
 	}
 	e.finalSize = finalSize
-	e.finalWALSize = finalWALSize
+	e.finalWAL = finalWAL
+	e.finalTempBytes = finalTempBytes
 	return nil
 }
 
-func (e *SizeEngine) StoreMetricsToOutput(metrics *output.OutputDatabaseMetrics) error {
-	metrics.Storage = &output.OutputDatabaseStorageMetrics{
-		InitialSize: e.initialSize,
-		FinalSize:   e.finalSize,
-		SizeDelta:   e.finalSize - e.initialSize,
-		WALDelta:    e.finalWALSize - e.initialWALSize,
+func (e *SizeEngine) StoreMetricsToOutput(m *output.OutputDatabaseMetrics) error {
+	sizeDelta := e.finalSize - e.initialSize
+	walDelta := e.finalWAL - e.initialWAL
+	tempDelta := e.finalTempBytes - e.initialTempBytes
+
+	var diffFromProd float64
+	if e.initialSize > 0 && e.initialSize < e.prodMetrics.DatabaseSize {
+		diffFromProd = float64(e.prodMetrics.DatabaseSize) / float64(e.initialSize)
+	} else {
+		diffFromProd = 1
+	}
+
+	m.Storage = &output.OutputDatabaseStorageMetrics{
+		InitialSize:            e.initialSize,
+		FinalSize:              e.finalSize,
+		SizeDelta:              sizeDelta,
+		WALDelta:               walDelta,
+		TempDelta:              tempDelta,
+		EstimatedTempDelta:     int64(float64(tempDelta) * diffFromProd),
+		EstimatedProdWALDelta:  int64(float64(walDelta) * diffFromProd),
+		EstimatedProdSizeDelta: int64(float64(sizeDelta) * diffFromProd),
 	}
 	return nil
 }
@@ -78,7 +107,7 @@ func (e *SizeEngine) getDatabaseStorageInBytes() (int64, error) {
 	return size, nil
 }
 
-func (e *SizeEngine) getWALBytes() (uint64, error) {
+func (e *SizeEngine) getCurrentWALPosition() (int64, error) {
 	var wal_lsn string
 	err := e.db.QueryRow("SELECT pg_current_wal_lsn()").Scan(&wal_lsn)
 	if err != nil {
@@ -98,5 +127,15 @@ func (e *SizeEngine) getWALBytes() (uint64, error) {
 		return 0, fmt.Errorf("failed to parse WAL LSN low half %v: %v", parts[1], err)
 	}
 
-	return high<<32 | low, nil
+	return int64(high<<32 | low), nil
+}
+
+func (e *SizeEngine) getTempBytes() (int64, error) {
+	var temp_bytes int64
+	err := e.db.QueryRow("SELECT temp_bytes from pg_stat_database WHERE datname = current_database()").Scan(&temp_bytes)
+	if err != nil {
+		return 0, fmt.Errorf("failed to query database for temp bytes: %v", err)
+	}
+
+	return temp_bytes, nil
 }

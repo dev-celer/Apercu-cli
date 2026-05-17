@@ -48,7 +48,7 @@ func NewMigrationOutput() *OutputDatabaseMigration {
 }
 
 type OutputDatabaseMetrics struct {
-	Prod           map[helper.FullTableName]metricshelper.TableMetrics              `yaml:"prod,omitempty" json:"prod,omitempty"`
+	Prod           metricshelper.DatabaseMetrics                                    `yaml:"prod,omitempty" json:"prod,omitempty"`
 	SchemaDiff     map[string]*metricshelper.SchemaDiff                             `yaml:"schema_diff,omitempty" json:"schema_diff,omitempty"`
 	Locks          map[metricshelper.QueryLock]map[string]metricshelper.LockMetrics `yaml:"locks,omitempty" json:"locks,omitempty"`
 	RewrittenTable []helper.FullTableName                                           `yaml:"rewritten_table,omitempty" json:"rewritten_table,omitempty"`
@@ -58,7 +58,6 @@ type OutputDatabaseMetrics struct {
 
 func NewOutputDatabaseMetrics() *OutputDatabaseMetrics {
 	return &OutputDatabaseMetrics{
-		Prod:           make(map[helper.FullTableName]metricshelper.TableMetrics),
 		SchemaDiff:     make(map[string]*metricshelper.SchemaDiff),
 		RewrittenTable: make([]helper.FullTableName, 0),
 		Locks:          make(map[metricshelper.QueryLock]map[string]metricshelper.LockMetrics),
@@ -67,10 +66,14 @@ func NewOutputDatabaseMetrics() *OutputDatabaseMetrics {
 }
 
 type OutputDatabaseStorageMetrics struct {
-	InitialSize int64  `yaml:"initial_size" json:"initial_size"`
-	FinalSize   int64  `yaml:"final_size" json:"final_size"`
-	SizeDelta   int64  `yaml:"size_delta" json:"size_delta"`
-	WALDelta    uint64 `yaml:"wal_delta" json:"wal_delta"`
+	InitialSize            int64 `yaml:"initial_size" json:"initial_size"`
+	FinalSize              int64 `yaml:"final_size" json:"final_size"`
+	SizeDelta              int64 `yaml:"size_delta" json:"size_delta"`
+	WALDelta               int64 `yaml:"wal_delta" json:"wal_delta"`
+	TempDelta              int64 `yaml:"temp_delta" json:"temp_delta"`
+	EstimatedProdSizeDelta int64 `yaml:"estimated_prod_size_delta" json:"estimated_prod_size_delta"`
+	EstimatedProdWALDelta  int64 `yaml:"estimated_prod_wal_delta" json:"estimated_prod_wal_delta"`
+	EstimatedTempDelta     int64 `yaml:"estimated_temp_delta" json:"estimated_temp_delta"`
 }
 
 type OutputDatabaseExplainQuery struct {

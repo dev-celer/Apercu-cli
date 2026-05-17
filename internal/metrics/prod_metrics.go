@@ -45,17 +45,17 @@ func getExactRowCount(db *sql.DB, schemaName string, tableName string) (int64, e
 	var rowCount int64
 	err := db.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM \"%s\".\"%s\"", schemaName, tableName)).Scan(&rowCount)
 	if err != nil {
-		return 0, fmt.Errorf("failed to get row count for table %s.%s: %v", schemaName, tableName, err)
+		return 0, fmt.Errorf("failed to get prod database row count for table %s.%s: %v", schemaName, tableName, err)
 	}
 	return rowCount, nil
 }
 
-func GetDatabaseStats(db *sql.DB) (map[helper.FullTableName]metricshelper.TableMetrics, error) {
-	stats := make(map[helper.FullTableName]metricshelper.TableMetrics)
+func GetDatabaseStats(db *sql.DB) (metricshelper.DatabaseMetrics, error) {
+	tablesStats := make(map[helper.FullTableName]metricshelper.TableMetrics)
 
 	pgClassStats, err := getPgClassDatabaseStats(db)
 	if err != nil {
-		return nil, err
+		return metricshelper.DatabaseMetrics{}, err
 	}
 	isReadOnly := false
 	for _, s := range pgClassStats {
@@ -63,7 +63,7 @@ func GetDatabaseStats(db *sql.DB) (map[helper.FullTableName]metricshelper.TableM
 		if isReadOnly {
 			s.RowCount, err = getExactRowCount(db, s.SchemaName, s.TableName)
 			if err != nil {
-				return nil, err
+				return metricshelper.DatabaseMetrics{}, err
 			}
 		}
 
@@ -76,10 +76,10 @@ func GetDatabaseStats(db *sql.DB) (map[helper.FullTableName]metricshelper.TableM
 					isReadOnly = true
 					s.RowCount, err = getExactRowCount(db, s.SchemaName, s.TableName)
 					if err != nil {
-						return nil, err
+						return metricshelper.DatabaseMetrics{}, err
 					}
 				} else {
-					return nil, fmt.Errorf("failed to call ANALYZE on table %s.%s: %v", s.SchemaName, s.TableName, err)
+					return metricshelper.DatabaseMetrics{}, fmt.Errorf("failed to call ANALYZE on prod database table %s.%s: %v", s.SchemaName, s.TableName, err)
 				}
 			}
 
@@ -87,7 +87,7 @@ func GetDatabaseStats(db *sql.DB) (map[helper.FullTableName]metricshelper.TableM
 			if !isReadOnly {
 				err = db.QueryRow("select c.reltuples::bigint as row_count from pg_class c inner join pg_stat_user_tables s on s.relname = c.relname where c.relkind = 'r' and s.relid = ?", s.RelId).Scan(&s.RowCount)
 				if err != nil {
-					return nil, fmt.Errorf("failed to get row count for table %s.%s: %v", s.SchemaName, s.TableName, err)
+					return metricshelper.DatabaseMetrics{}, fmt.Errorf("failed to get prod database row count for table %s.%s: %v", s.SchemaName, s.TableName, err)
 				}
 			}
 		}
@@ -96,10 +96,10 @@ func GetDatabaseStats(db *sql.DB) (map[helper.FullTableName]metricshelper.TableM
 		var tableSize int64
 		err := db.QueryRow(fmt.Sprintf("SELECT pg_total_relation_size(%d)", s.RelId)).Scan(&tableSize)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get table size for table %s.%s: %v", s.SchemaName, s.TableName, err)
+			return metricshelper.DatabaseMetrics{}, fmt.Errorf("failed to get prod database table size for table %s.%s: %v", s.SchemaName, s.TableName, err)
 		}
 
-		stats[helper.FullTableName{
+		tablesStats[helper.FullTableName{
 			Schema: s.SchemaName,
 			Table:  s.TableName,
 		}] = metricshelper.TableMetrics{
@@ -108,5 +108,15 @@ func GetDatabaseStats(db *sql.DB) (map[helper.FullTableName]metricshelper.TableM
 		}
 	}
 
-	return stats, nil
+	// Retrieve the full database size
+	var databaseSize int64
+	err = db.QueryRow("SELECT pg_database_size(current_database())").Scan(&databaseSize)
+	if err != nil {
+		return metricshelper.DatabaseMetrics{}, fmt.Errorf("failed to get prod database size: %v", err)
+	}
+
+	return metricshelper.DatabaseMetrics{
+		TablesMetrics: tablesStats,
+		DatabaseSize:  databaseSize,
+	}, nil
 }
