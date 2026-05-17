@@ -76,7 +76,7 @@ func initializeEngines(prodDb, previewDb *sql.DB, prodStats map[string]map[strin
 
 	enginesList = append(enginesList, engines.NewSizeEngine(previewDb))
 
-	enginesList = append(enginesList, engines.NewRewriteEngine(previewDb))
+	enginesList = append(enginesList, engines.NewRewriteEngine(previewDb, prodStats))
 
 	return enginesList, nil
 }

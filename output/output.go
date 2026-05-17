@@ -1,6 +1,8 @@
 package output
 
 import (
+	"apercu-cli/helper"
+	formathelper "apercu-cli/helper/format"
 	metricshelper "apercu-cli/helper/metrics"
 	"apercu-cli/helper/warning"
 	"bytes"
@@ -49,7 +51,7 @@ type OutputDatabaseMetrics struct {
 	Prod           map[string]map[string]metricshelper.TableMetrics                 `yaml:"prod,omitempty" json:"prod,omitempty"`
 	SchemaDiff     map[string]*metricshelper.SchemaDiff                             `yaml:"schema_diff,omitempty" json:"schema_diff,omitempty"`
 	Locks          map[metricshelper.QueryLock]map[string]metricshelper.LockMetrics `yaml:"locks,omitempty" json:"locks,omitempty"`
-	RewrittenTable []string                                                         `yaml:"rewritten_table,omitempty" json:"rewritten_table,omitempty"`
+	RewrittenTable []helper.FullTableName                                           `yaml:"rewritten_table,omitempty" json:"rewritten_table,omitempty"`
 	Explains       []OutputDatabaseExplainQuery                                     `yaml:"explains,omitempty" json:"explains,omitempty"`
 	Storage        *OutputDatabaseStorageMetrics                                    `yaml:"storage,omitempty" json:"storage,omitempty"`
 }
@@ -58,7 +60,7 @@ func NewOutputDatabaseMetrics() *OutputDatabaseMetrics {
 	return &OutputDatabaseMetrics{
 		Prod:           make(map[string]map[string]metricshelper.TableMetrics),
 		SchemaDiff:     make(map[string]*metricshelper.SchemaDiff),
-		RewrittenTable: make([]string, 0),
+		RewrittenTable: make([]helper.FullTableName, 0),
 		Locks:          make(map[metricshelper.QueryLock]map[string]metricshelper.LockMetrics),
 		Explains:       make([]OutputDatabaseExplainQuery, 0),
 	}
@@ -132,28 +134,10 @@ var templateFuncs = template.FuncMap{
 		return *s
 	},
 	"size_pretty": func(i int64) string {
-		if i < 1024 {
-			return fmt.Sprintf("%d B", i)
-		} else if i < 1024*1024 {
-			return fmt.Sprintf("%.2f KB", float64(i)/1024)
-		} else if i < 1024*1024*1024 {
-			return fmt.Sprintf("%.2f MB", float64(i)/1024/1024)
-		} else if i < 1024*1024*1024*1024 {
-			return fmt.Sprintf("%.2f GB", float64(i)/1024/1024/1024)
-		}
-		return fmt.Sprintf("%.2f TB", float64(i)/1024/1024/1024/1024)
+		return formathelper.BytesSizePretty(i)
 	},
 	"usize_pretty": func(i uint64) string {
-		if i < 1024 {
-			return fmt.Sprintf("%d B", i)
-		} else if i < 1024*1024 {
-			return fmt.Sprintf("%.2f KB", float64(i)/1024)
-		} else if i < 1024*1024*1024 {
-			return fmt.Sprintf("%.2f MB", float64(i)/1024/1024)
-		} else if i < 1024*1024*1024*1024 {
-			return fmt.Sprintf("%.2f GB", float64(i)/1024/1024/1024)
-		}
-		return fmt.Sprintf("%.2f TB", float64(i)/1024/1024/1024/1024)
+		return formathelper.UBytesSizePretty(i)
 	},
 	"print_schemas_diff": func(schemasDiff map[string]*metricshelper.SchemaDiff) string {
 		text := metricshelper.GetSchemasDiffText(schemasDiff)

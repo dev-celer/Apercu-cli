@@ -1,6 +1,8 @@
 package engines
 
 import (
+	databasehelper "apercu-cli/helper"
+	metricshelper "apercu-cli/helper/metrics"
 	"apercu-cli/helper/warning"
 	"apercu-cli/output"
 	"database/sql"
@@ -9,15 +11,19 @@ import (
 
 type RewriteEngine struct {
 	db                *sql.DB
-	preMigrationNode  map[string]uint32
-	postMigrationNode map[string]uint32
+	preMigrationNode  map[databasehelper.FullTableName]uint32
+	postMigrationNode map[databasehelper.FullTableName]uint32
+	warnings          []warning.Warning
+	prodMetrics       map[databasehelper.FullTableName]metricshelper.TableMetrics
 }
 
-func NewRewriteEngine(db *sql.DB) *RewriteEngine {
+func NewRewriteEngine(db *sql.DB, prodMetrics map[databasehelper.FullTableName]metricshelper.TableMetrics) *RewriteEngine {
 	return &RewriteEngine{
 		db:                db,
-		preMigrationNode:  make(map[string]uint32),
-		postMigrationNode: make(map[string]uint32),
+		preMigrationNode:  make(map[databasehelper.FullTableName]uint32),
+		postMigrationNode: make(map[databasehelper.FullTableName]uint32),
+		warnings:          make([]warning.Warning, 0),
+		prodMetrics:       prodMetrics,
 	}
 }
 
@@ -31,7 +37,7 @@ func (e *RewriteEngine) CollectPreMigrationMetrics() error {
 	return nil
 }
 
-func (e *RewriteEngine) SendPgProxyLogs(s string) {}
+func (e *RewriteEngine) SendPgProxyLogs(_ string) {}
 
 func (e *RewriteEngine) CollectPostMigrationMetrics() error {
 	nodes, err := e.getRelNode()
@@ -48,6 +54,16 @@ func (e *RewriteEngine) StoreMetricsToOutput(metrics *output.OutputDatabaseMetri
 		if preMigrationNode, ok := e.preMigrationNode[table]; ok {
 			if preMigrationNode != nodeId {
 				metrics.RewrittenTable = append(metrics.RewrittenTable, table)
+
+				// Get prod database metrics
+				prod, ok := e.prodMetrics[table]
+
+				// Generate warning
+				if ok {
+					e.warnings = append(e.warnings, warning.NewRewriteWarning(table, &prod))
+				} else {
+					e.warnings = append(e.warnings, warning.NewRewriteWarning(table, nil))
+				}
 			}
 		}
 	}
@@ -55,24 +71,28 @@ func (e *RewriteEngine) StoreMetricsToOutput(metrics *output.OutputDatabaseMetri
 }
 
 func (e *RewriteEngine) GetWarnings() []warning.Warning {
-	return nil
+	return e.warnings
 }
 
-func (e *RewriteEngine) getRelNode() (map[string]uint32, error) {
+func (e *RewriteEngine) getRelNode() (map[databasehelper.FullTableName]uint32, error) {
 	rows, err := e.db.Query("select s.schemaname, s.relname, c.relfilenode from pg_class c inner join pg_stat_user_tables s on s.relid = c.oid")
 	if err != nil {
 		return nil, fmt.Errorf("failed to query preview database for node id: %w", err)
 	}
 	defer rows.Close()
 
-	nodes := make(map[string]uint32)
+	nodes := make(map[databasehelper.FullTableName]uint32)
 	for rows.Next() {
 		var schema, table string
 		var relfilenode uint32
 		if err := rows.Scan(&schema, &table, &relfilenode); err != nil {
 			return nil, fmt.Errorf("failed to scan row for node id: %w", err)
 		}
-		nodes[fmt.Sprintf("%s.%s", schema, table)] = relfilenode
+
+		nodes[databasehelper.FullTableName{
+			Schema: schema,
+			Table:  table,
+		}] = relfilenode
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("failed to scan rows for node id: %w", err)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 type ConnectionFields struct {
@@ -14,6 +15,21 @@ type ConnectionFields struct {
 	Password string `json:"password" yaml:"password"`
 	Database string `json:"database" yaml:"database"`
 	Url      string `json:"url" yaml:"url"`
+}
+
+type FullTableName struct {
+	Schema string `json:"schema" yaml:"schema"`
+	Table  string `json:"table" yaml:"table"`
+}
+
+func (t FullTableName) String() string {
+	if strings.Contains(t.Schema, ".") {
+		t.Schema = fmt.Sprintf("\"%s\"", t.Schema)
+	}
+	if strings.Contains(t.Table, ".") {
+		t.Table = fmt.Sprintf("\"%s\"", t.Table)
+	}
+	return fmt.Sprintf("%s.%s", t.Schema, t.Table)
 }
 
 var reg = regexp.MustCompile(`postgresql:\/\/(.+?):(.+?)@(.+?)[\/:](\d*)\/?(.+?)?(?:\?|$)`)
