@@ -46,19 +46,21 @@ func NewMigrationOutput() *OutputDatabaseMigration {
 }
 
 type OutputDatabaseMetrics struct {
-	Prod       map[string]map[string]metricshelper.TableMetrics                 `yaml:"prod,omitempty" json:"prod,omitempty"`
-	SchemaDiff map[string]*metricshelper.SchemaDiff                             `yaml:"schema_diff,omitempty" json:"schema_diff,omitempty"`
-	Locks      map[metricshelper.QueryLock]map[string]metricshelper.LockMetrics `yaml:"locks,omitempty" json:"locks,omitempty"`
-	Explains   []OutputDatabaseExplainQuery                                     `yaml:"explains,omitempty" json:"explains,omitempty"`
-	Storage    *OutputDatabaseStorageMetrics                                    `yaml:"storage,omitempty" json:"storage,omitempty"`
+	Prod           map[string]map[string]metricshelper.TableMetrics                 `yaml:"prod,omitempty" json:"prod,omitempty"`
+	SchemaDiff     map[string]*metricshelper.SchemaDiff                             `yaml:"schema_diff,omitempty" json:"schema_diff,omitempty"`
+	Locks          map[metricshelper.QueryLock]map[string]metricshelper.LockMetrics `yaml:"locks,omitempty" json:"locks,omitempty"`
+	RewrittenTable []string                                                         `yaml:"rewritten_table,omitempty" json:"rewritten_table,omitempty"`
+	Explains       []OutputDatabaseExplainQuery                                     `yaml:"explains,omitempty" json:"explains,omitempty"`
+	Storage        *OutputDatabaseStorageMetrics                                    `yaml:"storage,omitempty" json:"storage,omitempty"`
 }
 
 func NewOutputDatabaseMetrics() *OutputDatabaseMetrics {
 	return &OutputDatabaseMetrics{
-		Prod:       make(map[string]map[string]metricshelper.TableMetrics),
-		SchemaDiff: make(map[string]*metricshelper.SchemaDiff),
-		Locks:      make(map[metricshelper.QueryLock]map[string]metricshelper.LockMetrics),
-		Explains:   make([]OutputDatabaseExplainQuery, 0),
+		Prod:           make(map[string]map[string]metricshelper.TableMetrics),
+		SchemaDiff:     make(map[string]*metricshelper.SchemaDiff),
+		RewrittenTable: make([]string, 0),
+		Locks:          make(map[metricshelper.QueryLock]map[string]metricshelper.LockMetrics),
+		Explains:       make([]OutputDatabaseExplainQuery, 0),
 	}
 }
 
