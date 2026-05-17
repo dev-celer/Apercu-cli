@@ -89,7 +89,7 @@ func GetDatabaseStats(db *sql.DB) (map[string]map[string]metricshelper.TableMetr
 
 			// Recall the pg_class request for row count
 			if !isReadOnly {
-				err = db.QueryRow(fmt.Sprintf("select c.reltuples::bigint as row_count from pg_class c inner join pg_stat_user_tables s on s.relname = c.relname where c.relkind = 'r' and s.relid = '%d'", s.RelId)).Scan(&s.RowCount)
+				err = db.QueryRow("select c.reltuples::bigint as row_count from pg_class c inner join pg_stat_user_tables s on s.relname = c.relname where c.relkind = 'r' and s.relid = ?", s.RelId).Scan(&s.RowCount)
 				if err != nil {
 					return nil, fmt.Errorf("failed to get row count for table %s.%s: %v", s.SchemaName, s.TableName, err)
 				}
