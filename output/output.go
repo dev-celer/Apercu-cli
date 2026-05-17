@@ -284,7 +284,7 @@ Before Migration Size: {{size_pretty $db.Migration.Metrics.Storage.InitialSize}}
 After Migration Size: {{size_pretty $db.Migration.Metrics.Storage.FinalSize}}
 Size Delta: {{size_pretty $db.Migration.Metrics.Storage.SizeDelta}}
 --- WAL Detail ---
-WAL Size Delta: {{usize_pretty $db.Migration.Metrics.Storage.WALDelta}}
+WAL Size Delta: {{size_pretty $db.Migration.Metrics.Storage.WALDelta}}
 {{- end}}
 {{- if $db.Migration.Metrics.Locks}}
 --- Locks detail ---
