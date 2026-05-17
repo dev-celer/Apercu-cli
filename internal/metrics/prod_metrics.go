@@ -22,7 +22,7 @@ type TablePgClassStats struct {
 }
 
 func getPgClassDatabaseStats(db *sql.DB) ([]TablePgClassStats, error) {
-	rows, err := db.Query("select s.relid, c.relname as table_name, s.schemaname as schema_name, c.reltuples::bigint as row_count, s.last_analyze, s.last_autoanalyze from pg_class c inner join pg_stat_user_tables s on s.relname = c.relname where c.relkind = 'r'")
+	rows, err := db.Query("select s.relid, c.relname as table_name, s.schemaname as schema_name, c.reltuples::bigint as row_count, s.last_analyze, s.last_autoanalyze from pg_class c inner join pg_stat_user_tables s on s.relid = c.oid")
 	if err != nil {
 		return nil, errors.New(fmt.Sprintf("Failed to query prod database for stats: %v", err))
 	}
