@@ -108,15 +108,15 @@ func (e *SizeEngine) getDatabaseStorageInBytes() (int64, error) {
 }
 
 func (e *SizeEngine) getCurrentWALPosition() (int64, error) {
-	var wal_lsn string
-	err := e.db.QueryRow("SELECT pg_current_wal_lsn()").Scan(&wal_lsn)
+	var walLsn string
+	err := e.db.QueryRow("SELECT pg_current_wal_lsn()").Scan(&walLsn)
 	if err != nil {
 		return 0, fmt.Errorf("failed to query database for WAL LSN: %v", err)
 	}
 
-	parts := strings.SplitN(wal_lsn, "/", 2)
+	parts := strings.SplitN(walLsn, "/", 2)
 	if len(parts) != 2 {
-		return 0, fmt.Errorf("invalid WAL LSN format, expected hex/hex, got %v", wal_lsn)
+		return 0, fmt.Errorf("invalid WAL LSN format, expected hex/hex, got %v", walLsn)
 	}
 	high, err := strconv.ParseUint(parts[0], 16, 32)
 	if err != nil {
