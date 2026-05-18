@@ -6,9 +6,7 @@ import (
 	"apercu-cli/helper/warning"
 	"apercu-cli/output"
 	"database/sql"
-	"errors"
 	"fmt"
-	"log"
 	"log/slog"
 	"maps"
 	"math/rand/v2"
@@ -25,15 +23,11 @@ import (
 const ExecutionTimeThreshold = 0.1
 
 type ExplainQueryEngine struct {
-	db       *sql.DB
-	queries  *ExtractQueriesOutput
-	output   []output.OutputDatabaseExplainQuery
-	warnings map[warning.Code]warning.Warning
-}
-
-type ExtractQueriesOutput struct {
-	Queries  map[string][]string
-	Warnings []string
+	db             *sql.DB
+	queries        map[string][]string
+	fetchedQueries []string
+	output         []output.OutputDatabaseExplainQuery
+	warnings       map[warning.Code]warning.Warning
 }
 
 func extractQueriesFromFile(path string) ([]string, error) {
@@ -58,21 +52,25 @@ func extractQueriesFromFile(path string) ([]string, error) {
 	return result, nil
 }
 
-func extractAllQueriesToExplain(paths []string) (*ExtractQueriesOutput, error) {
-	outputData := &ExtractQueriesOutput{
-		Queries:  make(map[string][]string),
-		Warnings: make([]string, 0),
-	}
+func extractAllQueriesToExplain(paths []string) (map[string][]string, []warning.Warning, error) {
+	outputData := make(map[string][]string)
+	warnings := make([]warning.Warning, 0)
 
 	for _, path := range paths {
 		info, err := os.Stat(path)
 		if err != nil {
+			var code warning.Code
 			if os.IsNotExist(err) {
-				outputData.Warnings = append(outputData.Warnings, fmt.Sprintf("Explain query path not found: %s", path))
-				_, _ = fmt.Fprintln(log.Writer(), "WARNING: Explain query path not found:", path)
-				continue
+				code = warning.CodeExplainQueryPathNotFound
+			} else {
+				code = warning.CodeExplainQueryFailedToReadFile
 			}
-			return nil, errors.New(fmt.Sprintf("Failed to get explain query file path %s: %v", path, err))
+			w := warning.NewExplainQueryFileWarning(code, path)
+			if w != nil {
+				warning.PrintWarning(w)
+				warnings = append(warnings, w)
+			}
+			continue
 		}
 
 		if info.IsDir() {
@@ -86,68 +84,97 @@ func extractAllQueriesToExplain(paths []string) (*ExtractQueriesOutput, error) {
 					slog.Debug("Found explain query file", "file_path", p)
 					queries, err := extractQueriesFromFile(p)
 					if err != nil {
-						outputData.Warnings = append(outputData.Warnings, fmt.Sprintf("Failed to get queries from file %s: %v", p, err))
-						_, _ = fmt.Fprintf(log.Writer(), "Failed to get queries from file %s: %v\n", p, err)
+						w := warning.NewExplainQueryFileWarning(warning.CodeExplainQueryFailedToReadFile, p)
+						if w != nil {
+							warning.PrintWarning(w)
+							warnings = append(warnings, w)
+						}
 						return nil
 					}
 					if len(queries) == 0 {
-						outputData.Warnings = append(outputData.Warnings, fmt.Sprintf("No queries found in file %s", p))
-						_, _ = fmt.Fprintf(log.Writer(), "No queries found in file %s\n", p)
+						w := warning.NewExplainQueryFileWarning(warning.CodeExplainQueryNoQueries, p)
+						if w != nil {
+							warning.PrintWarning(w)
+							warnings = append(warnings, w)
+						}
 						return nil
 					}
 
-					outputData.Queries[p] = queries
+					outputData[p] = queries
 				}
 
 				return nil
 			}); err != nil {
-				outputData.Warnings = append(outputData.Warnings, fmt.Sprintf("Failed to walk through explain query directory %s: %v", path, err))
-				_, _ = fmt.Fprintf(log.Writer(), "Failed to walk through explain query directory %s: %v\n", path, err)
+				w := warning.NewExplainQueryFileWarning(warning.CodeExplainQueryFailedToReadFile, path)
+				if w != nil {
+					warning.PrintWarning(w)
+					warnings = append(warnings, w)
+				}
 				continue
 			}
 		} else {
 			slog.Debug("Explain query file found", "file", path)
 			queries, err := extractQueriesFromFile(path)
 			if err != nil {
-				outputData.Warnings = append(outputData.Warnings, fmt.Sprintf("Failed to get queries from file %s: %v", path, err))
-				_, _ = fmt.Fprintf(log.Writer(), "Failed to get queries from file %s: %v\n", path, err)
+				w := warning.NewExplainQueryFileWarning(warning.CodeExplainQueryFailedToReadFile, path)
+				if w != nil {
+					warning.PrintWarning(w)
+					warnings = append(warnings, w)
+				}
 				continue
 			}
 			if len(queries) == 0 {
-				outputData.Warnings = append(outputData.Warnings, fmt.Sprintf("No queries found in file %s", path))
-				_, _ = fmt.Fprintf(log.Writer(), "No queries found in file %s\n", path)
+				w := warning.NewExplainQueryFileWarning(warning.CodeExplainQueryNoQueries, path)
+				if w != nil {
+					warning.PrintWarning(w)
+					warnings = append(warnings, w)
+				}
 				continue
 			}
 
-			outputData.Queries[path] = queries
+			outputData[path] = queries
 		}
 	}
 
-	return outputData, nil
+	return outputData, warnings, nil
 }
 
-func NewExplainQueryEngine(db *sql.DB, dbConfig *config.Database) (*ExplainQueryEngine, error) {
-	queries, err := extractAllQueriesToExplain(dbConfig.ExplainQuery.Queries)
+func fetchQueriesFromProdDb(db *sql.DB) ([]string, []warning.Warning, error) {
+
+}
+
+func NewExplainQueryEngine(previewDb *sql.DB, dbConfig *config.Database, prodDb *sql.DB) (*ExplainQueryEngine, error) {
+	queries, w1, err := extractAllQueriesToExplain(dbConfig.ExplainQuery.Queries)
 	if err != nil {
 		return nil, err
 	}
+	fetchedQueries, w2, err := fetchQueriesFromProdDb(prodDb)
+
+	warnings := make(map[warning.Code]warning.Warning)
+	for _, w := range w1 {
+		warnings[w.GetWarningCode()] = w
+	}
+	for _, w := range w2 {
+		warnings[w.GetWarningCode()] = w
+	}
 
 	return &ExplainQueryEngine{
-		db:       db,
-		queries:  queries,
-		output:   make([]output.OutputDatabaseExplainQuery, 0),
-		warnings: make(map[warning.Code]warning.Warning),
+		db:             previewDb,
+		queries:        queries,
+		fetchedQueries: fetchedQueries,
+		output:         make([]output.OutputDatabaseExplainQuery, 0),
+		warnings:       warnings,
 	}, nil
 }
 
 func (e *ExplainQueryEngine) CollectPreMigrationMetrics() error {
 	c := 0
-	for _, query := range e.queries.Queries {
+	for _, query := range e.queries {
 		c += len(query)
 	}
-	slog.Debug("Collecting pre-migration explain queries results", "queries", c, "files", len(e.queries.Queries))
+	slog.Debug("Collecting pre-migration explain queries results", "queries", c, "files", len(e.queries))
 
-	for file, queries := range e.queries.Queries {
+	for file, queries := range e.queries {
 		for _, query := range queries {
 			queryRun, err := e.generateQueryRun(query)
 			var preMigrationRun output.OutputDatabaseMigrationExplainQueryRun
@@ -172,12 +199,12 @@ func (e *ExplainQueryEngine) SendPgProxyLogs(s string) {}
 
 func (e *ExplainQueryEngine) CollectPostMigrationMetrics() error {
 	c := 0
-	for _, query := range e.queries.Queries {
+	for _, query := range e.queries {
 		c += len(query)
 	}
-	slog.Debug("Collecting post-migration explain queries results", "queries", c, "files", len(e.queries.Queries))
+	slog.Debug("Collecting post-migration explain queries results", "queries", c, "files", len(e.queries))
 
-	for file, queries := range e.queries.Queries {
+	for file, queries := range e.queries {
 		for _, query := range queries {
 			idx := slices.IndexFunc(e.output, func(s output.OutputDatabaseExplainQuery) bool {
 				return s.Query == query && s.File == file

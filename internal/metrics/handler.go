@@ -66,7 +66,7 @@ func initializeEngines(prodDb, previewDb *sql.DB, prodStats metricshelper.Databa
 
 	enginesList = append(enginesList, engines.NewLocksEngine())
 
-	queryEngine, err := engines.NewExplainQueryEngine(previewDb, dbConfig)
+	queryEngine, err := engines.NewExplainQueryEngine(previewDb, dbConfig, prodDb)
 	if err != nil {
 		return nil, err
 	}
