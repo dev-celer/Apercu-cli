@@ -31,8 +31,9 @@ func TestLoadConfig_Valid(t *testing.T) {
 	assert.Equal(t, []string{"migrate"}, db.Migration.Command)
 	assert.Equal(t, "./migrations", db.Migration.LocalDir)
 
-	assert.Equal(t, len(db.ExplainQuery), 1)
-	assert.Equal(t, "./queries/test-queries.sql", db.ExplainQuery[0])
+	assert.Equal(t, len(db.ExplainQuery.Queries), 1)
+	assert.Equal(t, "./queries/test-queries.sql", db.ExplainQuery.Queries[0])
+	assert.True(t, db.ExplainQuery.DisableAutoQueriesFetch)
 
 	assert.Equal(t, []DatabaseSeed{{Path: "./seeds/data.sql", SeedOn: DatabaseSeedTypeAlways}}, db.Seed)
 }
@@ -45,6 +46,7 @@ func TestLoadConfig_Minimal(t *testing.T) {
 	db := cfg.Databases["mydb"]
 	assert.Nil(t, db.Migration)
 	assert.Empty(t, db.Seed)
+	assert.False(t, db.ExplainQuery.DisableAutoQueriesFetch)
 }
 
 func TestLoadConfig_MissingFile(t *testing.T) {

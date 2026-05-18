@@ -127,7 +127,7 @@ func extractAllQueriesToExplain(paths []string) (*ExtractQueriesOutput, error) {
 }
 
 func NewExplainQueryEngine(db *sql.DB, dbConfig *config.Database) (*ExplainQueryEngine, error) {
-	queries, err := extractAllQueriesToExplain(dbConfig.ExplainQuery)
+	queries, err := extractAllQueriesToExplain(dbConfig.ExplainQuery.Queries)
 	if err != nil {
 		return nil, err
 	}

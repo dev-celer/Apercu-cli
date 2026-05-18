@@ -58,7 +58,7 @@ type Database struct {
 	Anonymization *DatabaseAnonymization `yaml:"anonymization,omitempty"`
 	Migration     *DatabaseMigration     `yaml:"migration,omitempty"`
 	Seed          []DatabaseSeed         `yaml:"seed,omitempty"`
-	ExplainQuery  []string               `yaml:"explain_query,omitempty"`
+	ExplainQuery  DatabaseExplainQuery   `yaml:"explain_query,omitempty"`
 }
 
 type DatabaseSource struct {
@@ -135,4 +135,9 @@ type DatabaseAnonymizationStorageNeon struct {
 	ProjectId  *string `yaml:"project_id,omitempty"`
 	ApiKey     *string `yaml:"api_key,omitempty"`
 	BranchName string  `yaml:"branch_name"`
+}
+
+type DatabaseExplainQuery struct {
+	DisableAutoQueriesFetch bool     `yaml:"disable_auto_queries_fetch"`
+	Queries                 []string `yaml:"queries"`
 }

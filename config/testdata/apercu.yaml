@@ -25,4 +25,6 @@ databases:
       - path: "./seeds/data.sql"
         seed_on: "always"
     explain_query:
-      - "./queries/test-queries.sql"
+      disable_auto_queries_fetch: true
+      queries:
+        - "./queries/test-queries.sql"
