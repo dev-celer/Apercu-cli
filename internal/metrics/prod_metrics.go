@@ -85,7 +85,7 @@ func GetDatabaseStats(db *sql.DB) (metricshelper.DatabaseMetrics, error) {
 
 			// Recall the pg_class request for row count
 			if !isReadOnly {
-				err = db.QueryRow("/* apercu */select c.reltuples::bigint as row_count from pg_class c inner join pg_stat_user_tables s on s.relname = c.relname where c.relkind = 'r' and s.relid = ?", s.RelId).Scan(&s.RowCount)
+				err = db.QueryRow("/* apercu */select c.reltuples::bigint as row_count from pg_class c inner join pg_stat_user_tables s on s.relname = c.relname where c.relkind = 'r' and s.relid = $1", s.RelId).Scan(&s.RowCount)
 				if err != nil {
 					return metricshelper.DatabaseMetrics{}, fmt.Errorf("failed to get prod database row count for table %s.%s: %v", s.SchemaName, s.TableName, err)
 				}
