@@ -23,7 +23,7 @@ type TablePgClassStats struct {
 }
 
 func getPgClassDatabaseStats(db *sql.DB) ([]TablePgClassStats, error) {
-	rows, err := db.Query("select s.relid, c.relname as table_name, s.schemaname as schema_name, c.reltuples::bigint as row_count, s.last_analyze, s.last_autoanalyze from pg_class c inner join pg_stat_user_tables s on s.relid = c.oid")
+	rows, err := db.Query("/* apercu */select s.relid, c.relname as table_name, s.schemaname as schema_name, c.reltuples::bigint as row_count, s.last_analyze, s.last_autoanalyze from pg_class c inner join pg_stat_user_tables s on s.relid = c.oid")
 	if err != nil {
 		return nil, errors.New(fmt.Sprintf("Failed to query prod database for stats: %v", err))
 	}
@@ -43,7 +43,7 @@ func getPgClassDatabaseStats(db *sql.DB) ([]TablePgClassStats, error) {
 
 func getExactRowCount(db *sql.DB, schemaName string, tableName string) (int64, error) {
 	var rowCount int64
-	err := db.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM \"%s\".\"%s\"", schemaName, tableName)).Scan(&rowCount)
+	err := db.QueryRow(fmt.Sprintf("/* apercu */SELECT COUNT(*) FROM \"%s\".\"%s\"", schemaName, tableName)).Scan(&rowCount)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get prod database row count for table %s.%s: %v", schemaName, tableName, err)
 	}
@@ -70,7 +70,7 @@ func GetDatabaseStats(db *sql.DB) (metricshelper.DatabaseMetrics, error) {
 		// If last analyze delta time exceed threshold, try to call analyze
 		lastAnalyze := min(time.Now().Sub(s.LastAutoAnalyze), time.Now().Sub(s.LastAnalyze))
 		if lastAnalyze.Hours() > AnalyzeDeltaThreshold.Hours() {
-			_, err := db.Exec(fmt.Sprintf("ANALYZE \"%s\".\"%s\"", s.SchemaName, s.TableName))
+			_, err := db.Exec(fmt.Sprintf("/* apercu */ANALYZE \"%s\".\"%s\"", s.SchemaName, s.TableName))
 			if err != nil {
 				if pqErr, ok := errors.AsType[*pq.Error](err); ok && (pqErr.Code == "25006" || pqErr.Code == "42501") {
 					isReadOnly = true
@@ -85,7 +85,7 @@ func GetDatabaseStats(db *sql.DB) (metricshelper.DatabaseMetrics, error) {
 
 			// Recall the pg_class request for row count
 			if !isReadOnly {
-				err = db.QueryRow("select c.reltuples::bigint as row_count from pg_class c inner join pg_stat_user_tables s on s.relname = c.relname where c.relkind = 'r' and s.relid = ?", s.RelId).Scan(&s.RowCount)
+				err = db.QueryRow("/* apercu */select c.reltuples::bigint as row_count from pg_class c inner join pg_stat_user_tables s on s.relname = c.relname where c.relkind = 'r' and s.relid = ?", s.RelId).Scan(&s.RowCount)
 				if err != nil {
 					return metricshelper.DatabaseMetrics{}, fmt.Errorf("failed to get prod database row count for table %s.%s: %v", s.SchemaName, s.TableName, err)
 				}
@@ -94,7 +94,7 @@ func GetDatabaseStats(db *sql.DB) (metricshelper.DatabaseMetrics, error) {
 
 		// Retrieve the table size
 		var tableSize int64
-		err := db.QueryRow(fmt.Sprintf("SELECT pg_total_relation_size(%d)", s.RelId)).Scan(&tableSize)
+		err := db.QueryRow(fmt.Sprintf("/* apercu */SELECT pg_total_relation_size(%d)", s.RelId)).Scan(&tableSize)
 		if err != nil {
 			return metricshelper.DatabaseMetrics{}, fmt.Errorf("failed to get prod database table size for table %s.%s: %v", s.SchemaName, s.TableName, err)
 		}
@@ -110,7 +110,7 @@ func GetDatabaseStats(db *sql.DB) (metricshelper.DatabaseMetrics, error) {
 
 	// Retrieve the full database size
 	var databaseSize int64
-	err = db.QueryRow("SELECT pg_database_size(current_database())").Scan(&databaseSize)
+	err = db.QueryRow("/* apercu */SELECT pg_database_size(current_database())").Scan(&databaseSize)
 	if err != nil {
 		return metricshelper.DatabaseMetrics{}, fmt.Errorf("failed to get prod database size: %v", err)
 	}
