@@ -5,45 +5,12 @@ import (
 )
 
 const (
-	CodeExplainQueryTimeRegression   Code = "EXPL_QUERY_REGR"
-	CodeExplainQueryPathNotFound     Code = "EXPL_QUERY_PATH_NOT_FOUND"
-	CodeExplainQueryNoQueries        Code = "EXPL_QUERY_NO_QUERIES"
-	CodeExplainQueryFailedToReadFile Code = "EXPL_QUERY_ERR_READING_FILE"
+	CodeExplainQueryPathNotFound          Code = "EXPL_QUERY_PATH_NOT_FOUND"
+	CodeExplainQueryNoQueries             Code = "EXPL_QUERY_NO_QUERIES"
+	CodeExplainQueryFailedToReadFile      Code = "EXPL_QUERY_ERR_READING_FILE"
+	CodeExplainQueryStatStatementsMissing Code = "EXPL_QUERY_PG_STAT_STATEMENTS_MISSING"
+	CodeExplainQueryProdFetchFailed       Code = "EXPL_QUERY_PROD_FETCH_FAILED"
 )
-
-type ExplainQueryTime struct {
-	Hi, Lo, Med float64
-	Level       Level
-}
-
-func (w *ExplainQueryTime) GetWarningText() string {
-	return fmt.Sprintf("Query execution time regression (med: %+.1f 95%% CI: %+.1f to %+.1f)", w.Med, w.Lo, w.Hi)
-}
-
-func (w *ExplainQueryTime) GetWarningLevel() Level {
-	return w.Level
-}
-
-func (w *ExplainQueryTime) GetWarningCode() Code {
-	return CodeExplainQueryTimeRegression
-}
-
-type ExplainQueryCount struct {
-	Level Level
-	Count uint64
-}
-
-func (w ExplainQueryCount) GetWarningText() string {
-	return fmt.Sprintf("Query execution time regression on %d queries", w.Count)
-}
-
-func (w ExplainQueryCount) GetWarningLevel() Level {
-	return w.Level
-}
-
-func (w ExplainQueryCount) GetWarningCode() Code {
-	return CodeExplainQueryTimeRegression
-}
 
 type ExplainQueryFile struct {
 	path string
@@ -76,10 +43,58 @@ func (e ExplainQueryFile) GetWarningText() string {
 	return ""
 }
 
+func (e ExplainQueryFile) GetWarningTextLong() string {
+	return e.GetWarningText()
+}
+
 func (e ExplainQueryFile) GetWarningLevel() Level {
 	return WarningLevelLow
 }
 
 func (e ExplainQueryFile) GetWarningCode() Code {
+	return e.code
+}
+
+type ExplainQueryProdFetch struct {
+	detail string
+	code   Code
+}
+
+func NewExplainQueryProdFetchWarning(code Code, detail string) *ExplainQueryProdFetch {
+	switch code {
+	case CodeExplainQueryStatStatementsMissing:
+	case CodeExplainQueryProdFetchFailed:
+	default:
+		return nil
+	}
+	return &ExplainQueryProdFetch{
+		detail: detail,
+		code:   code,
+	}
+}
+
+func (e ExplainQueryProdFetch) GetWarningText() string {
+	switch e.code {
+	case CodeExplainQueryStatStatementsMissing:
+		return "pg_stat_statements extension is not installed on the prod database; auto-fetch skipped"
+	case CodeExplainQueryProdFetchFailed:
+		return "Failed to fetch queries from prod database"
+	}
+	return ""
+}
+
+func (e ExplainQueryProdFetch) GetWarningTextLong() string {
+	switch e.code {
+	case CodeExplainQueryProdFetchFailed:
+		return fmt.Sprintf("Failed to fetch queries from prod database: %s", e.detail)
+	}
+	return e.GetWarningText()
+}
+
+func (e ExplainQueryProdFetch) GetWarningLevel() Level {
+	return WarningLevelLow
+}
+
+func (e ExplainQueryProdFetch) GetWarningCode() Code {
 	return e.code
 }

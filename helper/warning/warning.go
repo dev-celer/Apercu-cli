@@ -8,6 +8,7 @@ import (
 
 type Warning interface {
 	GetWarningText() string
+	GetWarningTextLong() string
 	GetWarningLevel() Level
 	GetWarningCode() Code
 }
@@ -42,5 +43,5 @@ func PrintWarning(w Warning) {
 	if v := reflect.ValueOf(w); v.Kind() == reflect.Ptr && v.IsNil() {
 		return
 	}
-	_, _ = fmt.Fprintln(log.Writer(), fmt.Sprintf("WARNING: %s", w.GetWarningText()))
+	_, _ = fmt.Fprintln(log.Writer(), fmt.Sprintf("WARNING: %s", w.GetWarningTextLong()))
 }

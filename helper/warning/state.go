@@ -7,11 +7,15 @@ const (
 )
 
 type StateFileWarning struct {
-	msg string
+	path string
 }
 
 func (s StateFileWarning) GetWarningText() string {
-	return s.msg
+	return fmt.Sprintf("Failed to open state file (%s)", s.path)
+}
+
+func (s StateFileWarning) GetWarningTextLong() string {
+	return s.GetWarningText()
 }
 
 func (s StateFileWarning) GetWarningLevel() Level {
@@ -24,6 +28,6 @@ func (s StateFileWarning) GetWarningCode() Code {
 
 func NewStateFileWarning(filePath string) StateFileWarning {
 	return StateFileWarning{
-		msg: fmt.Sprintf("Failed to open state file (%s)", filePath),
+		path: filePath,
 	}
 }

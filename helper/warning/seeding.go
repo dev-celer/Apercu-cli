@@ -8,35 +8,41 @@ const (
 )
 
 type SeedingError struct {
-	Msg  string
-	Code Code
+	path string
+	code Code
 }
 
 func (s SeedingError) GetWarningText() string {
-	return s.Msg
+	switch s.code {
+	case CodeFailedToOpenSeedFile:
+		return fmt.Sprintf("Failed to open seed file (%s)", s.path)
+	case CodeSeedFileNotFound:
+		return fmt.Sprintf("Seed file not found (%s)", s.path)
+	default:
+		return ""
+	}
 }
+
+func (s SeedingError) GetWarningTextLong() string { return s.GetWarningText() }
 
 func (s SeedingError) GetWarningLevel() Level {
 	return WarningLevelLow
 }
 
 func (s SeedingError) GetWarningCode() Code {
-	return s.Code
+	return s.code
 }
 
 func NewSeedingError(code Code, filepath string) *SeedingError {
-	var msg string
 	switch code {
 	case CodeFailedToOpenSeedFile:
-		msg = fmt.Sprintf("Failed to open seed file (%s)", filepath)
 	case CodeSeedFileNotFound:
-		msg = fmt.Sprintf("Seed file not found (%s)", filepath)
 	default:
 		return nil
 	}
 
 	return &SeedingError{
-		Code: code,
-		Msg:  msg,
+		code: code,
+		path: filepath,
 	}
 }

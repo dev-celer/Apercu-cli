@@ -34,6 +34,10 @@ func (w WALSizeWarning) GetWarningText() string {
 	return fmt.Sprintf("Migration is estimated to generate %s of WAL on production (%.0f%% of production database size)", format.BytesSizePretty(w.estimatedProdWAL), w.ratio()*100)
 }
 
+func (w WALSizeWarning) GetWarningTextLong() string {
+	return w.GetWarningText()
+}
+
 func (w WALSizeWarning) IsWarning() bool {
 	if w.levelByAbsolute() == nil && w.levelByRatio() == nil {
 		return false

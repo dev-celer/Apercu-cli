@@ -21,6 +21,10 @@ func (w *MissingEnvVarsWarning) GetWarningText() string {
 	return fmt.Sprintf("Missing environment variable used in config (%s)", strings.Join(w.variables, ", "))
 }
 
+func (w *MissingEnvVarsWarning) GetWarningTextLong() string {
+	return w.GetWarningText()
+}
+
 func (w *MissingEnvVarsWarning) GetWarningLevel() Level {
 	return WarningLevelLow
 }

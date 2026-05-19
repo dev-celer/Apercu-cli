@@ -77,22 +77,15 @@ type OutputDatabaseStorageMetrics struct {
 }
 
 type OutputDatabaseExplainQuery struct {
-	File             string                                  `yaml:"file" json:"file"`
+	// File while be set to "" if the query what retrieved from the prod database pg_stat_statements
+	File             string                                  `yaml:"file,omitempty" json:"file,omitempty"`
 	Query            string                                  `yaml:"query" json:"query"`
 	Warnings         []warning.Warning                       `yaml:"warnings,omitempty" json:"warnings,omitempty"`
-	ExecutionDelta   OutputDatabaseExplainQueryDelta         `yaml:"execution_delta,omitempty" json:"execution_delta,omitempty"`
 	PreMigrationRun  *OutputDatabaseMigrationExplainQueryRun `yaml:"pre_migration_run,omitempty" json:"pre_migration_run,omitempty"`
 	PostMigrationRun *OutputDatabaseMigrationExplainQueryRun `yaml:"post_migration_run,omitempty" json:"post_migration_run,omitempty"`
 }
 
-type OutputDatabaseExplainQueryDelta struct {
-	Lo     float64
-	Hi     float64
-	Median float64
-}
-
 type OutputDatabaseMigrationExplainQueryRun struct {
-	ExecutionTimes []float64
 	ExplainedQuery *metricshelper.ExplainResult `yaml:"explained_query,omitempty" json:"explained_query,omitempty"`
 	Error          error                        `yaml:"error,omitempty" json:"error,omitempty"`
 }
@@ -201,9 +194,6 @@ var templateFuncs = template.FuncMap{
 				for _, warning := range explain.Warnings {
 					outputStr += fmt.Sprintf("> - %s", warning.GetWarningText())
 				}
-
-				// Display delta
-				outputStr += fmt.Sprintf("execution time delta %+.1f (95%% CI: %+.1f to %+.1f)", explain.ExecutionDelta.Median*100, explain.ExecutionDelta.Lo*100, explain.ExecutionDelta.Hi*100)
 
 				// Display explained query
 				if explain.PreMigrationRun != nil {

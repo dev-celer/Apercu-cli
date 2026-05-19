@@ -30,6 +30,10 @@ func (t TableRewriteWarning) GetWarningText() string {
 	return fmt.Sprintf("Table %s was rewritten, in production this table is %s (%s rows)", t.table.String(), format.BytesSizePretty(t.prodMetrics.TableSize), format.CountPretty(t.prodMetrics.RowCount))
 }
 
+func (t TableRewriteWarning) GetWarningTextLong() string {
+	return t.GetWarningText()
+}
+
 func (t TableRewriteWarning) GetWarningLevel() Level {
 	// If table is missing in prod - Low
 	if t.prodMetrics == nil {
