@@ -21,6 +21,8 @@ func (w mockedWarning) GetWarningText() string {
 	return w.desc
 }
 
+func (w mockedWarning) GetWarningTextLong() string { return w.GetWarningText() }
+
 func (w mockedWarning) GetWarningLevel() warning.Level {
 	return warning.WarningLevelMedium
 }
