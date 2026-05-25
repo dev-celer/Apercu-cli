@@ -5,11 +5,13 @@ import (
 )
 
 const (
-	CodeExplainQueryPathNotFound          Code = "EXPL_QUERY_PATH_NOT_FOUND"
-	CodeExplainQueryNoQueries             Code = "EXPL_QUERY_NO_QUERIES"
-	CodeExplainQueryFailedToReadFile      Code = "EXPL_QUERY_ERR_READING_FILE"
-	CodeExplainQueryStatStatementsMissing Code = "EXPL_QUERY_PG_STAT_STATEMENTS_MISSING"
-	CodeExplainQueryProdFetchFailed       Code = "EXPL_QUERY_PROD_FETCH_FAILED"
+	CodeExplainQueryPathNotFound           Code = "EXPL_QUERY_PATH_NOT_FOUND"
+	CodeExplainQueryNoQueries              Code = "EXPL_QUERY_NO_QUERIES"
+	CodeExplainQueryFailedToReadFile       Code = "EXPL_QUERY_ERR_READING_FILE"
+	CodeExplainQueryStatStatementsMissing  Code = "EXPL_QUERY_PG_STAT_STATEMENTS_MISSING"
+	CodeExplainQueryProdFetchFailed        Code = "EXPL_QUERY_PROD_FETCH_FAILED"
+	CodeExplainQueryPlanScanRegression     Code = "EXPL_QUERY_PLAN_SCAN_REGR"
+	CodeExplainQueryPlanOrderingRegression Code = "EXPL_QUERY_PLAN_ORDER_REGR"
 )
 
 type ExplainQueryFile struct {
@@ -96,5 +98,49 @@ func (e ExplainQueryProdFetch) GetWarningLevel() Level {
 }
 
 func (e ExplainQueryProdFetch) GetWarningCode() Code {
+	return e.code
+}
+
+type ExplainPlanRegression struct {
+	short string
+	long  string
+	level Level
+	code  Code
+}
+
+func NewExplainPlanScanRegressionWarning(level Level, rel, before, after string) ExplainPlanRegression {
+	return ExplainPlanRegression{
+		level: level,
+		code:  CodeExplainQueryPlanScanRegression,
+		short: fmt.Sprintf("Plan scan regression on %s: %s -> %s", rel, before, after),
+		long:  fmt.Sprintf("Query plan regression on relation %s: access method changed from %s to %s after the migration. This usually means an index the query relied on is no longer usable.", rel, before, after),
+	}
+}
+
+func NewExplainPlanOrderingRegressionWarning(level Level, key string) ExplainPlanRegression {
+	return ExplainPlanRegression{
+		level: level,
+		code:  CodeExplainQueryPlanOrderingRegression,
+		short: fmt.Sprintf("Plan ordering regression: new sort on %s", key),
+		long:  fmt.Sprintf("Query plan regression: the post-migration plan introduces a new sort on %s that was not present before, suggesting an index that previously provided ordering was dropped.", key),
+	}
+}
+
+func (e ExplainPlanRegression) GetWarningText() string {
+	return e.short
+}
+
+func (e ExplainPlanRegression) GetWarningTextLong() string {
+	if e.long == "" {
+		return e.short
+	}
+	return e.long
+}
+
+func (e ExplainPlanRegression) GetWarningLevel() Level {
+	return e.level
+}
+
+func (e ExplainPlanRegression) GetWarningCode() Code {
 	return e.code
 }

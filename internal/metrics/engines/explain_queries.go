@@ -8,7 +8,6 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
-	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -41,8 +40,9 @@ type ExplainQueryEngine struct {
 	db             *sql.DB
 	queries        map[string][]string
 	fetchedQueries []string
+	prodStats      metricshelper.DatabaseMetrics
 	output         []output.OutputDatabaseExplainQuery
-	warnings       map[warning.Code]warning.Warning
+	warnings       []warning.Warning
 }
 
 func extractQueriesFromFile(path string) ([]string, error) {
@@ -220,7 +220,7 @@ func fetchQueriesFromProdDb(db *sql.DB) ([]string, []warning.Warning, error) {
 	return queries, warnings, nil
 }
 
-func NewExplainQueryEngine(previewDb *sql.DB, dbConfig *config.Database, prodDb *sql.DB) (*ExplainQueryEngine, error) {
+func NewExplainQueryEngine(previewDb *sql.DB, dbConfig *config.Database, prodDb *sql.DB, prodStats metricshelper.DatabaseMetrics) (*ExplainQueryEngine, error) {
 	queries, w1, err := extractAllQueriesToExplain(dbConfig.ExplainQuery.Queries)
 	if err != nil {
 		return nil, err
@@ -235,18 +235,12 @@ func NewExplainQueryEngine(previewDb *sql.DB, dbConfig *config.Database, prodDb 
 		}
 	}
 
-	warnings := make(map[warning.Code]warning.Warning)
-	for _, w := range w1 {
-		warnings[w.GetWarningCode()] = w
-	}
-	for _, w := range w2 {
-		warnings[w.GetWarningCode()] = w
-	}
-
+	warnings := slices.Concat(w1, w2)
 	return &ExplainQueryEngine{
 		db:             previewDb,
 		queries:        queries,
 		fetchedQueries: fetchedQueries,
+		prodStats:      prodStats,
 		output:         make([]output.OutputDatabaseExplainQuery, 0),
 		warnings:       warnings,
 	}, nil
@@ -325,9 +319,7 @@ func (e *ExplainQueryEngine) CollectPostMigrationMetrics() error {
 			}
 			e.output[idx].PostMigrationRun = &postMigrationRun
 
-			if len(query) > 120 {
-				query = query[:120] + "..."
-			}
+			e.analyzeAndAttach(idx)
 		}
 	}
 
@@ -349,11 +341,35 @@ func (e *ExplainQueryEngine) CollectPostMigrationMetrics() error {
 		}
 		e.output[idx].PostMigrationRun = &postMigrationRun
 
-		if len(query) > 120 {
-			query = query[:120] + "..."
-		}
+		e.analyzeAndAttach(idx)
 	}
 	return nil
+}
+
+// analyzeAndAttach runs the plan-regression analyzer on the pre/post explain
+// results for output entry idx and attaches any findings as warnings.
+func (e *ExplainQueryEngine) analyzeAndAttach(idx int) {
+	out := &e.output[idx]
+	if out.PreMigrationRun == nil || out.PostMigrationRun == nil {
+		return
+	}
+	if out.PreMigrationRun.Error != nil || out.PostMigrationRun.Error != nil {
+		return
+	}
+	if out.PreMigrationRun.ExplainedQuery == nil || out.PostMigrationRun.ExplainedQuery == nil {
+		return
+	}
+
+	regressions := analyzePlanRegression(out.PreMigrationRun.ExplainedQuery, out.PostMigrationRun.ExplainedQuery, e.prodStats)
+	for _, r := range regressions {
+		w := r.toWarning()
+		if w == nil {
+			continue
+		}
+		out.Warnings = append(out.Warnings, w)
+		warning.PrintWarning(w)
+		e.warnings = append(e.warnings, w)
+	}
 }
 
 func (e *ExplainQueryEngine) StoreMetricsToOutput(metrics *output.OutputDatabaseMetrics) error {
@@ -367,7 +383,7 @@ func (e *ExplainQueryEngine) StoreMetricsToOutput(metrics *output.OutputDatabase
 }
 
 func (e *ExplainQueryEngine) GetWarnings() []warning.Warning {
-	return slices.Collect(maps.Values(e.warnings))
+	return e.warnings
 }
 
 type QueryRunResult struct {
