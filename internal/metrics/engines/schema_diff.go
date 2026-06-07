@@ -71,7 +71,7 @@ func convertRawColumnToSchemaStructs(columns []rawColumn) map[string]metricshelp
 		}
 
 		// Add column to table
-		s.Tables[tableIndex].Columns = append(s.Tables[tableIndex].Columns, *metricshelper.NewColumn(column.ColumnName, column.DataType))
+		s.Tables[tableIndex].Columns = append(s.Tables[tableIndex].Columns, *metricshelper.NewColumn(column.ColumnName, column.DataType, column.IsNullable == "YES"))
 
 		// Store updated schema
 		schemas[column.TableSchema] = s
@@ -85,6 +85,23 @@ type rawColumn struct {
 	TableName   string
 	ColumnName  string
 	DataType    string
+	IsNullable  string
+}
+
+type rawIndex struct {
+	SchemaName string
+	TableName  string
+	IndexName  string
+	IndexDef   string
+	IsUnique   bool
+}
+
+type rawConstraint struct {
+	SchemaName     string
+	TableName      string
+	ConstraintName string
+	ConstraintType string
+	Definition     string
 }
 
 func (e *SchemaDiffEngine) getSchema() (map[string]metricshelper.Schema, error) {
@@ -93,12 +110,25 @@ func (e *SchemaDiffEngine) getSchema() (map[string]metricshelper.Schema, error) 
 		return nil, err
 	}
 
-	convertedSchemas := convertRawColumnToSchemaStructs(columns)
-	return convertedSchemas, nil
+	schemas := convertRawColumnToSchemaStructs(columns)
+
+	indexes, err := e.getIndexes()
+	if err != nil {
+		return nil, err
+	}
+	attachIndexes(schemas, indexes)
+
+	constraints, err := e.getConstraints()
+	if err != nil {
+		return nil, err
+	}
+	attachConstraints(schemas, constraints)
+
+	return schemas, nil
 }
 
 func (e *SchemaDiffEngine) getColumns() ([]rawColumn, error) {
-	rows, err := e.db.Query("SELECT table_schema, table_name, column_name, data_type FROM information_schema.columns WHERE table_schema NOT IN ('information_schema', 'pg_catalog')")
+	rows, err := e.db.Query("SELECT table_schema, table_name, column_name, data_type, is_nullable FROM information_schema.columns WHERE table_schema NOT IN ('information_schema', 'pg_catalog')")
 	if err != nil {
 		return nil, errors.New(fmt.Sprintf("Failed to query database for schema: %v", err))
 	}
@@ -107,13 +137,136 @@ func (e *SchemaDiffEngine) getColumns() ([]rawColumn, error) {
 	var columns []rawColumn
 	for rows.Next() {
 		var c rawColumn
-		if err := rows.Scan(&c.TableSchema, &c.TableName, &c.ColumnName, &c.DataType); err != nil {
+		if err := rows.Scan(&c.TableSchema, &c.TableName, &c.ColumnName, &c.DataType, &c.IsNullable); err != nil {
 			return nil, errors.New(fmt.Sprintf("Failed to scan schema: %v", err))
 		}
 		columns = append(columns, c)
 	}
 
 	return columns, nil
+}
+
+// getIndexes returns every index that does NOT back a constraint. Indexes
+// implicitly created for primary keys, unique and exclusion constraints are
+// reported through getConstraints instead, so they are filtered out here to
+// avoid duplicate entries in the diff.
+func (e *SchemaDiffEngine) getIndexes() ([]rawIndex, error) {
+	const query = `
+SELECT n.nspname AS schema_name,
+       t.relname AS table_name,
+       ic.relname AS index_name,
+       pg_get_indexdef(i.indexrelid) AS index_def,
+       i.indisunique AS is_unique
+FROM pg_index i
+JOIN pg_class ic ON ic.oid = i.indexrelid
+JOIN pg_class t ON t.oid = i.indrelid
+JOIN pg_namespace n ON n.oid = t.relnamespace
+WHERE n.nspname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
+  AND NOT EXISTS (SELECT 1 FROM pg_constraint c WHERE c.conindid = i.indexrelid)`
+
+	rows, err := e.db.Query(query)
+	if err != nil {
+		return nil, errors.New(fmt.Sprintf("Failed to query database for indexes: %v", err))
+	}
+	defer func() { _ = rows.Close() }()
+
+	var indexes []rawIndex
+	for rows.Next() {
+		var i rawIndex
+		if err := rows.Scan(&i.SchemaName, &i.TableName, &i.IndexName, &i.IndexDef, &i.IsUnique); err != nil {
+			return nil, errors.New(fmt.Sprintf("Failed to scan indexes: %v", err))
+		}
+		indexes = append(indexes, i)
+	}
+
+	return indexes, nil
+}
+
+func (e *SchemaDiffEngine) getConstraints() ([]rawConstraint, error) {
+	const query = `
+SELECT n.nspname AS schema_name,
+       t.relname AS table_name,
+       c.conname AS constraint_name,
+       c.contype AS constraint_type,
+       pg_get_constraintdef(c.oid) AS definition
+FROM pg_constraint c
+JOIN pg_class t ON t.oid = c.conrelid
+JOIN pg_namespace n ON n.oid = t.relnamespace
+WHERE n.nspname NOT IN ('information_schema', 'pg_catalog', 'pg_toast')
+  AND c.conrelid <> 0`
+
+	rows, err := e.db.Query(query)
+	if err != nil {
+		return nil, errors.New(fmt.Sprintf("Failed to query database for constraints: %v", err))
+	}
+	defer func() { _ = rows.Close() }()
+
+	var constraints []rawConstraint
+	for rows.Next() {
+		var c rawConstraint
+		var contype string
+		if err := rows.Scan(&c.SchemaName, &c.TableName, &c.ConstraintName, &contype, &c.Definition); err != nil {
+			return nil, errors.New(fmt.Sprintf("Failed to scan constraints: %v", err))
+		}
+		c.ConstraintType = constraintTypeLabel(contype)
+		constraints = append(constraints, c)
+	}
+
+	return constraints, nil
+}
+
+// constraintTypeLabel maps a pg_constraint.contype char to a readable label.
+func constraintTypeLabel(contype string) string {
+	switch contype {
+	case "p":
+		return "PRIMARY KEY"
+	case "f":
+		return "FOREIGN KEY"
+	case "u":
+		return "UNIQUE"
+	case "c":
+		return "CHECK"
+	case "x":
+		return "EXCLUSION"
+	case "t":
+		return "TRIGGER"
+	default:
+		return contype
+	}
+}
+
+// attachIndexes appends each index to its owning table. Indexes whose
+// schema/table is not present in the column-derived map are skipped.
+func attachIndexes(schemas map[string]metricshelper.Schema, indexes []rawIndex) {
+	for _, idx := range indexes {
+		s, ok := schemas[idx.SchemaName]
+		if !ok {
+			continue
+		}
+		tableIndex := slices.IndexFunc(s.Tables, func(t metricshelper.Table) bool { return t.Name == idx.TableName })
+		if tableIndex == -1 {
+			continue
+		}
+		s.Tables[tableIndex].Indexes = append(s.Tables[tableIndex].Indexes, *metricshelper.NewIndex(idx.IndexName, idx.IndexDef, idx.IsUnique))
+		schemas[idx.SchemaName] = s
+	}
+}
+
+// attachConstraints appends each constraint to its owning table. Constraints
+// whose schema/table is not present in the column-derived map are skipped.
+func attachConstraints(schemas map[string]metricshelper.Schema, constraints []rawConstraint) {
+	for _, con := range constraints {
+		s, ok := schemas[con.SchemaName]
+		if !ok {
+			continue
+		}
+		tableIndex := slices.IndexFunc(s.Tables, func(t metricshelper.Table) bool { return t.Name == con.TableName })
+		if tableIndex == -1 {
+			continue
+		}
+		s.Tables[tableIndex].Constraints = append(s.Tables[tableIndex].Constraints, *metricshelper.NewConstraint(con.ConstraintName, con.ConstraintType, con.Definition))
+		schemas[con.SchemaName] = s
+	}
 }
 
 func getSchemaDiff(oldSchema, newSchema *metricshelper.Schema) *metricshelper.SchemaDiff {
@@ -195,7 +348,17 @@ func getSchemasDiff(oldSchema, newSchema map[string]metricshelper.Schema) map[st
 }
 
 func hasColumnChanged(oldColumn, newColumn metricshelper.Column) bool {
-	return oldColumn.DataType != newColumn.DataType || oldColumn.Name != newColumn.Name
+	return oldColumn.DataType != newColumn.DataType ||
+		oldColumn.Name != newColumn.Name ||
+		oldColumn.Nullable != newColumn.Nullable
+}
+
+func hasIndexChanged(oldIndex, newIndex metricshelper.Index) bool {
+	return oldIndex.Definition != newIndex.Definition || oldIndex.Unique != newIndex.Unique
+}
+
+func hasConstraintChanged(oldConstraint, newConstraint metricshelper.Constraint) bool {
+	return oldConstraint.Definition != newConstraint.Definition || oldConstraint.Type != newConstraint.Type
 }
 
 func getTableDiff(oldTable, newTable metricshelper.Table) *metricshelper.TableDiff {
@@ -223,6 +386,48 @@ func getTableDiff(oldTable, newTable metricshelper.Table) *metricshelper.TableDi
 		idx := slices.IndexFunc(newTable.Columns, func(c metricshelper.Column) bool { return c.Name == oldTableColumn.Name })
 		if idx == -1 {
 			diff.DeletedColumns = append(diff.DeletedColumns, oldTableColumn)
+		}
+	}
+
+	// Check updated or created constraints
+	for _, newConstraint := range newTable.Constraints {
+		oldIndex := slices.IndexFunc(oldTable.Constraints, func(c metricshelper.Constraint) bool { return c.Name == newConstraint.Name })
+		if oldIndex == -1 {
+			diff.CreatedConstraints = append(diff.CreatedConstraints, newConstraint)
+			continue
+		}
+		oldConstraint := oldTable.Constraints[oldIndex]
+		if hasConstraintChanged(oldConstraint, newConstraint) {
+			diff.UpdatedConstraints = append(diff.UpdatedConstraints, struct{ Old, New metricshelper.Constraint }{oldConstraint, newConstraint})
+		}
+	}
+
+	// Check deleted constraints
+	for _, oldConstraint := range oldTable.Constraints {
+		idx := slices.IndexFunc(newTable.Constraints, func(c metricshelper.Constraint) bool { return c.Name == oldConstraint.Name })
+		if idx == -1 {
+			diff.DeletedConstraints = append(diff.DeletedConstraints, oldConstraint)
+		}
+	}
+
+	// Check updated or created indexes
+	for _, newIndex := range newTable.Indexes {
+		oldIndex := slices.IndexFunc(oldTable.Indexes, func(i metricshelper.Index) bool { return i.Name == newIndex.Name })
+		if oldIndex == -1 {
+			diff.CreatedIndexes = append(diff.CreatedIndexes, newIndex)
+			continue
+		}
+		oldIdx := oldTable.Indexes[oldIndex]
+		if hasIndexChanged(oldIdx, newIndex) {
+			diff.UpdatedIndexes = append(diff.UpdatedIndexes, struct{ Old, New metricshelper.Index }{oldIdx, newIndex})
+		}
+	}
+
+	// Check deleted indexes
+	for _, oldIndex := range oldTable.Indexes {
+		idx := slices.IndexFunc(newTable.Indexes, func(i metricshelper.Index) bool { return i.Name == oldIndex.Name })
+		if idx == -1 {
+			diff.DeletedIndexes = append(diff.DeletedIndexes, oldIndex)
 		}
 	}
 

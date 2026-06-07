@@ -70,4 +70,52 @@ func TestTableDiff_HasChanges(t *testing.T) {
 		d.UnchangedColumns = append(d.UnchangedColumns, Column{Name: "id", DataType: "integer"})
 		assert.False(t, d.HasChanges())
 	})
+	t.Run("created index", func(t *testing.T) {
+		t.Parallel()
+		d := NewTableDiff("test_table")
+		d.CreatedIndexes = append(d.CreatedIndexes, Index{Name: "idx"})
+		assert.True(t, d.HasChanges())
+	})
+	t.Run("deleted index", func(t *testing.T) {
+		t.Parallel()
+		d := NewTableDiff("test_table")
+		d.DeletedIndexes = append(d.DeletedIndexes, Index{Name: "idx"})
+		assert.True(t, d.HasChanges())
+	})
+	t.Run("updated index", func(t *testing.T) {
+		t.Parallel()
+		d := NewTableDiff("test_table")
+		d.UpdatedIndexes = append(d.UpdatedIndexes, struct {
+			Old Index
+			New Index
+		}{Old: Index{Name: "idx", Definition: "a"}, New: Index{Name: "idx", Definition: "b"}})
+		assert.True(t, d.HasChanges())
+	})
+	t.Run("created constraint", func(t *testing.T) {
+		t.Parallel()
+		d := NewTableDiff("test_table")
+		d.CreatedConstraints = append(d.CreatedConstraints, Constraint{Name: "c"})
+		assert.True(t, d.HasChanges())
+	})
+	t.Run("deleted constraint", func(t *testing.T) {
+		t.Parallel()
+		d := NewTableDiff("test_table")
+		d.DeletedConstraints = append(d.DeletedConstraints, Constraint{Name: "c"})
+		assert.True(t, d.HasChanges())
+	})
+	t.Run("updated constraint", func(t *testing.T) {
+		t.Parallel()
+		d := NewTableDiff("test_table")
+		d.UpdatedConstraints = append(d.UpdatedConstraints, struct {
+			Old Constraint
+			New Constraint
+		}{Old: Constraint{Name: "c", Definition: "a"}, New: Constraint{Name: "c", Definition: "b"}})
+		assert.True(t, d.HasChanges())
+	})
+}
+
+func TestColumnText_Nullability(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, "id\tinteger NOT NULL", Column{Name: "id", DataType: "integer", Nullable: false}.text())
+	assert.Equal(t, "email\ttext", Column{Name: "email", DataType: "text", Nullable: true}.text())
 }
