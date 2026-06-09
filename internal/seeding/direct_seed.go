@@ -38,7 +38,7 @@ func (h *DirectSeed) compareSeedContentFromHash(hash string, filePath string) (b
 		if w != nil {
 			h.warnings = append(h.warnings, w)
 			warning.PrintWarning(w)
-			return false, errors.New(w.GetWarningText())
+			return false, errors.New(w.GetText())
 		}
 	}
 	defer f.Close()
@@ -49,7 +49,7 @@ func (h *DirectSeed) compareSeedContentFromHash(hash string, filePath string) (b
 		if w != nil {
 			h.warnings = append(h.warnings, w)
 			warning.PrintWarning(w)
-			return false, errors.New(w.GetWarningText())
+			return false, errors.New(w.GetText())
 		}
 	}
 

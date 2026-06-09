@@ -287,8 +287,8 @@ func (h *DockerHandler) Apply(ctx context.Context) error {
 	if finalCountErr != nil {
 		if errors.Is(finalCountErr, ErrMigrationTableNotFound) {
 			w := warning.MigrationTableNotFound{}
-			h.warnings = append(h.warnings, w)
-			warning.PrintWarning(w)
+			h.warnings = append(h.warnings, &w)
+			warning.PrintWarning(&w)
 		} else {
 			return finalCountErr
 		}

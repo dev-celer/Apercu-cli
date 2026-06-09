@@ -10,24 +10,32 @@ type StateFileWarning struct {
 	path string
 }
 
-func (s StateFileWarning) GetWarningText() string {
-	return fmt.Sprintf("Failed to open state file (%s)", s.path)
+func (w *StateFileWarning) GetText() string {
+	return fmt.Sprintf("Failed to open state file (%s)", w.path)
 }
 
-func (s StateFileWarning) GetWarningTextLong() string {
-	return s.GetWarningText()
+func (w *StateFileWarning) GetTextLong() string {
+	return w.GetText()
 }
 
-func (s StateFileWarning) GetWarningLevel() Level {
+func (w *StateFileWarning) GetLevel() Level {
 	return WarningLevelLow
 }
 
-func (s StateFileWarning) GetWarningCode() Code {
+func (w *StateFileWarning) GetCode() Code {
 	return CodeStateFileFailedToRead
 }
 
-func NewStateFileWarning(filePath string) StateFileWarning {
-	return StateFileWarning{
+func (w *StateFileWarning) GetIsIdempotent() bool {
+	return true
+}
+
+func (w *StateFileWarning) GetKeys() []string {
+	return []string{w.path}
+}
+
+func NewStateFileWarning(filePath string) *StateFileWarning {
+	return &StateFileWarning{
 		path: filePath,
 	}
 }

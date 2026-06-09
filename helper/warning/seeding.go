@@ -12,25 +12,33 @@ type SeedingError struct {
 	code Code
 }
 
-func (s SeedingError) GetWarningText() string {
-	switch s.code {
+func (w *SeedingError) GetText() string {
+	switch w.code {
 	case CodeFailedToOpenSeedFile:
-		return fmt.Sprintf("Failed to open seed file (%s)", s.path)
+		return fmt.Sprintf("Failed to open seed file (%s)", w.path)
 	case CodeSeedFileNotFound:
-		return fmt.Sprintf("Seed file not found (%s)", s.path)
+		return fmt.Sprintf("Seed file not found (%s)", w.path)
 	default:
 		return ""
 	}
 }
 
-func (s SeedingError) GetWarningTextLong() string { return s.GetWarningText() }
+func (w *SeedingError) GetTextLong() string { return w.GetText() }
 
-func (s SeedingError) GetWarningLevel() Level {
+func (w *SeedingError) GetLevel() Level {
 	return WarningLevelLow
 }
 
-func (s SeedingError) GetWarningCode() Code {
-	return s.code
+func (w *SeedingError) GetCode() Code {
+	return w.code
+}
+
+func (w *SeedingError) GetIsIdempotent() bool {
+	return true
+}
+
+func (w *SeedingError) GetKeys() []string {
+	return []string{w.path}
 }
 
 func NewSeedingError(code Code, filepath string) *SeedingError {

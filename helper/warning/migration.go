@@ -6,18 +6,26 @@ const (
 
 type MigrationTableNotFound struct{}
 
-func (w MigrationTableNotFound) GetWarningText() string {
+func (w *MigrationTableNotFound) GetText() string {
 	return "Migration table not found, cannot determine migration count"
 }
 
-func (w MigrationTableNotFound) GetWarningTextLong() string {
-	return w.GetWarningText()
+func (w *MigrationTableNotFound) GetTextLong() string {
+	return w.GetText()
 }
 
-func (w MigrationTableNotFound) GetWarningLevel() Level {
+func (w *MigrationTableNotFound) GetLevel() Level {
 	return WarningLevelLow
 }
 
-func (w MigrationTableNotFound) GetWarningCode() Code {
+func (w *MigrationTableNotFound) GetCode() Code {
 	return CodeMigrationTableNotFound
+}
+
+func (w *MigrationTableNotFound) GetIsIdempotent() bool {
+	return true
+}
+
+func (w *MigrationTableNotFound) GetKeys() []string {
+	return nil
 }

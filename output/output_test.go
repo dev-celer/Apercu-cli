@@ -10,31 +10,41 @@ import (
 )
 
 type mockedWarning struct {
-	desc string
+	desc         string
+	isIdempotent bool
+	keys         []string
 }
 
 const (
 	MockedCode warning.Code = "MOCK_WARN"
 )
 
-func (w mockedWarning) GetWarningText() string {
+func (w *mockedWarning) GetText() string {
 	return w.desc
 }
 
-func (w mockedWarning) GetWarningTextLong() string { return w.GetWarningText() }
+func (w *mockedWarning) GetTextLong() string { return w.GetText() }
 
-func (w mockedWarning) GetWarningLevel() warning.Level {
+func (w *mockedWarning) GetLevel() warning.Level {
 	return warning.WarningLevelMedium
 }
 
-func (w mockedWarning) GetWarningCode() warning.Code {
+func (w *mockedWarning) GetCode() warning.Code {
 	return MockedCode
 }
 
-func (w mockedWarning) PrintWarning() {}
+func (w *mockedWarning) GetIsIdempotent() bool { return w.isIdempotent }
 
-func newMockedWarning(desc string) mockedWarning {
-	return mockedWarning{desc: desc}
+func (w *mockedWarning) GetKeys() []string { return w.keys }
+
+func (w *mockedWarning) PrintWarning() {}
+
+func newMockedWarning(desc string, isIdempotent bool, keys []string) *mockedWarning {
+	return &mockedWarning{
+		desc:         desc,
+		isIdempotent: isIdempotent,
+		keys:         keys,
+	}
 }
 
 func strPtr(s string) *string { return &s }
@@ -76,7 +86,7 @@ func TestRenderMarkdown_MigrationAndSeeding(t *testing.T) {
 					Duration:     "500ms",
 					Errors:       []string{"seed x failed"},
 				},
-				Warnings: []warning.Warning{newMockedWarning("top-level warn")},
+				Warnings: []warning.Warning{newMockedWarning("top-level warn", false, nil)},
 				Errors:   []string{"top-level error"},
 			},
 		},

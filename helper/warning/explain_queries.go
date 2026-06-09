@@ -33,28 +33,36 @@ func NewExplainQueryFileWarning(code Code, path string) *ExplainQueryFile {
 	}
 }
 
-func (e ExplainQueryFile) GetWarningText() string {
-	switch e.code {
+func (w *ExplainQueryFile) GetText() string {
+	switch w.code {
 	case CodeExplainQueryPathNotFound:
-		return fmt.Sprintf("Explain query path not found: %s", e.path)
+		return fmt.Sprintf("Explain query path not found: %s", w.path)
 	case CodeExplainQueryNoQueries:
-		return fmt.Sprintf("No queries to explain found in file: %s", e.path)
+		return fmt.Sprintf("No queries to explain found in file: %s", w.path)
 	case CodeExplainQueryFailedToReadFile:
-		return fmt.Sprintf("Failed to read for explain queries file: %s", e.path)
+		return fmt.Sprintf("Failed to read for explain queries file: %s", w.path)
 	}
 	return ""
 }
 
-func (e ExplainQueryFile) GetWarningTextLong() string {
-	return e.GetWarningText()
+func (w *ExplainQueryFile) GetTextLong() string {
+	return w.GetText()
 }
 
-func (e ExplainQueryFile) GetWarningLevel() Level {
+func (w *ExplainQueryFile) GetLevel() Level {
 	return WarningLevelLow
 }
 
-func (e ExplainQueryFile) GetWarningCode() Code {
-	return e.code
+func (w *ExplainQueryFile) GetCode() Code {
+	return w.code
+}
+
+func (w *ExplainQueryFile) GetIsIdempotent() bool {
+	return true
+}
+
+func (w *ExplainQueryFile) GetKeys() []string {
+	return []string{w.path}
 }
 
 type ExplainQueryProdFetch struct {
@@ -75,8 +83,8 @@ func NewExplainQueryProdFetchWarning(code Code, detail string) *ExplainQueryProd
 	}
 }
 
-func (e ExplainQueryProdFetch) GetWarningText() string {
-	switch e.code {
+func (w *ExplainQueryProdFetch) GetText() string {
+	switch w.code {
 	case CodeExplainQueryStatStatementsMissing:
 		return "pg_stat_statements extension is not installed on the prod database; auto-fetch skipped"
 	case CodeExplainQueryProdFetchFailed:
@@ -85,20 +93,28 @@ func (e ExplainQueryProdFetch) GetWarningText() string {
 	return ""
 }
 
-func (e ExplainQueryProdFetch) GetWarningTextLong() string {
-	switch e.code {
+func (w *ExplainQueryProdFetch) GetTextLong() string {
+	switch w.code {
 	case CodeExplainQueryProdFetchFailed:
-		return fmt.Sprintf("Failed to fetch queries from prod database: %s", e.detail)
+		return fmt.Sprintf("Failed to fetch queries from prod database: %s", w.detail)
 	}
-	return e.GetWarningText()
+	return w.GetText()
 }
 
-func (e ExplainQueryProdFetch) GetWarningLevel() Level {
+func (w *ExplainQueryProdFetch) GetLevel() Level {
 	return WarningLevelLow
 }
 
-func (e ExplainQueryProdFetch) GetWarningCode() Code {
-	return e.code
+func (w *ExplainQueryProdFetch) GetCode() Code {
+	return w.code
+}
+
+func (w *ExplainQueryProdFetch) GetIsIdempotent() bool {
+	return true
+}
+
+func (w *ExplainQueryProdFetch) GetKeys() []string {
+	return nil
 }
 
 type ExplainPlanRegression struct {
@@ -106,41 +122,52 @@ type ExplainPlanRegression struct {
 	long  string
 	level Level
 	code  Code
+	key   string
 }
 
-func NewExplainPlanScanRegressionWarning(level Level, rel, before, after string) ExplainPlanRegression {
-	return ExplainPlanRegression{
+func NewExplainPlanScanRegressionWarning(level Level, rel, before, after string) *ExplainPlanRegression {
+	return &ExplainPlanRegression{
 		level: level,
 		code:  CodeExplainQueryPlanScanRegression,
 		short: fmt.Sprintf("Plan scan regression on %s: %s -> %s", rel, before, after),
 		long:  fmt.Sprintf("Query plan regression on relation %s: access method changed from %s to %s after the migration. This usually means an index the query relied on is no longer usable.", rel, before, after),
+		key:   rel,
 	}
 }
 
-func NewExplainPlanOrderingRegressionWarning(level Level, key string) ExplainPlanRegression {
-	return ExplainPlanRegression{
+func NewExplainPlanOrderingRegressionWarning(level Level, key string) *ExplainPlanRegression {
+	return &ExplainPlanRegression{
 		level: level,
 		code:  CodeExplainQueryPlanOrderingRegression,
 		short: fmt.Sprintf("Plan ordering regression: new sort on %s", key),
 		long:  fmt.Sprintf("Query plan regression: the post-migration plan introduces a new sort on %s that was not present before, suggesting an index that previously provided ordering was dropped.", key),
+		key:   key,
 	}
 }
 
-func (e ExplainPlanRegression) GetWarningText() string {
-	return e.short
+func (w *ExplainPlanRegression) GetText() string {
+	return w.short
 }
 
-func (e ExplainPlanRegression) GetWarningTextLong() string {
-	if e.long == "" {
-		return e.short
+func (w *ExplainPlanRegression) GetTextLong() string {
+	if w.long == "" {
+		return w.short
 	}
-	return e.long
+	return w.long
 }
 
-func (e ExplainPlanRegression) GetWarningLevel() Level {
-	return e.level
+func (w *ExplainPlanRegression) GetLevel() Level {
+	return w.level
 }
 
-func (e ExplainPlanRegression) GetWarningCode() Code {
-	return e.code
+func (w *ExplainPlanRegression) GetCode() Code {
+	return w.code
+}
+
+func (w *ExplainPlanRegression) GetIsIdempotent() bool {
+	return true
+}
+
+func (w *ExplainPlanRegression) GetKeys() []string {
+	return []string{w.key}
 }

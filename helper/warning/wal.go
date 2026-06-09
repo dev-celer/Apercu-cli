@@ -27,25 +27,25 @@ func NewWALSizeWarning(estimatedProdWAL, prodDatabaseSize int64) *WALSizeWarning
 	return &w
 }
 
-func (w WALSizeWarning) GetWarningText() string {
+func (w *WALSizeWarning) GetText() string {
 	if w.prodDatabaseSize <= 0 {
 		return fmt.Sprintf("Migration is estimated to generate %s of WAL on production", format.BytesSizePretty(w.estimatedProdWAL))
 	}
 	return fmt.Sprintf("Migration is estimated to generate %s of WAL on production (%.0f%% of production database size)", format.BytesSizePretty(w.estimatedProdWAL), w.ratio()*100)
 }
 
-func (w WALSizeWarning) GetWarningTextLong() string {
-	return w.GetWarningText()
+func (w *WALSizeWarning) GetTextLong() string {
+	return w.GetText()
 }
 
-func (w WALSizeWarning) IsWarning() bool {
+func (w *WALSizeWarning) IsWarning() bool {
 	if w.levelByAbsolute() == nil && w.levelByRatio() == nil {
 		return false
 	}
 	return true
 }
 
-func (w WALSizeWarning) GetWarningLevel() Level {
+func (w *WALSizeWarning) GetLevel() Level {
 	byAbsolute := w.levelByAbsolute()
 	byRatio := w.levelByRatio()
 
@@ -67,11 +67,11 @@ func (w WALSizeWarning) GetWarningLevel() Level {
 	return *byRatio
 }
 
-func (w WALSizeWarning) GetWarningCode() Code {
+func (w *WALSizeWarning) GetCode() Code {
 	return CodeHighWALVolume
 }
 
-func (w WALSizeWarning) levelByAbsolute() *Level {
+func (w *WALSizeWarning) levelByAbsolute() *Level {
 	// If > 10 GiB - Med
 	if w.estimatedProdWAL > 10*1024*1024*1024 {
 		return new(WarningLevelMedium)
@@ -84,7 +84,7 @@ func (w WALSizeWarning) levelByAbsolute() *Level {
 	return nil
 }
 
-func (w WALSizeWarning) levelByRatio() *Level {
+func (w *WALSizeWarning) levelByRatio() *Level {
 	// Cannot compute ratio without prod size - Low
 	if w.prodDatabaseSize <= 0 {
 		return nil
@@ -105,9 +105,17 @@ func (w WALSizeWarning) levelByRatio() *Level {
 	return nil
 }
 
-func (w WALSizeWarning) ratio() float64 {
+func (w *WALSizeWarning) ratio() float64 {
 	if w.prodDatabaseSize <= 0 {
 		return 0
 	}
 	return float64(w.estimatedProdWAL) / float64(w.prodDatabaseSize)
+}
+
+func (w *WALSizeWarning) GetIsIdempotent() bool {
+	return false
+}
+
+func (w *WALSizeWarning) GetKeys() []string {
+	return nil
 }

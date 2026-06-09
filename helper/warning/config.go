@@ -14,23 +14,31 @@ type MissingEnvVarsWarning struct {
 	variables []string
 }
 
-func (w *MissingEnvVarsWarning) GetWarningText() string {
+func (w *MissingEnvVarsWarning) GetText() string {
 	if len(w.variables) > 1 {
 		return fmt.Sprintf("Missing environment variables used in config (%s)", strings.Join(w.variables, ", "))
 	}
 	return fmt.Sprintf("Missing environment variable used in config (%s)", strings.Join(w.variables, ", "))
 }
 
-func (w *MissingEnvVarsWarning) GetWarningTextLong() string {
-	return w.GetWarningText()
+func (w *MissingEnvVarsWarning) GetTextLong() string {
+	return w.GetText()
 }
 
-func (w *MissingEnvVarsWarning) GetWarningLevel() Level {
+func (w *MissingEnvVarsWarning) GetLevel() Level {
 	return WarningLevelLow
 }
 
-func (w *MissingEnvVarsWarning) GetWarningCode() Code {
+func (w *MissingEnvVarsWarning) GetCode() Code {
 	return CodeMissingEnvironmentVariable
+}
+
+func (w *MissingEnvVarsWarning) GetIsIdempotent() bool {
+	return true
+}
+
+func (w *MissingEnvVarsWarning) GetKeys() []string {
+	return w.variables
 }
 
 func NewMissingEnvVarsWarning(variables ...string) *MissingEnvVarsWarning {

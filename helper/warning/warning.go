@@ -7,10 +7,12 @@ import (
 )
 
 type Warning interface {
-	GetWarningText() string
-	GetWarningTextLong() string
-	GetWarningLevel() Level
-	GetWarningCode() Code
+	GetText() string
+	GetTextLong() string
+	GetLevel() Level
+	GetCode() Code
+	GetIsIdempotent() bool
+	GetKeys() []string
 }
 
 type Code string
@@ -43,5 +45,23 @@ func PrintWarning(w Warning) {
 	if v := reflect.ValueOf(w); v.Kind() == reflect.Ptr && v.IsNil() {
 		return
 	}
-	_, _ = fmt.Fprintln(log.Writer(), fmt.Sprintf("WARNING: %s", w.GetWarningTextLong()))
+	_, _ = fmt.Fprintln(log.Writer(), fmt.Sprintf("WARNING: %s", w.GetTextLong()))
+}
+
+type WarningState struct {
+	Code         Code
+	Level        Level
+	Keys         []string
+	IsIdempotent bool
+	WarningText  string
+}
+
+func NewWarningState(w Warning) WarningState {
+	return WarningState{
+		Code:         w.GetCode(),
+		Level:        w.GetLevel(),
+		IsIdempotent: w.GetIsIdempotent(),
+		Keys:         w.GetKeys(),
+		WarningText:  w.GetText(),
+	}
 }

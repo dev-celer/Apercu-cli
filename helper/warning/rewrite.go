@@ -16,37 +16,37 @@ type TableRewriteWarning struct {
 	prodMetrics *metricshelper.TableMetrics
 }
 
-func NewRewriteWarning(table helper.FullTableName, metrics *metricshelper.TableMetrics) TableRewriteWarning {
-	return TableRewriteWarning{
+func NewRewriteWarning(table helper.FullTableName, metrics *metricshelper.TableMetrics) *TableRewriteWarning {
+	return &TableRewriteWarning{
 		table:       table,
 		prodMetrics: metrics,
 	}
 }
 
-func (t TableRewriteWarning) GetWarningText() string {
-	if t.prodMetrics == nil {
-		return fmt.Sprintf("Table %s was rewritten, this table was not found in the production database", t.table.String())
+func (w *TableRewriteWarning) GetText() string {
+	if w.prodMetrics == nil {
+		return fmt.Sprintf("Table %s was rewritten, this table was not found in the production database", w.table.String())
 	}
-	return fmt.Sprintf("Table %s was rewritten, in production this table is %s (%s rows)", t.table.String(), format.BytesSizePretty(t.prodMetrics.TableSize), format.CountPretty(t.prodMetrics.RowCount))
+	return fmt.Sprintf("Table %s was rewritten, in production this table is %s (%s rows)", w.table.String(), format.BytesSizePretty(w.prodMetrics.TableSize), format.CountPretty(w.prodMetrics.RowCount))
 }
 
-func (t TableRewriteWarning) GetWarningTextLong() string {
-	return t.GetWarningText()
+func (w *TableRewriteWarning) GetTextLong() string {
+	return w.GetText()
 }
 
-func (t TableRewriteWarning) GetWarningLevel() Level {
+func (w *TableRewriteWarning) GetLevel() Level {
 	// If table is missing in prod - Low
-	if t.prodMetrics == nil {
+	if w.prodMetrics == nil {
 		return WarningLevelLow
 	}
 
 	// If > 1GiB - High
-	if t.prodMetrics.TableSize > 1024*1024*1024 {
+	if w.prodMetrics.TableSize > 1024*1024*1024 {
 		return WarningLevelHigh
 	}
 
 	// If > 100MiB - Med
-	if t.prodMetrics.TableSize > 100*1024*1024 {
+	if w.prodMetrics.TableSize > 100*1024*1024 {
 		return WarningLevelMedium
 	}
 
@@ -54,6 +54,14 @@ func (t TableRewriteWarning) GetWarningLevel() Level {
 	return WarningLevelLow
 }
 
-func (t TableRewriteWarning) GetWarningCode() Code {
+func (w *TableRewriteWarning) GetCode() Code {
 	return CodeTableRewritten
+}
+
+func (w *TableRewriteWarning) GetIsIdempotent() bool {
+	return false
+}
+
+func (w *TableRewriteWarning) GetKeys() []string {
+	return []string{w.table.String()}
 }
