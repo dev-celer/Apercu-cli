@@ -187,3 +187,7 @@ func (s *WarningStore) ReconcileWarningsWithState(state *config.DatabaseState) (
 	}
 	return
 }
+
+func (s *WarningStore) MarshalJSON() (data []byte, err error) {
+	return json.Marshal(s.warnings)
+}
