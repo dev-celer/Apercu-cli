@@ -92,7 +92,15 @@ func NewWarningStore() *WarningStore {
 }
 
 func (s *WarningStore) AddWarning(w Warning) {
-	if w != nil && !slices.ContainsFunc(s.warnings, func(warning Warning) bool {
+	if w == nil {
+		return
+	}
+	// Guard against a typed-nil pointer wrapped in a non-nil interface
+	if v := reflect.ValueOf(w); v.Kind() == reflect.Ptr && v.IsNil() {
+		return
+	}
+
+	if !slices.ContainsFunc(s.warnings, func(warning Warning) bool {
 		return w.GetFullCode() == warning.GetFullCode()
 	}) {
 		s.warnings = append(s.warnings, w)
