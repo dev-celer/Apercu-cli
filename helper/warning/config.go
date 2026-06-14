@@ -54,14 +54,14 @@ func NewMissingEnvVarsWarnings(variables ...string) []MissingEnvVarsWarning {
 	}
 
 	// Filter out duplicate variables
-	vars := make([]string, len(variables))
+	vars := make([]string, 0, len(variables))
 	for _, v := range variables {
-		if slices.Index(variables, v) == -1 {
+		if slices.Index(vars, v) == -1 {
 			vars = append(vars, v)
 		}
 	}
 
-	warnings := make([]MissingEnvVarsWarning, len(vars))
+	warnings := make([]MissingEnvVarsWarning, 0, len(vars))
 	for _, v := range vars {
 		warnings = append(warnings, MissingEnvVarsWarning{variable: v})
 	}
