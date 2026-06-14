@@ -129,6 +129,12 @@ var templateFuncs = template.FuncMap{
 		}
 		return *s
 	},
+	"get_warnings": func(output PreviewOutputDatabase) []warning.Warning {
+		if output.Warnings == nil {
+			return nil
+		}
+		return output.Warnings.GetWarnings()
+	},
 	"size_pretty": func(i int64) string {
 		return formathelper.BytesSizePretty(i)
 	},
@@ -232,7 +238,7 @@ var markdownTmpl = template.Must(template.New("markdown").Funcs(templateFuncs).P
 {{- if $db.Warnings}}
 
 > [!WARNING]
-{{range $db.Warnings.GetWarnings()}}> - {{.}}
+{{range get_warnings $db}}> - {{.}}
 {{end}}
 {{- end}}
 {{- if $db.Errors}}
