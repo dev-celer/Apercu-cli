@@ -123,9 +123,9 @@ func (s *WarningStore) GetWarnings() []Warning {
 // ReconcileWarningsWithState will read previous warnings, ignored warnings from state.
 // Filter out the ignored warnings, count the solved / new warnings and add the last warnings that are not idempotent.
 // It will also mutate the state to replace the last warnings by current warnings
-func (s *WarningStore) ReconcileWarningsWithState(state *config.DatabaseState) (solved, new int) {
+func (s *WarningStore) ReconcileWarningsWithState(state *config.DatabaseState) (solved, added int) {
 	solved = 0
-	new = 0
+	added = 0
 	if state == nil {
 		return
 	}
@@ -158,7 +158,7 @@ func (s *WarningStore) ReconcileWarningsWithState(state *config.DatabaseState) (
 		_, last := state.LastWarnings[w.GetFullCode()]
 		// If no, consider as new
 		if !last {
-			new++
+			added++
 			continue
 		}
 		// Else remove it from last warnings
