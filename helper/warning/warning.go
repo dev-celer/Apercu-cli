@@ -81,7 +81,7 @@ func ConvertStatesToWarnings(states map[string]json.RawMessage) []Warning {
 	return warnings
 }
 
-var warningConverter map[Code]func(state json.RawMessage) Warning
+var warningConverter map[Code]func(state json.RawMessage) Warning = make(map[Code]func(state json.RawMessage) Warning)
 
 type WarningStore struct {
 	warnings []Warning
