@@ -13,7 +13,17 @@ type State struct {
 }
 
 type DatabaseState struct {
-	AppliedSeeds []SeedState `yaml:"applied_seeds" json:"applied_seeds"`
+	AppliedSeeds    []SeedState                `json:"applied_seeds"`
+	LastWarnings    map[string]json.RawMessage `json:"last_warnings"`
+	IgnoredWarnings map[string]json.RawMessage `json:"ignored_warnings"`
+}
+
+func NewDatabaseState() DatabaseState {
+	return DatabaseState{
+		AppliedSeeds:    make([]SeedState, 0),
+		LastWarnings:    make(map[string]json.RawMessage),
+		IgnoredWarnings: make(map[string]json.RawMessage),
+	}
 }
 
 type SeedState struct {

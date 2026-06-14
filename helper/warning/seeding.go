@@ -38,7 +38,7 @@ func (w *SeedingError) GetCode() Code {
 }
 
 func (w *SeedingError) GetFullCode() string {
-	return fmt.Sprintf("%s.%s", w.GetCode(), EscapeKey(w.path))
+	return fmt.Sprintf("%s.%s", w.GetCode(), FormatKey(w.path))
 }
 
 func (w *SeedingError) GetIsIdempotent() bool {

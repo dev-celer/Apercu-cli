@@ -1,6 +1,7 @@
 package warning
 
 import (
+	"apercu-cli/config"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -53,13 +54,13 @@ func PrintWarning(w Warning) {
 	_, _ = fmt.Fprintln(log.Writer(), fmt.Sprintf("WARNING: %s", w.GetTextLong()))
 }
 
-func EscapeKey(key string) string {
+func FormatKey(key string) string {
 	key = strings.Replace(key, " ", "_", -1)
 	key = strings.Replace(key, "/", "_", -1)
 	return key
 }
 
-func ConvertStateToWarnings(states map[string]json.RawMessage) []Warning {
+func ConvertStatesToWarnings(states map[string]json.RawMessage) []Warning {
 	warnings := make([]Warning, 0)
 	slog.Debug("Converting state to warnings")
 
@@ -115,4 +116,74 @@ func (s *WarningStore) AddWarningsAndPrint(w []Warning) {
 
 func (s *WarningStore) GetWarnings() []Warning {
 	return s.warnings
+}
+
+// ReconcileWarningsWithState will read previous warnings, ignored warnings from state.
+// Filter out the ignored warnings, count the solved / new warnings and add the last warnings that are not idempotent.
+// It will also mutate the state to replace the last warnings by current warnings
+func (s *WarningStore) ReconcileWarningsWithState(state *config.DatabaseState) (solved, new int) {
+	solved = 0
+	new = 0
+	if state == nil {
+		return
+	}
+
+	// Filter out ignored warning from the present warnings
+	s.warnings = slices.DeleteFunc(s.warnings, func(w Warning) bool {
+		// Check if warning is present in state ignored warnings
+		_, ignored := state.IgnoredWarnings[w.GetFullCode()]
+
+		if !ignored {
+			// If warning is not present in ignored, keep it
+			return false
+		}
+
+		// If warning was ignored, is not idempotent and is still present, consider as a new warning
+		if !w.GetIsIdempotent() {
+			// If present in last warning, remove it and consider as solved
+			delete(state.LastWarnings, w.GetFullCode())
+			solved++
+			return false
+		}
+
+		// Else if warning is idempotent, filter out ignored keys
+		return true
+	})
+
+	// Count the new warnings
+	for _, w := range s.warnings {
+		// Check if warning is present in state last warnings
+		_, last := state.LastWarnings[w.GetFullCode()]
+		// If no, consider as new
+		if !last {
+			new++
+			continue
+		}
+		// Else remove it from last warnings
+		delete(state.LastWarnings, w.GetFullCode())
+	}
+
+	// Handle the remaining warnings from last run
+	for _, w := range ConvertStatesToWarnings(state.LastWarnings) {
+		// If warning is not idempotent, consider as solved
+		if !w.GetIsIdempotent() {
+			solved++
+			continue
+		}
+
+		// Else, add it to the warnings
+		s.AddWarning(w)
+	}
+
+	// Update the state
+	state.LastWarnings = make(map[string]json.RawMessage)
+	for _, w := range s.warnings {
+		v, err := w.GetStateValues()
+		if err != nil {
+			slog.Error("Failed to store warnings to state", "code", w.GetFullCode(), "error", err)
+			continue
+		}
+		state.LastWarnings[w.GetFullCode()] = v
+	}
+	return
 }

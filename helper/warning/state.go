@@ -31,7 +31,7 @@ func (w *StateFileWarning) GetCode() Code {
 }
 
 func (w *StateFileWarning) GetFullCode() string {
-	return fmt.Sprintf("%s.%s", w.GetCode(), EscapeKey(w.path))
+	return fmt.Sprintf("%s.%s", w.GetCode(), FormatKey(w.path))
 }
 
 func (w *StateFileWarning) GetIsIdempotent() bool {

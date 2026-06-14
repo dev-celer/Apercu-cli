@@ -60,7 +60,7 @@ func (w *ExplainQueryFile) GetCode() Code {
 }
 
 func (w *ExplainQueryFile) GetFullCode() string {
-	return fmt.Sprintf("%s.%s", w.code, EscapeKey(w.path))
+	return fmt.Sprintf("%s.%s", w.code, FormatKey(w.path))
 }
 
 func (w *ExplainQueryFile) GetIsIdempotent() bool {
@@ -209,7 +209,7 @@ func (w *ExplainPlanOrderingRegression) GetCode() Code {
 }
 
 func (w *ExplainPlanOrderingRegression) GetFullCode() string {
-	return fmt.Sprintf("%s.%s", w.GetCode(), EscapeKey(w.key))
+	return fmt.Sprintf("%s.%s", w.GetCode(), FormatKey(w.key))
 }
 
 func (w *ExplainPlanOrderingRegression) GetIsIdempotent() bool {
@@ -275,7 +275,7 @@ func (w *ExplainPlanScanRegression) GetCode() Code {
 }
 
 func (w *ExplainPlanScanRegression) GetFullCode() string {
-	return fmt.Sprintf("%s.%s", w.GetCode(), EscapeKey(w.key))
+	return fmt.Sprintf("%s.%s", w.GetCode(), FormatKey(w.key))
 }
 
 func (w *ExplainPlanScanRegression) GetIsIdempotent() bool {

@@ -32,7 +32,7 @@ func (w *MissingEnvVarsWarning) GetCode() Code {
 }
 
 func (w *MissingEnvVarsWarning) GetFullCode() string {
-	return fmt.Sprintf("%s.%s", w.GetCode(), EscapeKey(w.variable))
+	return fmt.Sprintf("%s.%s", w.GetCode(), FormatKey(w.variable))
 }
 
 func (w *MissingEnvVarsWarning) GetIsIdempotent() bool {

@@ -61,7 +61,7 @@ func (w *TableRewriteWarning) GetCode() Code {
 }
 
 func (w *TableRewriteWarning) GetFullCode() string {
-	return fmt.Sprintf("%s.%s", w.GetCode(), EscapeKey(w.table.String()))
+	return fmt.Sprintf("%s.%s", w.GetCode(), FormatKey(w.table.String()))
 }
 
 func (w *TableRewriteWarning) GetIsIdempotent() bool {

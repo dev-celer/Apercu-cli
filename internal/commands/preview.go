@@ -133,6 +133,9 @@ func preview(cmd *cobra.Command, args []string) error {
 		dbOutput.Seeding = seedHandler.GetOutput()
 	}
 
+	// Reconcile warnings with the state
+	dbOutput.Warnings.ReconcileWarningsWithState(&dbState)
+
 	// Save the state
 	state.Databases[dbName] = dbState
 	if statePath != "" {

@@ -106,8 +106,11 @@ func reset(cmd *cobra.Command, args []string) error {
 		dbOutput.Seeding = seedHandler.GetOutput()
 	}
 
-	// Save a new state
+	// Reconcile warnings with the state
 	state := config.NewState()
+	dbOutput.Warnings.ReconcileWarningsWithState(&dbState)
+
+	// Save a new state
 	state.Databases[dbName] = dbState
 	if statePath != "" {
 		if err := state.Save(statePath); err != nil {
