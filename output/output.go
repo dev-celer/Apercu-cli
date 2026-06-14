@@ -201,7 +201,7 @@ var templateFuncs = template.FuncMap{
 					outputStr += "> [!WARNING]\n"
 				}
 				for _, warning := range explain.Warnings {
-					outputStr += fmt.Sprintf("> - %s", warning.GetText())
+					outputStr += fmt.Sprintf("> - %s\n", warning.GetTextLong())
 				}
 
 				// Display explained query
