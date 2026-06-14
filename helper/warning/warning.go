@@ -138,9 +138,9 @@ func (s *WarningStore) ReconcileWarningsWithState(state *config.DatabaseState) (
 			return false
 		}
 
-		// If warning was ignored, is not idempotent and is still present, consider as a new warning
+		// If warning was ignored, is not idempotent and is still present, preserve the warning
 		if !w.GetIsIdempotent() {
-			// If present in last warning, remove it and consider as solved
+			// If present in last warning, consider the last one as solved and remove it from the last warning map so it can be considered as new
 			delete(state.LastWarnings, w.GetFullCode())
 			solved++
 			return false
