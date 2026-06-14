@@ -83,13 +83,13 @@ func (w *TableRewriteWarning) GetStateValues() (json.RawMessage, error) {
 
 func init() {
 	warningConverter[CodeTableRewritten] = func(state json.RawMessage) Warning {
-		v := TableRewriteWarning{}
+		v := TableRewriteWarningState{}
 		err := json.Unmarshal(state, &v)
 		if err != nil {
 			slog.Debug("Failed to unmarshal state", "error", err)
 			return nil
 		}
 
-		return NewRewriteWarning(v.table, v.prodMetrics)
+		return NewRewriteWarning(v.Table, v.ProdMetrics)
 	}
 }
