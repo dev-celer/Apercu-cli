@@ -20,7 +20,7 @@ type MetricsHandler struct {
 	previewDb *sql.DB
 }
 
-func NewMetricsHandler(prodDbUrl, previewDbUrl string, dbConfig *config.Database, fullConfig *config.Config) (*MetricsHandler, error) {
+func NewMetricsHandler(prodDbUrl, previewDbUrl string, dbConfig *config.Database, fullConfig *config.Config, store *warning.WarningStore) (*MetricsHandler, error) {
 	prodDb, err := sql.Open("postgres", prodDbUrl)
 	if err != nil {
 		return nil, errors.New(fmt.Sprintf("Failed to connect to prod database: %v", err))
@@ -39,7 +39,7 @@ func NewMetricsHandler(prodDbUrl, previewDbUrl string, dbConfig *config.Database
 		_ = prodDb.Close()
 		return nil, errors.New(fmt.Sprintf("Failed to connect to preview database: %v", err))
 	}
-	enginesObj, err := initializeEngines(prodDb, previewDb, prodMetrics, dbConfig, fullConfig)
+	enginesObj, err := initializeEngines(prodDb, previewDb, prodMetrics, dbConfig, fullConfig, store)
 	if err != nil {
 		_ = prodDb.Close()
 		_ = previewDb.Close()
@@ -61,12 +61,12 @@ func (h *MetricsHandler) Close() {
 
 // initializeEngines is used to call all constructor for every metrics engines
 // any new metrics engines should be added to this function
-func initializeEngines(prodDb, previewDb *sql.DB, prodStats metricshelper.DatabaseMetrics, dbConfig *config.Database, fullConfig *config.Config) ([]engines.MetricEngine, error) {
+func initializeEngines(prodDb, previewDb *sql.DB, prodStats metricshelper.DatabaseMetrics, dbConfig *config.Database, fullConfig *config.Config, warningStore *warning.WarningStore) ([]engines.MetricEngine, error) {
 	enginesList := make([]engines.MetricEngine, 0)
 
 	enginesList = append(enginesList, engines.NewLocksEngine())
 
-	queryEngine, err := engines.NewExplainQueryEngine(previewDb, dbConfig, prodDb, prodStats)
+	queryEngine, err := engines.NewExplainQueryEngine(previewDb, dbConfig, prodDb, prodStats, warningStore)
 	if err != nil {
 		return nil, err
 	}
@@ -74,9 +74,9 @@ func initializeEngines(prodDb, previewDb *sql.DB, prodStats metricshelper.Databa
 
 	enginesList = append(enginesList, engines.NewSchemaDiffEngine(previewDb))
 
-	enginesList = append(enginesList, engines.NewSizeEngine(previewDb, prodStats))
+	enginesList = append(enginesList, engines.NewSizeEngine(previewDb, prodStats, warningStore))
 
-	enginesList = append(enginesList, engines.NewRewriteEngine(previewDb, prodStats))
+	enginesList = append(enginesList, engines.NewRewriteEngine(previewDb, prodStats, warningStore))
 
 	return enginesList, nil
 }
@@ -110,12 +110,4 @@ func (h *MetricsHandler) GetOutput() (*output.OutputDatabaseMetrics, error) {
 		}
 	}
 	return h.output, nil
-}
-
-func (h *MetricsHandler) GetWarnings() []warning.Warning {
-	warnings := make([]warning.Warning, 0)
-	for _, engine := range h.engines {
-		warnings = append(warnings, engine.GetWarnings()...)
-	}
-	return warnings
 }

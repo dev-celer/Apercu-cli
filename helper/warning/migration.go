@@ -1,5 +1,7 @@
 package warning
 
+import "encoding/json"
+
 const (
 	CodeMigrationTableNotFound Code = "NO_MIGRATION_TABLE"
 )
@@ -22,10 +24,12 @@ func (w *MigrationTableNotFound) GetCode() Code {
 	return CodeMigrationTableNotFound
 }
 
+func (w *MigrationTableNotFound) GetFullCode() string { return string(w.GetCode()) }
+
 func (w *MigrationTableNotFound) GetIsIdempotent() bool {
 	return true
 }
 
-func (w *MigrationTableNotFound) GetKeys() []string {
-	return nil
+func (w *MigrationTableNotFound) GetStateValues() (json.RawMessage, error) {
+	return json.RawMessage{}, nil
 }

@@ -1,6 +1,9 @@
 package warning
 
-import "fmt"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 const (
 	CodeStateFileFailedToRead Code = "STATE_FILE_OPEN_ERR"
@@ -26,12 +29,21 @@ func (w *StateFileWarning) GetCode() Code {
 	return CodeStateFileFailedToRead
 }
 
+func (w *StateFileWarning) GetFullCode() string {
+	return fmt.Sprintf("%s.%s", w.GetCode(), EscapeKey(w.path))
+}
+
 func (w *StateFileWarning) GetIsIdempotent() bool {
 	return true
 }
 
-func (w *StateFileWarning) GetKeys() []string {
-	return []string{w.path}
+type StateFileWarningState struct {
+	Path string `json:"path"`
+}
+
+func (w *StateFileWarning) GetStateValues() (json.RawMessage, error) {
+	v := StateFileWarningState{Path: w.path}
+	return json.Marshal(v)
 }
 
 func NewStateFileWarning(filePath string) *StateFileWarning {

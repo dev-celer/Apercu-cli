@@ -1,6 +1,7 @@
 package warning
 
 import (
+	"encoding/json"
 	"fmt"
 )
 
@@ -57,12 +58,25 @@ func (w *ExplainQueryFile) GetCode() Code {
 	return w.code
 }
 
+func (w *ExplainQueryFile) GetFullCode() string {
+	return fmt.Sprintf("%s.%s", w.code, EscapeKey(w.path))
+}
+
 func (w *ExplainQueryFile) GetIsIdempotent() bool {
 	return true
 }
 
-func (w *ExplainQueryFile) GetKeys() []string {
-	return []string{w.path}
+type ExplainQueryStateValues struct {
+	Path string `json:"path"`
+	Code Code   `json:"code"`
+}
+
+func (w *ExplainQueryFile) GetStateValues() (json.RawMessage, error) {
+	v := ExplainQueryStateValues{
+		Path: w.path,
+		Code: w.code,
+	}
+	return json.Marshal(v)
 }
 
 type ExplainQueryProdFetch struct {
@@ -96,7 +110,10 @@ func (w *ExplainQueryProdFetch) GetText() string {
 func (w *ExplainQueryProdFetch) GetTextLong() string {
 	switch w.code {
 	case CodeExplainQueryProdFetchFailed:
-		return fmt.Sprintf("Failed to fetch queries from prod database: %s", w.detail)
+		if len(w.detail) > 0 {
+			return fmt.Sprintf("Failed to fetch queries from prod database: %s", w.detail)
+		}
+		return "Failed to fetch queries from prod database"
 	}
 	return w.GetText()
 }
@@ -109,65 +126,116 @@ func (w *ExplainQueryProdFetch) GetCode() Code {
 	return w.code
 }
 
+func (w *ExplainQueryProdFetch) GetFullCode() string {
+	return string(w.code)
+}
+
 func (w *ExplainQueryProdFetch) GetIsIdempotent() bool {
 	return true
 }
 
-func (w *ExplainQueryProdFetch) GetKeys() []string {
-	return nil
+func (w *ExplainQueryProdFetch) GetStateValues() (json.RawMessage, error) {
+	return json.RawMessage{}, nil
 }
 
-type ExplainPlanRegression struct {
-	short string
-	long  string
+type ExplainPlanOrderingRegression struct {
 	level Level
-	code  Code
 	key   string
 }
 
-func NewExplainPlanScanRegressionWarning(level Level, rel, before, after string) *ExplainPlanRegression {
-	return &ExplainPlanRegression{
+func NewExplainPlanOrderingRegressionWarning(level Level, key string) *ExplainPlanOrderingRegression {
+	return &ExplainPlanOrderingRegression{
 		level: level,
-		code:  CodeExplainQueryPlanScanRegression,
-		short: fmt.Sprintf("Plan scan regression on %s: %s -> %s", rel, before, after),
-		long:  fmt.Sprintf("Query plan regression on relation %s: access method changed from %s to %s after the migration. This usually means an index the query relied on is no longer usable.", rel, before, after),
-		key:   rel,
-	}
-}
-
-func NewExplainPlanOrderingRegressionWarning(level Level, key string) *ExplainPlanRegression {
-	return &ExplainPlanRegression{
-		level: level,
-		code:  CodeExplainQueryPlanOrderingRegression,
-		short: fmt.Sprintf("Plan ordering regression: new sort on %s", key),
-		long:  fmt.Sprintf("Query plan regression: the post-migration plan introduces a new sort on %s that was not present before, suggesting an index that previously provided ordering was dropped.", key),
 		key:   key,
 	}
 }
 
-func (w *ExplainPlanRegression) GetText() string {
-	return w.short
+func (w *ExplainPlanOrderingRegression) GetText() string {
+	return fmt.Sprintf("Plan ordering regression: new sort on %s", w.key)
 }
 
-func (w *ExplainPlanRegression) GetTextLong() string {
-	if w.long == "" {
-		return w.short
-	}
-	return w.long
+func (w *ExplainPlanOrderingRegression) GetTextLong() string {
+	return fmt.Sprintf("Query plan regression: the post-migration plan introduces a new sort on %s that was not present before, suggesting an index that previously provided ordering was dropped.", w.key)
 }
 
-func (w *ExplainPlanRegression) GetLevel() Level {
+func (w *ExplainPlanOrderingRegression) GetLevel() Level {
 	return w.level
 }
 
-func (w *ExplainPlanRegression) GetCode() Code {
-	return w.code
+func (w *ExplainPlanOrderingRegression) GetCode() Code {
+	return CodeExplainQueryPlanOrderingRegression
 }
 
-func (w *ExplainPlanRegression) GetIsIdempotent() bool {
+func (w *ExplainPlanOrderingRegression) GetFullCode() string {
+	return fmt.Sprintf("%s.%s", w.GetCode(), EscapeKey(w.key))
+}
+
+func (w *ExplainPlanOrderingRegression) GetIsIdempotent() bool {
 	return true
 }
 
-func (w *ExplainPlanRegression) GetKeys() []string {
-	return []string{w.key}
+type ExplainPlanOrderingRegressionState struct {
+	Level Level `json:"level"`
+}
+
+func (w *ExplainPlanOrderingRegression) GetStateValues() (json.RawMessage, error) {
+	v := ExplainPlanOrderingRegressionState{
+		Level: w.level,
+	}
+	return json.Marshal(v)
+}
+
+type ExplainPlanScanRegression struct {
+	level  Level
+	key    string
+	before string
+	after  string
+}
+
+func NewExplainPlanScanRegressionWarning(level Level, rel, before, after string) *ExplainPlanScanRegression {
+	return &ExplainPlanScanRegression{
+		level:  level,
+		key:    rel,
+		before: before,
+		after:  after,
+	}
+}
+
+func (w *ExplainPlanScanRegression) GetText() string {
+	return fmt.Sprintf("Plan scan regression on %s: %s -> %s", w.key, w.before, w.after)
+}
+
+func (w *ExplainPlanScanRegression) GetTextLong() string {
+	return fmt.Sprintf("Query plan regression on relation %s: access method changed from %s to %s after the migration. This usually means an index the query relied on is no longer usable.", w.key, w.before, w.after)
+}
+
+func (w *ExplainPlanScanRegression) GetLevel() Level {
+	return w.level
+}
+
+func (w *ExplainPlanScanRegression) GetCode() Code {
+	return CodeExplainQueryPlanScanRegression
+}
+
+func (w *ExplainPlanScanRegression) GetFullCode() string {
+	return fmt.Sprintf("%s.%s", w.GetCode(), EscapeKey(w.key))
+}
+
+func (w *ExplainPlanScanRegression) GetIsIdempotent() bool {
+	return true
+}
+
+type ExplainPlanScanRegressionState struct {
+	Level  Level  `json:"level"`
+	Before string `json:"before"`
+	After  string `json:"after"`
+}
+
+func (w *ExplainPlanScanRegression) GetStateValues() (json.RawMessage, error) {
+	v := ExplainPlanScanRegressionState{
+		Level:  w.level,
+		Before: w.before,
+		After:  w.after,
+	}
+	return json.Marshal(v)
 }

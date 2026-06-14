@@ -42,7 +42,7 @@ type ExplainQueryEngine struct {
 	fetchedQueries []string
 	prodStats      metricshelper.DatabaseMetrics
 	output         []output.OutputDatabaseExplainQuery
-	warnings       []warning.Warning
+	warningStore   *warning.WarningStore
 }
 
 func extractQueriesFromFile(path string) ([]string, error) {
@@ -67,9 +67,8 @@ func extractQueriesFromFile(path string) ([]string, error) {
 	return result, nil
 }
 
-func extractAllQueriesToExplain(paths []string) (map[string][]string, []warning.Warning, error) {
+func extractAllQueriesToExplain(paths []string, store *warning.WarningStore) (map[string][]string, error) {
 	outputData := make(map[string][]string)
-	warnings := make([]warning.Warning, 0)
 
 	for _, path := range paths {
 		info, err := os.Stat(path)
@@ -81,10 +80,7 @@ func extractAllQueriesToExplain(paths []string) (map[string][]string, []warning.
 				code = warning.CodeExplainQueryFailedToReadFile
 			}
 			w := warning.NewExplainQueryFileWarning(code, path)
-			if w != nil {
-				warning.PrintWarning(w)
-				warnings = append(warnings, w)
-			}
+			store.AddWarningAndPrint(w)
 			continue
 		}
 
@@ -100,18 +96,12 @@ func extractAllQueriesToExplain(paths []string) (map[string][]string, []warning.
 					queries, err := extractQueriesFromFile(p)
 					if err != nil {
 						w := warning.NewExplainQueryFileWarning(warning.CodeExplainQueryFailedToReadFile, p)
-						if w != nil {
-							warning.PrintWarning(w)
-							warnings = append(warnings, w)
-						}
+						store.AddWarningAndPrint(w)
 						return nil
 					}
 					if len(queries) == 0 {
 						w := warning.NewExplainQueryFileWarning(warning.CodeExplainQueryNoQueries, p)
-						if w != nil {
-							warning.PrintWarning(w)
-							warnings = append(warnings, w)
-						}
+						store.AddWarningAndPrint(w)
 						return nil
 					}
 
@@ -121,10 +111,7 @@ func extractAllQueriesToExplain(paths []string) (map[string][]string, []warning.
 				return nil
 			}); err != nil {
 				w := warning.NewExplainQueryFileWarning(warning.CodeExplainQueryFailedToReadFile, path)
-				if w != nil {
-					warning.PrintWarning(w)
-					warnings = append(warnings, w)
-				}
+				store.AddWarningAndPrint(w)
 				continue
 			}
 		} else {
@@ -132,18 +119,12 @@ func extractAllQueriesToExplain(paths []string) (map[string][]string, []warning.
 			queries, err := extractQueriesFromFile(path)
 			if err != nil {
 				w := warning.NewExplainQueryFileWarning(warning.CodeExplainQueryFailedToReadFile, path)
-				if w != nil {
-					warning.PrintWarning(w)
-					warnings = append(warnings, w)
-				}
+				store.AddWarningAndPrint(w)
 				continue
 			}
 			if len(queries) == 0 {
 				w := warning.NewExplainQueryFileWarning(warning.CodeExplainQueryNoQueries, path)
-				if w != nil {
-					warning.PrintWarning(w)
-					warnings = append(warnings, w)
-				}
+				store.AddWarningAndPrint(w)
 				continue
 			}
 
@@ -151,33 +132,25 @@ func extractAllQueriesToExplain(paths []string) (map[string][]string, []warning.
 		}
 	}
 
-	return outputData, warnings, nil
+	return outputData, nil
 }
 
-func fetchQueriesFromProdDb(db *sql.DB) ([]string, []warning.Warning, error) {
+func fetchQueriesFromProdDb(db *sql.DB, store *warning.WarningStore) ([]string, error) {
 	if db == nil {
-		return nil, nil, nil
+		return nil, nil
 	}
-
-	warnings := make([]warning.Warning, 0)
 
 	var installed bool
 	err := db.QueryRow("/* apercu */ SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements')").Scan(&installed)
 	if err != nil {
 		w := warning.NewExplainQueryProdFetchWarning(warning.CodeExplainQueryProdFetchFailed, err.Error())
-		warning.PrintWarning(w)
-		if w != nil {
-			warnings = append(warnings, w)
-		}
-		return nil, warnings, nil
+		store.AddWarningAndPrint(w)
+		return nil, nil
 	}
 	if !installed {
 		w := warning.NewExplainQueryProdFetchWarning(warning.CodeExplainQueryStatStatementsMissing, "")
-		warning.PrintWarning(w)
-		if w != nil {
-			warnings = append(warnings, w)
-		}
-		return nil, warnings, nil
+		store.AddWarningAndPrint(w)
+		return nil, nil
 	}
 
 	slog.Debug("Fetching queries from prod pg_stat_statements", "min_calls", prodFetchMinCalls, "limit", prodFetchLimit)
@@ -185,11 +158,8 @@ func fetchQueriesFromProdDb(db *sql.DB) ([]string, []warning.Warning, error) {
 	rows, err := db.Query(fetchProdQueriesSQL, prodFetchMinCalls, prodFetchLimit)
 	if err != nil {
 		w := warning.NewExplainQueryProdFetchWarning(warning.CodeExplainQueryProdFetchFailed, err.Error())
-		warning.PrintWarning(w)
-		if w != nil {
-			warnings = append(warnings, w)
-		}
-		return nil, warnings, nil
+		store.AddWarningAndPrint(w)
+		return nil, nil
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -198,51 +168,43 @@ func fetchQueriesFromProdDb(db *sql.DB) ([]string, []warning.Warning, error) {
 		var q string
 		if err := rows.Scan(&q); err != nil {
 			w := warning.NewExplainQueryProdFetchWarning(warning.CodeExplainQueryProdFetchFailed, err.Error())
-			warning.PrintWarning(w)
-			if w != nil {
-				warnings = append(warnings, w)
-			}
-			return nil, warnings, nil
+			store.AddWarningAndPrint(w)
+			return nil, nil
 		}
 		queries = append(queries, q)
 	}
 	if err := rows.Err(); err != nil {
 		w := warning.NewExplainQueryProdFetchWarning(warning.CodeExplainQueryProdFetchFailed, err.Error())
-		warning.PrintWarning(w)
-		if w != nil {
-			warnings = append(warnings, w)
-		}
-		return nil, warnings, nil
+		store.AddWarningAndPrint(w)
+		return nil, nil
 	}
 
 	slog.Debug("Fetched queries from prod pg_stat_statements", "count", len(queries))
 
-	return queries, warnings, nil
+	return queries, nil
 }
 
-func NewExplainQueryEngine(previewDb *sql.DB, dbConfig *config.Database, prodDb *sql.DB, prodStats metricshelper.DatabaseMetrics) (*ExplainQueryEngine, error) {
-	queries, w1, err := extractAllQueriesToExplain(dbConfig.ExplainQuery.Queries)
+func NewExplainQueryEngine(previewDb *sql.DB, dbConfig *config.Database, prodDb *sql.DB, prodStats metricshelper.DatabaseMetrics, store *warning.WarningStore) (*ExplainQueryEngine, error) {
+	queries, err := extractAllQueriesToExplain(dbConfig.ExplainQuery.Queries, store)
 	if err != nil {
 		return nil, err
 	}
 
 	var fetchedQueries []string
-	var w2 []warning.Warning
 	if !dbConfig.ExplainQuery.DisableAutoQueriesFetch {
-		fetchedQueries, w2, err = fetchQueriesFromProdDb(prodDb)
+		fetchedQueries, err = fetchQueriesFromProdDb(prodDb, store)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	warnings := slices.Concat(w1, w2)
 	return &ExplainQueryEngine{
 		db:             previewDb,
 		queries:        queries,
 		fetchedQueries: fetchedQueries,
 		prodStats:      prodStats,
 		output:         make([]output.OutputDatabaseExplainQuery, 0),
-		warnings:       warnings,
+		warningStore:   store,
 	}, nil
 }
 
@@ -363,12 +325,7 @@ func (e *ExplainQueryEngine) analyzeAndAttach(idx int) {
 	regressions := analyzePlanRegression(out.PreMigrationRun.ExplainedQuery, out.PostMigrationRun.ExplainedQuery, e.prodStats)
 	for _, r := range regressions {
 		w := r.toWarning()
-		if w == nil {
-			continue
-		}
-		out.Warnings = append(out.Warnings, w)
-		warning.PrintWarning(w)
-		e.warnings = append(e.warnings, w)
+		e.warningStore.AddWarning(w)
 	}
 }
 
@@ -380,10 +337,6 @@ func (e *ExplainQueryEngine) StoreMetricsToOutput(metrics *output.OutputDatabase
 	}
 
 	return nil
-}
-
-func (e *ExplainQueryEngine) GetWarnings() []warning.Warning {
-	return e.warnings
 }
 
 type QueryRunResult struct {

@@ -21,10 +21,10 @@ type NeonHandler struct {
 	branch        string
 	parentBranch  *string
 	branchingType *config.DatabaseNeonBranchingType
-	warnings      []warning.Warning
+	warningStore  *warning.WarningStore
 }
 
-func NewNeonHandler(projectId string, apiKey string, parentBranch *string, branch string, branchingType *config.DatabaseNeonBranchingType) (*NeonHandler, error) {
+func NewNeonHandler(projectId string, apiKey string, parentBranch *string, branch string, branchingType *config.DatabaseNeonBranchingType, warningStore *warning.WarningStore) (*NeonHandler, error) {
 	client, err := neon.NewClient(neon.Config{Key: apiKey})
 	if err != nil {
 		return nil, errors.New(fmt.Sprintf("Failed to connect to Neon API: %v", err))
@@ -36,8 +36,8 @@ func NewNeonHandler(projectId string, apiKey string, parentBranch *string, branc
 		apiKey:        apiKey,
 		parentBranch:  parentBranch,
 		branch:        branch,
-		warnings:      make([]warning.Warning, 0),
 		branchingType: branchingType,
+		warningStore:  warningStore,
 	}, nil
 }
 
@@ -128,10 +128,6 @@ func (h *NeonHandler) waitForOperationToComplete(operationId string) error {
 			}
 		}
 	}
-}
-
-func (h *NeonHandler) GetWarnings() []warning.Warning {
-	return h.warnings
 }
 
 func (h *NeonHandler) Exists() (bool, error) {

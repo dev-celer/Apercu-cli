@@ -2,7 +2,6 @@ package engines
 
 import (
 	metricshelper "apercu-cli/helper/metrics"
-	"apercu-cli/helper/warning"
 	"apercu-cli/output"
 	"database/sql"
 	"errors"
@@ -47,10 +46,6 @@ func (e *SchemaDiffEngine) CollectPostMigrationMetrics() error {
 func (e *SchemaDiffEngine) StoreMetricsToOutput(metrics *output.OutputDatabaseMetrics) error {
 	diff := getSchemasDiff(e.beforeSchema, e.afterSchema)
 	metrics.SchemaDiff = diff
-	return nil
-}
-
-func (e *SchemaDiffEngine) GetWarnings() []warning.Warning {
 	return nil
 }
 

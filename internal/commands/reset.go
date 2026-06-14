@@ -48,10 +48,7 @@ func reset(cmd *cobra.Command, args []string) error {
 	var dbState config.DatabaseState
 
 	// Reset the database
-	prodConn, dbHandler, w, err := database.GetPreviewDatabaseHandler(dbConfig)
-	if w != nil {
-		w.UpdateGlobalEnvVarsWarning(dbOutput.Warnings)
-	}
+	prodConn, dbHandler, err := database.GetPreviewDatabaseHandler(dbConfig, dbOutput.Warnings)
 	if err != nil {
 		dbOutput.Errors = append(dbOutput.Errors, err.Error())
 		return ErrorAndExit(err, dbOutput, dbName)
@@ -69,20 +66,16 @@ func reset(cmd *cobra.Command, args []string) error {
 		dbOutput.Errors = append(dbOutput.Errors, err.Error())
 		return ErrorAndExit(err, dbOutput, dbName)
 	}
-	dbOutput.Warnings = dbHandler.GetWarnings()
 
 	// Initialize metrics handler
-	metricHandler, err := metrics.NewMetricsHandler(prodConn.Url, previewConn.Url, &dbConfig, &configFile)
+	metricHandler, err := metrics.NewMetricsHandler(prodConn.Url, previewConn.Url, &dbConfig, &configFile, dbOutput.Warnings)
 	if err != nil {
 		return ErrorAndExit(err, dbOutput, dbName)
 	}
 
 	// Apply the migrations
 	ctx := cmd.Context()
-	migrationHandler, w, err := migration.GetMigrationHandler(dbConfig, &previewConn)
-	if w != nil {
-		w.UpdateGlobalEnvVarsWarning(dbOutput.Warnings)
-	}
+	migrationHandler, err := migration.GetMigrationHandler(dbConfig, &previewConn, dbOutput.Warnings)
 	if err != nil {
 		return ErrorAndExit(err, dbOutput, dbName)
 	}
@@ -94,13 +87,10 @@ func reset(cmd *cobra.Command, args []string) error {
 	}
 	if migrationHandler != nil {
 		dbOutput.Migration = migrationHandler.GetOutput()
-		dbOutput.Warnings = append(dbOutput.Warnings, migrationHandler.GetWarnings()...)
 	}
 
-	dbOutput.Warnings = append(dbOutput.Warnings, metricHandler.GetWarnings()...)
-
 	// Apply the seeding
-	seedHandler, err := seeding.GetSeedingHandler(dbConfig, &dbState, previewConn)
+	seedHandler, err := seeding.GetSeedingHandler(dbConfig, &dbState, previewConn, dbOutput.Warnings)
 	if err != nil {
 		dbOutput.Seeding = output.NewSeedingOutput()
 		dbOutput.Seeding.Errors = append(dbOutput.Seeding.Errors, err.Error())

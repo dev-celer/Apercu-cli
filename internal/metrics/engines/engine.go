@@ -1,7 +1,6 @@
 package engines
 
 import (
-	"apercu-cli/helper/warning"
 	"apercu-cli/output"
 )
 
@@ -10,5 +9,4 @@ type MetricEngine interface {
 	SendPgProxyLogs(string)
 	CollectPostMigrationMetrics() error
 	StoreMetricsToOutput(*output.OutputDatabaseMetrics) error
-	GetWarnings() []warning.Warning
 }

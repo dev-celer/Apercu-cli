@@ -15,20 +15,19 @@ import (
 type HandlerInterface interface {
 	Apply(ctx context.Context) error
 	GetOutput() *output.OutputDatabaseMigration
-	GetWarnings() []warning.Warning
 }
 
-// GetMigrationHandler return an migration.HandlerInterface Object, a Missing EnvVars Warning (optionally), or an error
-func GetMigrationHandler(dbConfig config.Database, connection *helper.ConnectionFields) (HandlerInterface, *warning.MissingEnvVarsWarning, error) {
+// GetMigrationHandler return an migration.HandlerInterface Object or an error
+func GetMigrationHandler(dbConfig config.Database, connection *helper.ConnectionFields, store *warning.WarningStore) (HandlerInterface, error) {
 	if dbConfig.Migration == nil {
 		slog.Debug("No migration specified")
-		return nil, nil, nil
+		return nil, nil
 	}
 
 	proxyHost, proxyPort := "apercu-pgproxy", "5432"
 	proxyUrl, err := database_url.RewriteDatabaseUrlHostAndPort(connection.Url, proxyHost, proxyPort)
 	if err != nil {
-		return nil, nil, fmt.Errorf("could not rewrite database url: %w", err)
+		return nil, fmt.Errorf("could not rewrite database url: %w", err)
 	}
 	internalEnv := map[string]string{
 		"PREVIEW_DATABASE_URL": proxyUrl,
@@ -62,8 +61,9 @@ func GetMigrationHandler(dbConfig config.Database, connection *helper.Connection
 
 	image, m3 := config.ReplaceVariables(dbConfig.Migration.Image, internalEnv)
 	localDir, m4 := config.ReplaceVariables(dbConfig.Migration.LocalDir, internalEnv)
-	w := warning.NewMissingEnvVarsWarning(slices.Concat(m1, m2, m3, m4)...)
-	warning.PrintWarning(w)
+	for _, w := range warning.NewMissingEnvVarsWarnings(slices.Concat(m1, m2, m3, m4)...) {
+		store.AddWarningAndPrint(&w)
+	}
 
 	return NewDockerHandler(
 		image,
@@ -72,5 +72,6 @@ func GetMigrationHandler(dbConfig config.Database, connection *helper.Connection
 		workDir,
 		localDir,
 		connection,
-	), w, nil
+		store,
+	), nil
 }

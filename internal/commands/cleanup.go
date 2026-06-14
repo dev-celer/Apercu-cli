@@ -2,6 +2,7 @@ package commands
 
 import (
 	"apercu-cli/config"
+	"apercu-cli/helper/warning"
 	"apercu-cli/internal/database"
 
 	"github.com/spf13/cobra"
@@ -30,7 +31,7 @@ func cleanup(cmd *cobra.Command, args []string) error {
 		break
 	}
 
-	_, handler, _, err := database.GetPreviewDatabaseHandler(dbConfig)
+	_, handler, err := database.GetPreviewDatabaseHandler(dbConfig, warning.NewWarningStore())
 	if err != nil {
 		return err
 	}

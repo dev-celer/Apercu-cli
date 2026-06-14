@@ -13,16 +13,16 @@ type RewriteEngine struct {
 	db                *sql.DB
 	preMigrationNode  map[databasehelper.FullTableName]uint32
 	postMigrationNode map[databasehelper.FullTableName]uint32
-	warnings          []warning.Warning
+	warningStore      *warning.WarningStore
 	prodMetrics       metricshelper.DatabaseMetrics
 }
 
-func NewRewriteEngine(db *sql.DB, prodMetrics metricshelper.DatabaseMetrics) *RewriteEngine {
+func NewRewriteEngine(db *sql.DB, prodMetrics metricshelper.DatabaseMetrics, warningStore *warning.WarningStore) *RewriteEngine {
 	return &RewriteEngine{
 		db:                db,
 		preMigrationNode:  make(map[databasehelper.FullTableName]uint32),
 		postMigrationNode: make(map[databasehelper.FullTableName]uint32),
-		warnings:          make([]warning.Warning, 0),
+		warningStore:      warningStore,
 		prodMetrics:       prodMetrics,
 	}
 }
@@ -60,18 +60,14 @@ func (e *RewriteEngine) StoreMetricsToOutput(metrics *output.OutputDatabaseMetri
 
 				// Generate warning
 				if ok {
-					e.warnings = append(e.warnings, warning.NewRewriteWarning(table, &prod))
+					e.warningStore.AddWarning(warning.NewRewriteWarning(table, &prod))
 				} else {
-					e.warnings = append(e.warnings, warning.NewRewriteWarning(table, nil))
+					e.warningStore.AddWarning(warning.NewRewriteWarning(table, nil))
 				}
 			}
 		}
 	}
 	return nil
-}
-
-func (e *RewriteEngine) GetWarnings() []warning.Warning {
-	return e.warnings
 }
 
 func (e *RewriteEngine) getRelNode() (map[databasehelper.FullTableName]uint32, error) {

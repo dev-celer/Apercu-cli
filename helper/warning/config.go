@@ -1,9 +1,9 @@
 package warning
 
 import (
+	"encoding/json"
 	"fmt"
 	"slices"
-	"strings"
 )
 
 const (
@@ -11,14 +11,11 @@ const (
 )
 
 type MissingEnvVarsWarning struct {
-	variables []string
+	variable string
 }
 
 func (w *MissingEnvVarsWarning) GetText() string {
-	if len(w.variables) > 1 {
-		return fmt.Sprintf("Missing environment variables used in config (%s)", strings.Join(w.variables, ", "))
-	}
-	return fmt.Sprintf("Missing environment variable used in config (%s)", strings.Join(w.variables, ", "))
+	return fmt.Sprintf("Missing environment variable used in config (%s)", w.variable)
 }
 
 func (w *MissingEnvVarsWarning) GetTextLong() string {
@@ -33,15 +30,19 @@ func (w *MissingEnvVarsWarning) GetCode() Code {
 	return CodeMissingEnvironmentVariable
 }
 
+func (w *MissingEnvVarsWarning) GetFullCode() string {
+	return fmt.Sprintf("%s.%s", w.GetCode(), EscapeKey(w.variable))
+}
+
 func (w *MissingEnvVarsWarning) GetIsIdempotent() bool {
 	return true
 }
 
-func (w *MissingEnvVarsWarning) GetKeys() []string {
-	return w.variables
+func (w *MissingEnvVarsWarning) GetStateValues() (json.RawMessage, error) {
+	return json.RawMessage{}, nil
 }
 
-func NewMissingEnvVarsWarning(variables ...string) *MissingEnvVarsWarning {
+func NewMissingEnvVarsWarnings(variables ...string) []MissingEnvVarsWarning {
 	if len(variables) == 0 {
 		return nil
 	}
@@ -54,35 +55,9 @@ func NewMissingEnvVarsWarning(variables ...string) *MissingEnvVarsWarning {
 		}
 	}
 
-	return &MissingEnvVarsWarning{
-		variables: vars,
+	warnings := make([]MissingEnvVarsWarning, len(vars))
+	for _, v := range vars {
+		warnings = append(warnings, MissingEnvVarsWarning{variable: v})
 	}
-}
-
-func (w *MissingEnvVarsWarning) UpdateGlobalEnvVarsWarning(globalWarnings []Warning) {
-	for _, i := range globalWarnings {
-		if gw, ok := i.(*MissingEnvVarsWarning); ok {
-			// Filter out variables already inside the global warning
-			for _, j := range gw.variables {
-				if slices.Index(w.variables, j) == -1 {
-					gw.variables = append(gw.variables, j)
-				}
-			}
-			return
-		}
-	}
-
-	// If not found in global variable, create it
-	globalWarnings = append(globalWarnings, w)
-}
-
-func MergeEnvVarsWarning(warnings ...*MissingEnvVarsWarning) *MissingEnvVarsWarning {
-	envVars := make([]string, 0)
-	for _, w := range warnings {
-		if w == nil {
-			continue
-		}
-		envVars = append(envVars, w.variables...)
-	}
-	return NewMissingEnvVarsWarning(envVars...)
+	return warnings
 }

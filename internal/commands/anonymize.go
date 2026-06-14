@@ -2,6 +2,7 @@ package commands
 
 import (
 	"apercu-cli/config"
+	"apercu-cli/helper/warning"
 	"apercu-cli/internal/anonymization"
 	"apercu-cli/internal/database"
 	"fmt"
@@ -35,7 +36,7 @@ func anonymize(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get the databases handlers
-	sourceConn, storageHandler, _, err := database.GetAnonymizationDatabaseHandlers(dbConfig)
+	sourceConn, storageHandler, err := database.GetAnonymizationDatabaseHandlers(dbConfig, warning.NewWarningStore())
 	if err != nil {
 		return err
 	}

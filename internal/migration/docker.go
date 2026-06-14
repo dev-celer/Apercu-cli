@@ -26,26 +26,26 @@ import (
 )
 
 type DockerHandler struct {
-	image       string
-	command     []string
-	env         map[string]string
-	workDir     string
-	localFolder string
-	warnings    []warning.Warning
-	database    *helper.ConnectionFields
-	output      *output.OutputDatabaseMigration
+	image        string
+	command      []string
+	env          map[string]string
+	workDir      string
+	localFolder  string
+	warningStore *warning.WarningStore
+	database     *helper.ConnectionFields
+	output       *output.OutputDatabaseMigration
 }
 
-func NewDockerHandler(image string, command []string, env map[string]string, workDir string, localFolder string, database *helper.ConnectionFields) *DockerHandler {
+func NewDockerHandler(image string, command []string, env map[string]string, workDir string, localFolder string, database *helper.ConnectionFields, warningStore *warning.WarningStore) *DockerHandler {
 	return &DockerHandler{
-		image:       image,
-		command:     command,
-		env:         env,
-		workDir:     workDir,
-		localFolder: localFolder,
-		warnings:    make([]warning.Warning, 0),
-		database:    database,
-		output:      output.NewMigrationOutput(),
+		image:        image,
+		command:      command,
+		env:          env,
+		workDir:      workDir,
+		localFolder:  localFolder,
+		warningStore: warningStore,
+		database:     database,
+		output:       output.NewMigrationOutput(),
 	}
 }
 
@@ -286,9 +286,7 @@ func (h *DockerHandler) Apply(ctx context.Context) error {
 	finalCount, finalCountErr := h.getCount()
 	if finalCountErr != nil {
 		if errors.Is(finalCountErr, ErrMigrationTableNotFound) {
-			w := warning.MigrationTableNotFound{}
-			h.warnings = append(h.warnings, &w)
-			warning.PrintWarning(&w)
+			h.warningStore.AddWarningAndPrint(&warning.MigrationTableNotFound{})
 		} else {
 			return finalCountErr
 		}
@@ -305,5 +303,3 @@ func (h *DockerHandler) Apply(ctx context.Context) error {
 func (h *DockerHandler) GetOutput() *output.OutputDatabaseMigration {
 	return h.output
 }
-
-func (h *DockerHandler) GetWarnings() []warning.Warning { return h.warnings }

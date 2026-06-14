@@ -27,7 +27,7 @@ type DirectSeed struct {
 	seedFilesPath []string
 	seedFiles     []config.DatabaseSeed
 	output        *output.OutputDatabaseSeeding
-	warnings      []warning.Warning
+	warningStore  *warning.WarningStore
 }
 
 // Returns true if the content of the seed file matches the hash
@@ -36,10 +36,10 @@ func (h *DirectSeed) compareSeedContentFromHash(hash string, filePath string) (b
 	if err != nil {
 		w := warning.NewSeedingError(warning.CodeFailedToOpenSeedFile, filePath)
 		if w != nil {
-			h.warnings = append(h.warnings, w)
-			warning.PrintWarning(w)
+			h.warningStore.AddWarningAndPrint(w)
 			return false, errors.New(w.GetText())
 		}
+		return false, nil
 	}
 	defer f.Close()
 
@@ -47,8 +47,7 @@ func (h *DirectSeed) compareSeedContentFromHash(hash string, filePath string) (b
 	if _, err := io.Copy(hasher, f); err != nil {
 		w := warning.NewSeedingError(warning.CodeFailedToOpenSeedFile, filePath)
 		if w != nil {
-			h.warnings = append(h.warnings, w)
-			warning.PrintWarning(w)
+			h.warningStore.AddWarningAndPrint(w)
 			return false, errors.New(w.GetText())
 		}
 	}
@@ -57,10 +56,10 @@ func (h *DirectSeed) compareSeedContentFromHash(hash string, filePath string) (b
 	return contentHash == hash, nil
 }
 
-func (h *DirectSeed) shouldSeedBeApplied(filePath string, seedOn config.DatabaseSeedType, state []config.SeedState) (bool, error) {
+func (h *DirectSeed) shouldSeedBeApplied(filePath string, seedOn config.DatabaseSeedType, state []config.SeedState) bool {
 	if seedOn == config.DatabaseSeedTypeAlways {
 		slog.Debug("Seed on always, applying seed file", "file", filePath)
-		return true, nil
+		return true
 	}
 
 	seedIndex := slices.IndexFunc(state, func(seed config.SeedState) bool {
@@ -68,20 +67,20 @@ func (h *DirectSeed) shouldSeedBeApplied(filePath string, seedOn config.Database
 	})
 	if seedIndex == -1 {
 		slog.Debug("Seed file has not been applied yet, applying seed file", "file", filePath)
-		return true, nil
+		return true
 	}
 
 	slog.Debug("Seed file has already been applied, checking content", "file", filePath)
 	seedUnchanged, err := h.compareSeedContentFromHash(state[seedIndex].Hash, filePath)
 	if err != nil {
-		return false, err
+		return false
 	}
 
 	if !seedUnchanged && seedOn == config.DatabaseSeedTypeUpdate {
 		slog.Debug("Seed file has been updated, applying seed file", "file", filePath)
-		return true, nil
+		return true
 	}
-	return false, nil
+	return false
 }
 
 func (h *DirectSeed) getSeedFilesToApply() {
@@ -97,8 +96,7 @@ func (h *DirectSeed) getSeedFilesToApply() {
 				w = warning.NewSeedingError(warning.CodeFailedToOpenSeedFile, seedFile.Path)
 			}
 			if w != nil {
-				h.warnings = append(h.warnings, w)
-				warning.PrintWarning(w)
+				h.warningStore.AddWarningAndPrint(w)
 			}
 			continue
 		}
@@ -111,11 +109,7 @@ func (h *DirectSeed) getSeedFilesToApply() {
 				}
 				if !d.IsDir() && filepath.Ext(p) == ".sql" {
 					slog.Debug("Found sql file", "file", p)
-					needApply, err := h.shouldSeedBeApplied(p, seedFile.SeedOn, h.state.AppliedSeeds)
-					if err != nil {
-						return nil
-					}
-					if !needApply {
+					if !h.shouldSeedBeApplied(p, seedFile.SeedOn, h.state.AppliedSeeds) {
 						return nil
 					}
 
@@ -124,18 +118,13 @@ func (h *DirectSeed) getSeedFilesToApply() {
 				return nil
 			}); err != nil {
 				if w := warning.NewSeedingError(warning.CodeFailedToOpenSeedFile, seedFile.Path); w != nil {
-					h.warnings = append(h.warnings, w)
-					warning.PrintWarning(w)
+					h.warningStore.AddWarningAndPrint(w)
 					continue
 				}
 			}
 		} else {
 			slog.Debug("Path is a file", "file", seedFile.Path)
-			needApply, err := h.shouldSeedBeApplied(seedFile.Path, seedFile.SeedOn, h.state.AppliedSeeds)
-			if err != nil {
-				continue
-			}
-			if !needApply {
+			if !h.shouldSeedBeApplied(seedFile.Path, seedFile.SeedOn, h.state.AppliedSeeds) {
 				continue
 			}
 			h.seedFilesPath = append(h.seedFilesPath, seedFile.Path)
@@ -143,7 +132,7 @@ func (h *DirectSeed) getSeedFilesToApply() {
 	}
 }
 
-func NewDirectSeed(conn helper.ConnectionFields, seedFiles []config.DatabaseSeed, state *config.DatabaseState) (*DirectSeed, error) {
+func NewDirectSeed(conn helper.ConnectionFields, seedFiles []config.DatabaseSeed, state *config.DatabaseState, warningStore *warning.WarningStore) (*DirectSeed, error) {
 	outputData := output.NewSeedingOutput()
 	db, err := sql.Open("postgres", conn.Url)
 	if err != nil {
@@ -151,7 +140,7 @@ func NewDirectSeed(conn helper.ConnectionFields, seedFiles []config.DatabaseSeed
 		return nil, errors.New(fmt.Sprintf("Failed to connect to database: %v", err))
 	}
 
-	return &DirectSeed{db: db, seedFiles: seedFiles, state: state, output: outputData, warnings: make([]warning.Warning, 0)}, nil
+	return &DirectSeed{db: db, seedFiles: seedFiles, state: state, output: outputData, warningStore: warningStore}, nil
 }
 
 func (h *DirectSeed) Close() error {
@@ -221,5 +210,3 @@ func (h *DirectSeed) Apply() {
 func (h *DirectSeed) GetOutput() *output.OutputDatabaseSeeding {
 	return h.output
 }
-
-func (h *DirectSeed) GetWarnings() []warning.Warning { return h.warnings }

@@ -4,6 +4,7 @@ import (
 	"apercu-cli/helper"
 	"apercu-cli/helper/format"
 	metricshelper "apercu-cli/helper/metrics"
+	"encoding/json"
 	"fmt"
 )
 
@@ -58,10 +59,23 @@ func (w *TableRewriteWarning) GetCode() Code {
 	return CodeTableRewritten
 }
 
+func (w *TableRewriteWarning) GetFullCode() string {
+	return fmt.Sprintf("%s.%s", w.GetCode(), EscapeKey(w.table.String()))
+}
+
 func (w *TableRewriteWarning) GetIsIdempotent() bool {
 	return false
 }
 
-func (w *TableRewriteWarning) GetKeys() []string {
-	return []string{w.table.String()}
+type TableRewriteWarningState struct {
+	Table       string                      `json:"table"`
+	ProdMetrics *metricshelper.TableMetrics `json:"prod_metrics,omitempty"`
+}
+
+func (w *TableRewriteWarning) GetStateValues() (json.RawMessage, error) {
+	v := TableRewriteWarningState{
+		Table:       w.table.String(),
+		ProdMetrics: w.prodMetrics,
+	}
+	return json.Marshal(v)
 }

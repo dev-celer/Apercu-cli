@@ -1,6 +1,9 @@
 package warning
 
-import "fmt"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 const (
 	CodeFailedToOpenSeedFile Code = "SEED_FILE_OPEN_ERR"
@@ -33,12 +36,21 @@ func (w *SeedingError) GetCode() Code {
 	return w.code
 }
 
+func (w *SeedingError) GetFullCode() string {
+	return fmt.Sprintf("%s.%s", w.GetCode(), EscapeKey(w.path))
+}
+
 func (w *SeedingError) GetIsIdempotent() bool {
 	return true
 }
 
-func (w *SeedingError) GetKeys() []string {
-	return []string{w.path}
+type SeedingErrorState struct {
+	Path string `json:"path"`
+}
+
+func (w *SeedingError) GetStateValues() (json.RawMessage, error) {
+	v := SeedingErrorState{Path: w.path}
+	return json.Marshal(v)
 }
 
 func NewSeedingError(code Code, filepath string) *SeedingError {

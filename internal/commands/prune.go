@@ -2,6 +2,7 @@ package commands
 
 import (
 	"apercu-cli/config"
+	"apercu-cli/helper/warning"
 	"apercu-cli/internal/database"
 	"apercu-cli/internal/repository"
 	"fmt"
@@ -61,7 +62,7 @@ func prune(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get database handler
-	databaseHandler, _, err := database.GetPruningDatabaseHandler(dbConfig)
+	databaseHandler, err := database.GetPruningDatabaseHandler(dbConfig, warning.NewWarningStore())
 	if err != nil {
 		return err
 	}

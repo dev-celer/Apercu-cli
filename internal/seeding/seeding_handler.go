@@ -12,10 +12,9 @@ type HandlerInterface interface {
 	Close() error
 	Apply()
 	GetOutput() *output.OutputDatabaseSeeding
-	GetWarnings() []warning.Warning
 }
 
-func GetSeedingHandler(dbConfig config.Database, state *config.DatabaseState, connection helper.ConnectionFields) (HandlerInterface, error) {
+func GetSeedingHandler(dbConfig config.Database, state *config.DatabaseState, connection helper.ConnectionFields, warningStore *warning.WarningStore) (HandlerInterface, error) {
 	if len(dbConfig.Seed) == 0 {
 		slog.Debug("No seed specified")
 		return nil, nil
@@ -25,5 +24,6 @@ func GetSeedingHandler(dbConfig config.Database, state *config.DatabaseState, co
 		connection,
 		dbConfig.Seed,
 		state,
+		warningStore,
 	)
 }

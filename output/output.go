@@ -18,13 +18,13 @@ type PreviewOutput struct {
 type PreviewOutputDatabase struct {
 	Migration *OutputDatabaseMigration `yaml:"migration,omitempty" json:"migration,omitempty"`
 	Seeding   *OutputDatabaseSeeding   `yaml:"seeding,omitempty" json:"seeding,omitempty"`
-	Warnings  []warning.Warning        `yaml:"warnings,omitempty" json:"warnings,omitempty"`
+	Warnings  *warning.WarningStore    `yaml:"warnings,omitempty" json:"warnings,omitempty"`
 	Errors    []string                 `yaml:"errors,omitempty" json:"errors,omitempty"`
 }
 
 func NewPreviewOutputDatabase() *PreviewOutputDatabase {
 	return &PreviewOutputDatabase{
-		Warnings: make([]warning.Warning, 0),
+		Warnings: warning.NewWarningStore(),
 		Errors:   make([]string, 0),
 	}
 }
@@ -232,7 +232,7 @@ var markdownTmpl = template.Must(template.New("markdown").Funcs(templateFuncs).P
 {{- if $db.Warnings}}
 
 > [!WARNING]
-{{range $db.Warnings}}> - {{.}}
+{{range $db.Warnings.GetWarnings()}}> - {{.}}
 {{end}}
 {{- end}}
 {{- if $db.Errors}}

@@ -2,6 +2,7 @@ package warning
 
 import (
 	"apercu-cli/helper/format"
+	"encoding/json"
 	"fmt"
 )
 
@@ -71,6 +72,10 @@ func (w *WALSizeWarning) GetCode() Code {
 	return CodeHighWALVolume
 }
 
+func (w *WALSizeWarning) GetFullCode() string {
+	return string(w.GetCode())
+}
+
 func (w *WALSizeWarning) levelByAbsolute() *Level {
 	// If > 10 GiB - Med
 	if w.estimatedProdWAL > 10*1024*1024*1024 {
@@ -116,6 +121,15 @@ func (w *WALSizeWarning) GetIsIdempotent() bool {
 	return false
 }
 
-func (w *WALSizeWarning) GetKeys() []string {
-	return nil
+type WALSizeWarningState struct {
+	EstimatedProdWAL int64 `json:"estimated_prod_wal"`
+	ProdDatabaseSize int64 `json:"prod_database_size"`
+}
+
+func (w *WALSizeWarning) GetStateValues() (json.RawMessage, error) {
+	v := WALSizeWarningState{
+		EstimatedProdWAL: w.estimatedProdWAL,
+		ProdDatabaseSize: w.prodDatabaseSize,
+	}
+	return json.Marshal(v)
 }

@@ -2,7 +2,6 @@ package engines
 
 import (
 	metricshelper "apercu-cli/helper/metrics"
-	"apercu-cli/helper/warning"
 	"apercu-cli/output"
 	"encoding/json"
 	"log/slog"
@@ -91,9 +90,5 @@ func (e *LocksEngine) StoreMetricsToOutput(metrics *output.OutputDatabaseMetrics
 		metrics.Locks[*query.Stats.Lock] = l
 	}
 
-	return nil
-}
-
-func (e *LocksEngine) GetWarnings() []warning.Warning {
 	return nil
 }

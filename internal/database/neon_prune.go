@@ -18,10 +18,10 @@ type NeonPruneHandler struct {
 	apiKey        string
 	parentBranch  string
 	branchPattern string
-	warnings      []warning.Warning
+	warningStore  *warning.WarningStore
 }
 
-func NewNeonPruneHandler(projectId string, apiKey string, parentBranch string, branchPattern string) (*NeonPruneHandler, error) {
+func NewNeonPruneHandler(projectId string, apiKey string, parentBranch string, branchPattern string, warningStore *warning.WarningStore) (*NeonPruneHandler, error) {
 	client, err := neon.NewClient(neon.Config{Key: apiKey})
 	if err != nil {
 		return nil, errors.New(fmt.Sprintf("Failed to connect to Neon API: %v", err))
@@ -33,12 +33,8 @@ func NewNeonPruneHandler(projectId string, apiKey string, parentBranch string, b
 		apiKey:        apiKey,
 		parentBranch:  parentBranch,
 		branchPattern: branchPattern,
-		warnings:      make([]warning.Warning, 0),
+		warningStore:  warningStore,
 	}), nil
-}
-
-func (h *NeonPruneHandler) GetWarnings() []warning.Warning {
-	return h.warnings
 }
 
 func (h *NeonPruneHandler) Prune(openedPullRequestNumber []string) ([]string, error) {
@@ -110,9 +106,9 @@ func (h *NeonPruneHandler) selectBranchesForPruning(branches []neon.Branch, prev
 		matched := false
 		for _, prNumber := range openPRNumbers {
 			prBranchName, m := config.ReplaceVariables(previewPattern, map[string]string{"PR_NUMBER": prNumber})
-			w := warning.NewMissingEnvVarsWarning(m...)
-			warning.PrintWarning(w)
-			w.UpdateGlobalEnvVarsWarning(h.warnings)
+			for _, w := range warning.NewMissingEnvVarsWarnings(m...) {
+				h.warningStore.AddWarningAndPrint(&w)
+			}
 
 			if branch.Name == prBranchName {
 				matched = true

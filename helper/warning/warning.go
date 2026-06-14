@@ -1,9 +1,12 @@
 package warning
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"reflect"
+	"slices"
+	"strings"
 )
 
 type Warning interface {
@@ -11,8 +14,9 @@ type Warning interface {
 	GetTextLong() string
 	GetLevel() Level
 	GetCode() Code
+	GetFullCode() string
 	GetIsIdempotent() bool
-	GetKeys() []string
+	GetStateValues() (json.RawMessage, error)
 }
 
 type Code string
@@ -48,20 +52,43 @@ func PrintWarning(w Warning) {
 	_, _ = fmt.Fprintln(log.Writer(), fmt.Sprintf("WARNING: %s", w.GetTextLong()))
 }
 
-type WarningState struct {
-	Code         Code
-	Level        Level
-	Keys         []string
-	IsIdempotent bool
-	WarningText  string
+func EscapeKey(key string) string {
+	key = strings.Replace(key, " ", "_", -1)
+	key = strings.Replace(key, "/", "_", -1)
+	return key
 }
 
-func NewWarningState(w Warning) WarningState {
-	return WarningState{
-		Code:         w.GetCode(),
-		Level:        w.GetLevel(),
-		IsIdempotent: w.GetIsIdempotent(),
-		Keys:         w.GetKeys(),
-		WarningText:  w.GetText(),
+type WarningStore struct {
+	warnings []Warning
+}
+
+func NewWarningStore() *WarningStore {
+	return &WarningStore{warnings: make([]Warning, 0)}
+}
+
+func (s *WarningStore) AddWarning(w Warning) {
+	if w != nil && !slices.Contains(s.warnings, w) {
+		s.warnings = append(s.warnings, w)
 	}
+}
+
+func (s *WarningStore) AddWarnings(w []Warning) {
+	for _, w := range w {
+		s.AddWarning(w)
+	}
+}
+
+func (s *WarningStore) AddWarningAndPrint(w Warning) {
+	PrintWarning(w)
+	s.AddWarning(w)
+}
+
+func (s *WarningStore) AddWarningsAndPrint(w []Warning) {
+	for _, w := range w {
+		s.AddWarningAndPrint(w)
+	}
+}
+
+func (s *WarningStore) GetWarnings() []Warning {
+	return s.warnings
 }

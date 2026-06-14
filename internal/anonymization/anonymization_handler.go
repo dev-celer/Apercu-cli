@@ -16,7 +16,7 @@ type HandlerInterface interface {
 }
 
 // GetDatabaseAnonymizer return a anonymization.HandlerInterface Object and optionally a Missing EnvVars warning
-func GetDatabaseAnonymizer(dbConfig config.Database, sourceConnection helper.ConnectionFields, storageConnection helper.ConnectionFields) (HandlerInterface, *warning.MissingEnvVarsWarning) {
+func GetDatabaseAnonymizer(dbConfig config.Database, sourceConnection helper.ConnectionFields, storageConnection helper.ConnectionFields) (HandlerInterface, []warning.MissingEnvVarsWarning) {
 	if dbConfig.Source == nil || dbConfig.Anonymization == nil {
 		slog.Debug("No source database specified")
 		return nil, nil
@@ -31,8 +31,10 @@ func GetDatabaseAnonymizer(dbConfig config.Database, sourceConnection helper.Con
 	}
 
 	greenmaskConfig, m2 := config.ReplaceVariables(dbConfig.Anonymization.GreenmaskConfig, map[string]string{})
-	w := warning.NewMissingEnvVarsWarning(slices.Concat(m1, m2)...)
-	warning.PrintWarning(w)
+	w := warning.NewMissingEnvVarsWarnings(slices.Concat(m1, m2)...)
+	for _, w := range w {
+		warning.PrintWarning(&w)
+	}
 
 	return NewGreenmaskHandler(
 		sourceConnection,
