@@ -162,7 +162,8 @@ func (w *ExplainQueryProdFetch) GetIsIdempotent() bool {
 }
 
 func (w *ExplainQueryProdFetch) GetStateValues() (json.RawMessage, error) {
-	return json.RawMessage{}, nil
+	// detail is intentionally not persisted across runs.
+	return json.RawMessage("{}"), nil
 }
 
 func init() {

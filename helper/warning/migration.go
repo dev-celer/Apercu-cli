@@ -31,7 +31,7 @@ func (w *MigrationTableNotFound) GetIsIdempotent() bool {
 }
 
 func (w *MigrationTableNotFound) GetStateValues() (json.RawMessage, error) {
-	return json.RawMessage{}, nil
+	return json.RawMessage("{}"), nil
 }
 
 func init() {
