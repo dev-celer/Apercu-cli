@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 )
 
 const (
@@ -22,11 +23,7 @@ type ExplainQueryFile struct {
 }
 
 func NewExplainQueryFileWarning(code Code, path string) *ExplainQueryFile {
-	switch code {
-	case CodeExplainQueryPathNotFound:
-	case CodeExplainQueryNoQueries:
-	case CodeExplainQueryFailedToReadFile:
-	default:
+	if !slices.Contains([]Code{CodeExplainQueryPathNotFound, CodeExplainQueryNoQueries, CodeExplainQueryFailedToReadFile}, code) {
 		return nil
 	}
 	return &ExplainQueryFile{
@@ -118,10 +115,7 @@ type ExplainQueryProdFetch struct {
 }
 
 func NewExplainQueryProdFetchWarning(code Code, detail string) *ExplainQueryProdFetch {
-	switch code {
-	case CodeExplainQueryStatStatementsMissing:
-	case CodeExplainQueryProdFetchFailed:
-	default:
+	if !slices.Contains([]Code{CodeExplainQueryStatStatementsMissing, CodeExplainQueryProdFetchFailed}, code) {
 		return nil
 	}
 	return &ExplainQueryProdFetch{

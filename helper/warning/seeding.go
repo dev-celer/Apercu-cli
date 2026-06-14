@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 )
 
 const (
@@ -55,13 +56,9 @@ func (w *SeedingError) GetStateValues() (json.RawMessage, error) {
 }
 
 func NewSeedingError(code Code, filepath string) *SeedingError {
-	switch code {
-	case CodeFailedToOpenSeedFile:
-	case CodeSeedFileNotFound:
-	default:
+	if !slices.Contains([]Code{CodeFailedToOpenSeedFile, CodeSeedFileNotFound}, code) {
 		return nil
 	}
-
 	return &SeedingError{
 		code: code,
 		path: filepath,
