@@ -141,6 +141,9 @@ var templateFuncs = template.FuncMap{
 	"usize_pretty": func(i uint64) string {
 		return formathelper.UBytesSizePretty(i)
 	},
+	"print_warning": func(w warning.Warning) string {
+		return fmt.Sprintf("%s - %s", w.GetFullCode(), w.GetText())
+	},
 	"print_schemas_diff": func(schemasDiff map[string]*metricshelper.SchemaDiff) string {
 		text := metricshelper.GetSchemasDiffText(schemasDiff)
 		if text == nil {
@@ -238,7 +241,7 @@ var markdownTmpl = template.Must(template.New("markdown").Funcs(templateFuncs).P
 {{- if $db.Warnings}}
 
 > [!WARNING]
-{{range get_warnings $db}}> - {{.}}
+{{range get_warnings $db}}> - {{print_warning .}}
 {{end}}
 {{- end}}
 {{- if $db.Errors}}
