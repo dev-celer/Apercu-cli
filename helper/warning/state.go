@@ -3,6 +3,7 @@ package warning
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 )
 
 const (
@@ -49,5 +50,17 @@ func (w *StateFileWarning) GetStateValues() (json.RawMessage, error) {
 func NewStateFileWarning(filePath string) *StateFileWarning {
 	return &StateFileWarning{
 		path: filePath,
+	}
+}
+
+func init() {
+	warningConverter[CodeStateFileFailedToRead] = func(state json.RawMessage) Warning {
+		s := StateFileWarningState{}
+		err := json.Unmarshal(state, &s)
+		if err != nil {
+			slog.Debug("Failed to unmarshal state", "error", err)
+			return nil
+		}
+		return NewStateFileWarning(s.Path)
 	}
 }

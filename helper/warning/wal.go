@@ -4,6 +4,7 @@ import (
 	"apercu-cli/helper/format"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 )
 
 const (
@@ -132,4 +133,17 @@ func (w *WALSizeWarning) GetStateValues() (json.RawMessage, error) {
 		ProdDatabaseSize: w.prodDatabaseSize,
 	}
 	return json.Marshal(v)
+}
+
+func init() {
+	warningConverter[CodeHighWALVolume] = func(state json.RawMessage) Warning {
+		s := WALSizeWarningState{}
+		err := json.Unmarshal(state, &s)
+		if err != nil {
+			slog.Debug("Failed to unmarshal state", "error", err)
+			return nil
+		}
+
+		return NewWALSizeWarning(s.EstimatedProdWAL, s.ProdDatabaseSize)
+	}
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
 	"reflect"
 	"slices"
 	"strings"
@@ -57,6 +58,29 @@ func EscapeKey(key string) string {
 	key = strings.Replace(key, "/", "_", -1)
 	return key
 }
+
+func ConvertStateToWarnings(states map[string]json.RawMessage) []Warning {
+	warnings := make([]Warning, 0)
+	slog.Debug("Converting state to warnings")
+
+	for fullCode, state := range states {
+		// Extract code / keys
+		code, key, _ := strings.Cut(fullCode, ".")
+		slog.Debug("handling warning", "code", code, "key", key)
+
+		f, ok := warningConverter[Code(code)]
+		if !ok {
+			slog.Debug("unknown code", "code", code)
+			continue
+		}
+
+		warnings = append(warnings, f(state))
+	}
+
+	return warnings
+}
+
+var warningConverter map[Code]func(state json.RawMessage) Warning
 
 type WarningStore struct {
 	warnings []Warning

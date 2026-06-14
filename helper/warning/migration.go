@@ -33,3 +33,9 @@ func (w *MigrationTableNotFound) GetIsIdempotent() bool {
 func (w *MigrationTableNotFound) GetStateValues() (json.RawMessage, error) {
 	return json.RawMessage{}, nil
 }
+
+func init() {
+	warningConverter[CodeMigrationTableNotFound] = func(state json.RawMessage) Warning {
+		return &MigrationTableNotFound{}
+	}
+}

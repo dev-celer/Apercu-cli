@@ -6,6 +6,7 @@ import (
 	metricshelper "apercu-cli/helper/metrics"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 )
 
 const (
@@ -68,14 +69,27 @@ func (w *TableRewriteWarning) GetIsIdempotent() bool {
 }
 
 type TableRewriteWarningState struct {
-	Table       string                      `json:"table"`
+	Table       helper.FullTableName        `json:"table"`
 	ProdMetrics *metricshelper.TableMetrics `json:"prod_metrics,omitempty"`
 }
 
 func (w *TableRewriteWarning) GetStateValues() (json.RawMessage, error) {
 	v := TableRewriteWarningState{
-		Table:       w.table.String(),
+		Table:       w.table,
 		ProdMetrics: w.prodMetrics,
 	}
 	return json.Marshal(v)
+}
+
+func init() {
+	warningConverter[CodeTableRewritten] = func(state json.RawMessage) Warning {
+		v := TableRewriteWarning{}
+		err := json.Unmarshal(state, &v)
+		if err != nil {
+			slog.Debug("Failed to unmarshal state", "error", err)
+			return nil
+		}
+
+		return NewRewriteWarning(v.table, v.prodMetrics)
+	}
 }

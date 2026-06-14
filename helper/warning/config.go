@@ -3,6 +3,7 @@ package warning
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"slices"
 )
 
@@ -38,8 +39,13 @@ func (w *MissingEnvVarsWarning) GetIsIdempotent() bool {
 	return true
 }
 
+type MissingEnvVarsWarningState struct {
+	Variable string `json:"variable"`
+}
+
 func (w *MissingEnvVarsWarning) GetStateValues() (json.RawMessage, error) {
-	return json.RawMessage{}, nil
+	v := MissingEnvVarsWarningState{w.variable}
+	return json.Marshal(v)
 }
 
 func NewMissingEnvVarsWarnings(variables ...string) []MissingEnvVarsWarning {
@@ -60,4 +66,17 @@ func NewMissingEnvVarsWarnings(variables ...string) []MissingEnvVarsWarning {
 		warnings = append(warnings, MissingEnvVarsWarning{variable: v})
 	}
 	return warnings
+}
+
+func init() {
+	warningConverter[CodeMissingEnvironmentVariable] = func(state json.RawMessage) Warning {
+		s := MissingEnvVarsWarningState{}
+		err := json.Unmarshal(state, &s)
+		if err != nil {
+			slog.Debug("Failed to unmarshal state", "error", err)
+			return nil
+		}
+
+		return &MissingEnvVarsWarning{s.Variable}
+	}
 }

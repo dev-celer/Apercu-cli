@@ -3,6 +3,7 @@ package warning
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 )
 
 const (
@@ -66,17 +67,49 @@ func (w *ExplainQueryFile) GetIsIdempotent() bool {
 	return true
 }
 
-type ExplainQueryStateValues struct {
+type ExplainQueryState struct {
 	Path string `json:"path"`
-	Code Code   `json:"code"`
 }
 
 func (w *ExplainQueryFile) GetStateValues() (json.RawMessage, error) {
-	v := ExplainQueryStateValues{
+	v := ExplainQueryState{
 		Path: w.path,
-		Code: w.code,
 	}
 	return json.Marshal(v)
+}
+
+func init() {
+	extractState := func(state json.RawMessage) (*ExplainQueryState, error) {
+		v := ExplainQueryState{}
+		err := json.Unmarshal(state, &v)
+		if err != nil {
+			slog.Debug("Failed to unmarshal state", "error", err)
+			return nil, err
+		}
+		return &v, nil
+	}
+
+	warningConverter[CodeExplainQueryPathNotFound] = func(state json.RawMessage) Warning {
+		s, err := extractState(state)
+		if err != nil {
+			return nil
+		}
+		return NewExplainQueryFileWarning(CodeExplainQueryPathNotFound, s.Path)
+	}
+	warningConverter[CodeExplainQueryNoQueries] = func(state json.RawMessage) Warning {
+		s, err := extractState(state)
+		if err != nil {
+			return nil
+		}
+		return NewExplainQueryFileWarning(CodeExplainQueryNoQueries, s.Path)
+	}
+	warningConverter[CodeExplainQueryFailedToReadFile] = func(state json.RawMessage) Warning {
+		s, err := extractState(state)
+		if err != nil {
+			return nil
+		}
+		return NewExplainQueryFileWarning(CodeExplainQueryFailedToReadFile, s.Path)
+	}
 }
 
 type ExplainQueryProdFetch struct {
@@ -138,6 +171,15 @@ func (w *ExplainQueryProdFetch) GetStateValues() (json.RawMessage, error) {
 	return json.RawMessage{}, nil
 }
 
+func init() {
+	warningConverter[CodeExplainQueryStatStatementsMissing] = func(state json.RawMessage) Warning {
+		return NewExplainQueryProdFetchWarning(CodeExplainQueryStatStatementsMissing, "")
+	}
+	warningConverter[CodeExplainQueryProdFetchFailed] = func(state json.RawMessage) Warning {
+		return NewExplainQueryProdFetchWarning(CodeExplainQueryProdFetchFailed, "")
+	}
+}
+
 type ExplainPlanOrderingRegression struct {
 	level Level
 	key   string
@@ -175,14 +217,29 @@ func (w *ExplainPlanOrderingRegression) GetIsIdempotent() bool {
 }
 
 type ExplainPlanOrderingRegressionState struct {
-	Level Level `json:"level"`
+	Level Level  `json:"level"`
+	Key   string `json:"key"`
 }
 
 func (w *ExplainPlanOrderingRegression) GetStateValues() (json.RawMessage, error) {
 	v := ExplainPlanOrderingRegressionState{
 		Level: w.level,
+		Key:   w.key,
 	}
 	return json.Marshal(v)
+}
+
+func init() {
+	warningConverter[CodeExplainQueryPlanOrderingRegression] = func(state json.RawMessage) Warning {
+		v := ExplainPlanOrderingRegressionState{}
+		err := json.Unmarshal(state, &v)
+		if err != nil {
+			slog.Debug("Failed to unmarshal state", "error", err)
+			return nil
+		}
+
+		return NewExplainPlanOrderingRegressionWarning(v.Level, v.Key)
+	}
 }
 
 type ExplainPlanScanRegression struct {
@@ -227,6 +284,7 @@ func (w *ExplainPlanScanRegression) GetIsIdempotent() bool {
 
 type ExplainPlanScanRegressionState struct {
 	Level  Level  `json:"level"`
+	Key    string `json:"key"`
 	Before string `json:"before"`
 	After  string `json:"after"`
 }
@@ -236,6 +294,20 @@ func (w *ExplainPlanScanRegression) GetStateValues() (json.RawMessage, error) {
 		Level:  w.level,
 		Before: w.before,
 		After:  w.after,
+		Key:    w.key,
 	}
 	return json.Marshal(v)
+}
+
+func init() {
+	warningConverter[CodeExplainQueryPlanScanRegression] = func(state json.RawMessage) Warning {
+		v := ExplainPlanScanRegressionState{}
+		err := json.Unmarshal(state, &v)
+		if err != nil {
+			slog.Debug("Failed to unmarshal state", "error", err)
+			return nil
+		}
+
+		return NewExplainPlanScanRegressionWarning(v.Level, v.Key, v.Before, v.After)
+	}
 }

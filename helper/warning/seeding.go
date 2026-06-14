@@ -3,6 +3,7 @@ package warning
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 )
 
 const (
@@ -64,5 +65,31 @@ func NewSeedingError(code Code, filepath string) *SeedingError {
 	return &SeedingError{
 		code: code,
 		path: filepath,
+	}
+}
+
+func init() {
+	validateState := func(state json.RawMessage) (*SeedingErrorState, error) {
+		s := &SeedingErrorState{}
+		err := json.Unmarshal(state, s)
+		if err != nil {
+			slog.Debug("failed to unmarshal state", "error", err)
+			return nil, err
+		}
+		return s, nil
+	}
+	warningConverter[CodeFailedToOpenSeedFile] = func(state json.RawMessage) Warning {
+		s, err := validateState(state)
+		if err != nil {
+			return nil
+		}
+		return NewSeedingError(CodeFailedToOpenSeedFile, s.Path)
+	}
+	warningConverter[CodeSeedFileNotFound] = func(state json.RawMessage) Warning {
+		s, err := validateState(state)
+		if err != nil {
+			return nil
+		}
+		return NewSeedingError(CodeSeedFileNotFound, s.Path)
 	}
 }
