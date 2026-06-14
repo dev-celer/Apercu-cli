@@ -3,6 +3,7 @@ package output
 import (
 	metricshelper "apercu-cli/helper/metrics"
 	"apercu-cli/helper/warning"
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -33,9 +34,11 @@ func (w *mockedWarning) GetCode() warning.Code {
 	return MockedCode
 }
 
+func (w *mockedWarning) GetFullCode() string { return string(w.GetCode()) }
+
 func (w *mockedWarning) GetIsIdempotent() bool { return w.isIdempotent }
 
-func (w *mockedWarning) GetKeys() []string { return w.keys }
+func (w *mockedWarning) GetStateValues() (json.RawMessage, error) { return json.RawMessage{}, nil }
 
 func (w *mockedWarning) PrintWarning() {}
 
@@ -59,6 +62,8 @@ func TestRenderMarkdown_Empty(t *testing.T) {
 
 func TestRenderMarkdown_MigrationAndSeeding(t *testing.T) {
 	t.Parallel()
+	warningStore := warning.NewWarningStore()
+	warningStore.AddWarning(newMockedWarning("top-level warn", false, nil))
 	o := PreviewOutput{
 		Databases: map[string]PreviewOutputDatabase{
 			"mydb": {
@@ -86,7 +91,7 @@ func TestRenderMarkdown_MigrationAndSeeding(t *testing.T) {
 					Duration:     "500ms",
 					Errors:       []string{"seed x failed"},
 				},
-				Warnings: []warning.Warning{newMockedWarning("top-level warn", false, nil)},
+				Warnings: warningStore,
 				Errors:   []string{"top-level error"},
 			},
 		},

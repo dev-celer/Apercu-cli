@@ -94,7 +94,7 @@ func TestSelectBranchesForPruning(t *testing.T) {
 	t.Parallel()
 
 	h := NeonPruneHandler{
-		warnings: make([]warning.Warning, 0),
+		warningStore: warning.NewWarningStore(),
 	}
 
 	tests := []struct {

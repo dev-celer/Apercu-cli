@@ -15,8 +15,8 @@ import (
 
 func newTestDirectSeed() *DirectSeed {
 	return &DirectSeed{
-		output:   output.NewSeedingOutput(),
-		warnings: make([]warning.Warning, 0),
+		output:       output.NewSeedingOutput(),
+		warningStore: warning.NewWarningStore(),
 	}
 }
 
@@ -72,8 +72,7 @@ func TestShouldSeedBeApplied(t *testing.T) {
 		}
 
 		ds := newTestDirectSeed()
-		applied, err := ds.shouldSeedBeApplied("seed.sql", config.DatabaseSeedTypeCreate, state)
-		assert.NoError(t, err)
+		applied := ds.shouldSeedBeApplied("seed.sql", config.DatabaseSeedTypeCreate, state)
 		assert.True(t, applied)
 	})
 
@@ -93,8 +92,7 @@ func TestShouldSeedBeApplied(t *testing.T) {
 		}
 
 		ds := newTestDirectSeed()
-		applied, err := ds.shouldSeedBeApplied(filePath, config.DatabaseSeedTypeAlways, state)
-		assert.NoError(t, err)
+		applied := ds.shouldSeedBeApplied(filePath, config.DatabaseSeedTypeAlways, state)
 		assert.True(t, applied)
 	})
 
@@ -114,8 +112,7 @@ func TestShouldSeedBeApplied(t *testing.T) {
 		}
 
 		ds := newTestDirectSeed()
-		applied, err := ds.shouldSeedBeApplied(filePath, config.DatabaseSeedTypeCreate, state)
-		assert.NoError(t, err)
+		applied := ds.shouldSeedBeApplied(filePath, config.DatabaseSeedTypeCreate, state)
 		assert.False(t, applied)
 	})
 
@@ -135,8 +132,7 @@ func TestShouldSeedBeApplied(t *testing.T) {
 		}
 
 		ds := newTestDirectSeed()
-		applied, err := ds.shouldSeedBeApplied(filePath, config.DatabaseSeedTypeCreate, state)
-		assert.NoError(t, err)
+		applied := ds.shouldSeedBeApplied(filePath, config.DatabaseSeedTypeCreate, state)
 		assert.False(t, applied)
 	})
 
@@ -156,8 +152,7 @@ func TestShouldSeedBeApplied(t *testing.T) {
 		}
 
 		ds := newTestDirectSeed()
-		applied, err := ds.shouldSeedBeApplied(filePath, config.DatabaseSeedTypeUpdate, state)
-		assert.NoError(t, err)
+		applied := ds.shouldSeedBeApplied(filePath, config.DatabaseSeedTypeUpdate, state)
 		assert.True(t, applied)
 	})
 
@@ -177,16 +172,14 @@ func TestShouldSeedBeApplied(t *testing.T) {
 		}
 
 		ds := newTestDirectSeed()
-		applied, err := ds.shouldSeedBeApplied(filePath, config.DatabaseSeedTypeUpdate, state)
-		assert.NoError(t, err)
+		applied := ds.shouldSeedBeApplied(filePath, config.DatabaseSeedTypeUpdate, state)
 		assert.False(t, applied)
 	})
 
 	t.Run("empty state applies seed", func(t *testing.T) {
 		t.Parallel()
 		ds := newTestDirectSeed()
-		applied, err := ds.shouldSeedBeApplied("seed.sql", config.DatabaseSeedTypeCreate, []config.SeedState{})
-		assert.NoError(t, err)
+		applied := ds.shouldSeedBeApplied("seed.sql", config.DatabaseSeedTypeCreate, []config.SeedState{})
 		assert.True(t, applied)
 	})
 }
@@ -206,25 +199,27 @@ func TestGetSeedFilesToApply(t *testing.T) {
 
 	t.Run("no seeds", func(t *testing.T) {
 		t.Parallel()
+		store := warning.NewWarningStore()
 		ds := &DirectSeed{
-			output:    output.NewSeedingOutput(),
-			warnings:  make([]warning.Warning, 0),
-			state:     &config.DatabaseState{AppliedSeeds: make([]config.SeedState, 0)},
-			seedFiles: nil,
+			output:       output.NewSeedingOutput(),
+			warningStore: store,
+			state:        &config.DatabaseState{AppliedSeeds: make([]config.SeedState, 0)},
+			seedFiles:    nil,
 		}
 
 		ds.getSeedFilesToApply()
 		assert.Len(t, ds.seedFilesPath, 0)
 		assert.Len(t, ds.output.Errors, 0)
-		assert.Len(t, ds.warnings, 0)
+		assert.Len(t, store.GetWarnings(), 0)
 	})
 
 	t.Run("seed file path", func(t *testing.T) {
 		t.Parallel()
+		store := warning.NewWarningStore()
 		ds := &DirectSeed{
-			output:   output.NewSeedingOutput(),
-			warnings: make([]warning.Warning, 0),
-			state:    &config.DatabaseState{AppliedSeeds: make([]config.SeedState, 0)},
+			output:       output.NewSeedingOutput(),
+			warningStore: store,
+			state:        &config.DatabaseState{AppliedSeeds: make([]config.SeedState, 0)},
 			seedFiles: []config.DatabaseSeed{
 				{Path: filepath.Join(dirPath, "seed1.sql")},
 			},
@@ -234,15 +229,16 @@ func TestGetSeedFilesToApply(t *testing.T) {
 		assert.Len(t, ds.seedFilesPath, 1)
 		assert.Equal(t, ds.seedFilesPath[0], filepath.Join(dirPath, "seed1.sql"))
 		assert.Len(t, ds.output.Errors, 0)
-		assert.Len(t, ds.warnings, 0)
+		assert.Len(t, store.GetWarnings(), 0)
 	})
 
 	t.Run("seed folder path", func(t *testing.T) {
 		t.Parallel()
+		store := warning.NewWarningStore()
 		ds := &DirectSeed{
-			output:   output.NewSeedingOutput(),
-			warnings: make([]warning.Warning, 0),
-			state:    &config.DatabaseState{AppliedSeeds: make([]config.SeedState, 0)},
+			output:       output.NewSeedingOutput(),
+			warningStore: store,
+			state:        &config.DatabaseState{AppliedSeeds: make([]config.SeedState, 0)},
 			seedFiles: []config.DatabaseSeed{
 				{Path: filepath.Join(dirPath, "seed1")},
 			},
@@ -252,15 +248,16 @@ func TestGetSeedFilesToApply(t *testing.T) {
 		assert.Len(t, ds.seedFilesPath, 1)
 		assert.Equal(t, ds.seedFilesPath[0], filepath.Join(dirPath, "seed1", "seed2.sql"))
 		assert.Len(t, ds.output.Errors, 0)
-		assert.Len(t, ds.warnings, 0)
+		assert.Len(t, store.GetWarnings(), 0)
 	})
 
 	t.Run("seed folder and file path", func(t *testing.T) {
 		t.Parallel()
+		store := warning.NewWarningStore()
 		ds := &DirectSeed{
-			output:   output.NewSeedingOutput(),
-			warnings: make([]warning.Warning, 0),
-			state:    &config.DatabaseState{AppliedSeeds: make([]config.SeedState, 0)},
+			output:       output.NewSeedingOutput(),
+			warningStore: store,
+			state:        &config.DatabaseState{AppliedSeeds: make([]config.SeedState, 0)},
 			seedFiles: []config.DatabaseSeed{
 				{Path: filepath.Join(dirPath, "seed1")},
 				{Path: filepath.Join(dirPath, "seed1.sql")},
@@ -272,15 +269,16 @@ func TestGetSeedFilesToApply(t *testing.T) {
 		assert.Equal(t, ds.seedFilesPath[0], filepath.Join(dirPath, "seed1", "seed2.sql"))
 		assert.Equal(t, ds.seedFilesPath[1], filepath.Join(dirPath, "seed1.sql"))
 		assert.Len(t, ds.output.Errors, 0)
-		assert.Len(t, ds.warnings, 0)
+		assert.Len(t, store.GetWarnings(), 0)
 	})
 
 	t.Run("missing path", func(t *testing.T) {
 		t.Parallel()
+		store := warning.NewWarningStore()
 		ds := &DirectSeed{
-			output:   output.NewSeedingOutput(),
-			warnings: make([]warning.Warning, 0),
-			state:    &config.DatabaseState{AppliedSeeds: make([]config.SeedState, 0)},
+			output:       output.NewSeedingOutput(),
+			warningStore: store,
+			state:        &config.DatabaseState{AppliedSeeds: make([]config.SeedState, 0)},
 			seedFiles: []config.DatabaseSeed{
 				{Path: filepath.Join(dirPath, "nonexistent")},
 				{Path: filepath.Join(dirPath, "seed1.sql")},
@@ -291,15 +289,16 @@ func TestGetSeedFilesToApply(t *testing.T) {
 		assert.Len(t, ds.seedFilesPath, 1)
 		assert.Equal(t, ds.seedFilesPath[0], filepath.Join(dirPath, "seed1.sql"))
 		assert.Len(t, ds.output.Errors, 0)
-		assert.Len(t, ds.warnings, 1)
+		assert.Len(t, store.GetWarnings(), 1)
 	})
 
 	t.Run("no valid path", func(t *testing.T) {
 		t.Parallel()
+		store := warning.NewWarningStore()
 		ds := &DirectSeed{
-			output:   output.NewSeedingOutput(),
-			warnings: make([]warning.Warning, 0),
-			state:    &config.DatabaseState{AppliedSeeds: make([]config.SeedState, 0)},
+			output:       output.NewSeedingOutput(),
+			warningStore: store,
+			state:        &config.DatabaseState{AppliedSeeds: make([]config.SeedState, 0)},
 			seedFiles: []config.DatabaseSeed{
 				{Path: filepath.Join(dirPath, "nonexistent")},
 				{Path: filepath.Join(dirPath, "seed2.sql")},
@@ -309,6 +308,6 @@ func TestGetSeedFilesToApply(t *testing.T) {
 		ds.getSeedFilesToApply()
 		assert.Len(t, ds.seedFilesPath, 0)
 		assert.Len(t, ds.output.Errors, 0)
-		assert.Len(t, ds.warnings, 2)
+		assert.Len(t, store.GetWarnings(), 2)
 	})
 }
