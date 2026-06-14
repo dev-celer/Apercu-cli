@@ -92,7 +92,9 @@ func NewWarningStore() *WarningStore {
 }
 
 func (s *WarningStore) AddWarning(w Warning) {
-	if w != nil && !slices.Contains(s.warnings, w) {
+	if w != nil && !slices.ContainsFunc(s.warnings, func(warning Warning) bool {
+		return w.GetFullCode() == warning.GetFullCode()
+	}) {
 		s.warnings = append(s.warnings, w)
 	}
 }
