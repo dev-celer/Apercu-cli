@@ -8,6 +8,7 @@ type QueryEvent struct {
 	Duration     time.Duration   `json:"duration"`
 	CommandTag   string          `json:"command_tag"`
 	RowsAffected int64           `json:"rows_affected"`
+	LocksTimeout *int64          `json:"locks_timeout,omitempty"`
 	Error        string          `json:"error,omitempty"`
 	Stats        QueryEventStats `json:"stats,omitempty"`
 }

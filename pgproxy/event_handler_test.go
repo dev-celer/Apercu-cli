@@ -4,6 +4,8 @@ import (
 	"apercu-cli/helper/metrics"
 	"reflect"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestStripLeadingComments(t *testing.T) {
@@ -253,6 +255,49 @@ func TestGetLockType(t *testing.T) {
 					wantStr = string(*tc.want)
 				}
 				t.Errorf("getLockType(%q) = %s, want %s", tc.sql, gotStr, wantStr)
+			}
+		})
+	}
+}
+
+func TestGetLockTimeoutValue(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		sql       string
+		wantBool  bool
+		wantValue *int64
+	}{
+		{"empty", "", false, nil},
+		{"unrelated query", "SELECT * FROM users", false, nil},
+		{"other set query", "SET my_value TO 'test'", false, nil},
+
+		{"set integer", "SET lock_timeout = 5000", true, new(int64(5000))},
+		{"set default", "SET lock_timeout = DEFAULT", true, nil},
+		{"set duration string", "SET lock_timeout = '5s'", true, new(int64(5000))},
+		{"set quoted integer", "SET lock_timeout = '5000'", true, new(int64(5000))},
+		{"set to", "SET lock_timeout TO 5000", true, new(int64(5000))},
+		{"set local", "SET LOCAL lock_timeout = 5000", true, new(int64(5000))},
+		{"set session", "SET SESSION lock_timeout = 5000", true, new(int64(5000))},
+		{"alter system set", "ALTER SYSTEM SET lock_timeout = 5000", true, new(int64(5000))},
+
+		{"invalid duration string", "SET lock_timeout = 'test'", false, nil},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ev := &metrics.QueryEvent{SQL: tc.sql}
+			gotBool, gotValue := getLockTimeoutValue(ev)
+			assert.Equal(t, tc.wantBool, gotBool)
+			if tc.wantValue != nil {
+				assert.NotNil(t, gotValue)
+				if gotValue != nil {
+					assert.Equal(t, *tc.wantValue, *gotValue)
+				}
+			} else {
+				assert.Nil(t, gotValue)
 			}
 		})
 	}

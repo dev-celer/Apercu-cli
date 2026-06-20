@@ -38,7 +38,7 @@ func (e *LocksEngine) SendPgProxyLogs(logs string) {
 		switch *query.Stats.Lock {
 		case metricshelper.QueryLockAccessExclusive:
 		case metricshelper.QueryLockShareRowExclusive:
-		case metricshelper.QueryLockShareUpdateExclusive:
+		case metricshelper.QueryLockShare:
 		default:
 			continue
 		}

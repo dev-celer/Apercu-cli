@@ -4,7 +4,9 @@ import (
 	"apercu-cli/helper/metrics"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 )
 
 func handleEvent(ev metrics.QueryEvent) {
@@ -26,6 +28,18 @@ func handleEvent(ev metrics.QueryEvent) {
 	}
 
 	_, _ = fmt.Println(string(data))
+}
+
+// handleSetLocksTimeoutEvent return (isSetLockTimeout, lockTimeoutValue (nil is DEFAULT))
+func handleSetLocksTimeoutEvent(ev *metrics.QueryEvent) {
+	ev.SQL = strings.ReplaceAll(ev.SQL, "\n", " ")
+	ev.SQL = stripLeadingComments(ev.SQL)
+	ev.SQL = collapseSpaces(ev.SQL)
+
+	isLockEvent, l := getLockTimeoutValue(ev)
+	if isLockEvent {
+		ev.LocksTimeout = l
+	}
 }
 
 func collapseSpaces(sql string) string {
@@ -240,6 +254,64 @@ func stripLeadingComments(sql string) string {
 			return sql
 		}
 	}
+}
+
+// getLockTimeoutValue return (isSetLockTimeout, lockTimeoutValue (nil is DEFAULT))
+func getLockTimeoutValue(ev *metrics.QueryEvent) (bool, *int64) {
+	upper := strings.ToUpper(ev.SQL)
+
+	prefixes := []string{
+		"SET SESSION ", "SET LOCAL ", "SET ", "ALTER SYSTEM SET ",
+	}
+
+	var rest, upperRest string
+	for _, p := range prefixes {
+		if strings.HasPrefix(upper, p) {
+			rest = ev.SQL[len(p):]
+			upperRest = upper[len(p):]
+			break
+		}
+	}
+	if rest == "" {
+		return false, nil
+	}
+
+	prefixes = []string{
+		"LOCK_TIMEOUT = ", "LOCK_TIMEOUT TO ",
+	}
+
+	hasPrefix := false
+	for _, p := range prefixes {
+		if strings.HasPrefix(upperRest, p) {
+			hasPrefix = true
+			rest = rest[len(p):]
+			upperRest = upperRest[len(p):]
+			break
+		}
+	}
+	if rest == "" || !hasPrefix {
+		return false, nil
+	}
+
+	// Handle default value
+	if upperRest == "DEFAULT" {
+		return true, nil
+	}
+
+	// strip quote
+	rest = strings.Replace(rest, "'", "", -1)
+	// Handle int value
+	i, err := strconv.ParseInt(rest, 10, 64)
+	if err == nil {
+		return true, &i
+	}
+
+	// Handle duration value
+	d, err := time.ParseDuration(rest)
+	if err == nil {
+		return true, new(d.Milliseconds())
+	}
+	return false, nil
 }
 
 func getAffectedTable(ev *metrics.QueryEvent) string {
