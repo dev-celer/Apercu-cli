@@ -18,12 +18,17 @@ type TablePgClassStats struct {
 	TableName       string
 	SchemaName      string
 	RowCount        int64
+	Writes          int64
+	Scans           int64
 	LastAnalyze     time.Time
 	LastAutoAnalyze time.Time
 }
 
 func getPgClassDatabaseStats(db *sql.DB) ([]TablePgClassStats, error) {
-	rows, err := db.Query("/* apercu */select s.relid, c.relname as table_name, s.schemaname as schema_name, c.reltuples::bigint as row_count, s.last_analyze, s.last_autoanalyze from pg_class c inner join pg_stat_user_tables s on s.relid = c.oid")
+	rows, err := db.Query("/* apercu */" +
+		"select s.relid, c.relname as table_name, s.schemaname as schema_name, c.reltuples::bigint as row_count, s.last_analyze, s.last_autoanalyze," +
+		"(s.n_tup_ins + s.n_tup_upd + s.n_tup_del) as writes, (s.seq_scan + COALESCE(s.idx_scan, 0)) as scans " +
+		"from pg_class c inner join pg_stat_user_tables s on s.relid = c.oid")
 	if err != nil {
 		return nil, errors.New(fmt.Sprintf("Failed to query prod database for stats: %v", err))
 	}
@@ -32,7 +37,7 @@ func getPgClassDatabaseStats(db *sql.DB) ([]TablePgClassStats, error) {
 	stats := make([]TablePgClassStats, 0)
 	for rows.Next() {
 		var s TablePgClassStats
-		if err := rows.Scan(&s.RelId, &s.TableName, &s.SchemaName, &s.RowCount, &s.LastAnalyze, &s.LastAutoAnalyze); err != nil {
+		if err := rows.Scan(&s.RelId, &s.TableName, &s.SchemaName, &s.RowCount, &s.Writes, &s.Scans, &s.LastAnalyze, &s.LastAutoAnalyze); err != nil {
 			return nil, errors.New(fmt.Sprintf("Failed to scan returned rows: %v", err))
 		}
 		stats = append(stats, s)
@@ -52,6 +57,13 @@ func getExactRowCount(db *sql.DB, schemaName string, tableName string) (int64, e
 
 func GetDatabaseStats(db *sql.DB) (metricshelper.DatabaseMetrics, error) {
 	tablesStats := make(map[helper.FullTableName]metricshelper.TableMetrics)
+
+	// Get stats age in seconds
+	var StatsAge int64
+	err := db.QueryRow("/* apercu */SELECT EXTRACT(EPOCH FROM (now() - stats_reset)) AS stats_age_s FROM pg_stat_database WHERE datname = current_database()").Scan(&StatsAge)
+	if err != nil {
+		return metricshelper.DatabaseMetrics{}, fmt.Errorf("failed to get prod database stats age: %v", err)
+	}
 
 	pgClassStats, err := getPgClassDatabaseStats(db)
 	if err != nil {
@@ -99,12 +111,20 @@ func GetDatabaseStats(db *sql.DB) (metricshelper.DatabaseMetrics, error) {
 			return metricshelper.DatabaseMetrics{}, fmt.Errorf("failed to get prod database table size for table %s.%s: %v", s.SchemaName, s.TableName, err)
 		}
 
+		var wps, sps *float64
+		if StatsAge > 0 {
+			wps = new(float64(s.Writes) / float64(StatsAge))
+			sps = new(float64(s.Scans) / float64(StatsAge))
+		}
+
 		tablesStats[helper.FullTableName{
 			Schema: s.SchemaName,
 			Table:  s.TableName,
 		}] = metricshelper.TableMetrics{
-			RowCount:  s.RowCount,
-			TableSize: tableSize,
+			RowCount:        s.RowCount,
+			TableSize:       tableSize,
+			WritesPerSecond: wps,
+			ScanPerSecond:   sps,
 		}
 	}
 
