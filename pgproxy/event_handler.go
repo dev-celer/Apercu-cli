@@ -30,7 +30,6 @@ func handleEvent(ev metrics.QueryEvent) {
 	_, _ = fmt.Println(string(data))
 }
 
-// handleSetLocksTimeoutEvent return (isSetLockTimeout, lockTimeoutValue (nil is DEFAULT))
 func handleSetLocksTimeoutEvent(ev *metrics.QueryEvent) {
 	ev.SQL = strings.ReplaceAll(ev.SQL, "\n", " ")
 	ev.SQL = stripLeadingComments(ev.SQL)
@@ -260,6 +259,11 @@ func stripLeadingComments(sql string) string {
 func getLockTimeoutValue(ev *metrics.QueryEvent) (bool, *int64) {
 	upper := strings.ToUpper(ev.SQL)
 
+	// check for reset
+	if strings.HasPrefix(upper, "RESET LOCK_TIMEOUT") || strings.HasPrefix(upper, "RESET ALL") {
+		return true, nil
+	}
+
 	prefixes := []string{
 		"SET SESSION ", "SET LOCAL ", "SET ", "ALTER SYSTEM SET ",
 	}
@@ -277,7 +281,7 @@ func getLockTimeoutValue(ev *metrics.QueryEvent) (bool, *int64) {
 	}
 
 	prefixes = []string{
-		"LOCK_TIMEOUT = ", "LOCK_TIMEOUT TO ",
+		"LOCK_TIMEOUT = ", "LOCK_TIMEOUT TO ", "LOCK_TIMEOUT =", "LOCK_TIMEOUT= ", "LOCK_TIMEOUT=",
 	}
 
 	hasPrefix := false
@@ -293,17 +297,37 @@ func getLockTimeoutValue(ev *metrics.QueryEvent) (bool, *int64) {
 		return false, nil
 	}
 
+	// Strip trailing semicolon / space
+	rest = strings.TrimRight(rest, "; ")
+	upperRest = strings.TrimRight(upperRest, "; ")
+
 	// Handle default value
 	if upperRest == "DEFAULT" {
 		return true, nil
 	}
 
 	// strip quote
-	rest = strings.Replace(rest, "'", "", -1)
+	rest = strings.ReplaceAll(rest, "'", "")
+	upperRest = strings.ReplaceAll(upperRest, "'", "")
 	// Handle int value
 	i, err := strconv.ParseInt(rest, 10, 64)
 	if err == nil {
 		return true, &i
+	}
+
+	// handle unsupported duration value
+	if strings.HasSuffix(upperRest, "D") {
+		// 1d -> ms
+		v := rest[:len(rest)-1]
+		i, err := strconv.ParseInt(v, 10, 64)
+		if err == nil {
+			return true, new(i * 24 * 60 * 60 * 1000)
+		}
+	}
+	if strings.HasSuffix(upperRest, "MIN") {
+		// 1min -> 1m
+		rest = rest[:len(rest)-3] + "m"
+		upperRest = upperRest[:len(upperRest)-3] + "M"
 	}
 
 	// Handle duration value
