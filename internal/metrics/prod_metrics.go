@@ -20,8 +20,8 @@ type TablePgClassStats struct {
 	RowCount        int64
 	Writes          int64
 	Scans           int64
-	LastAnalyze     time.Time
-	LastAutoAnalyze time.Time
+	LastAnalyze     sql.NullTime
+	LastAutoAnalyze sql.NullTime
 }
 
 func getPgClassDatabaseStats(db *sql.DB) ([]TablePgClassStats, error) {
@@ -80,8 +80,8 @@ func GetDatabaseStats(db *sql.DB) (metricshelper.DatabaseMetrics, error) {
 		}
 
 		// If last analyze delta time exceed threshold, try to call analyze
-		lastAnalyze := min(time.Now().Sub(s.LastAutoAnalyze), time.Now().Sub(s.LastAnalyze))
-		if lastAnalyze.Hours() > AnalyzeDeltaThreshold.Hours() {
+		lastAnalyze := min(time.Now().Sub(s.LastAutoAnalyze.Time), time.Now().Sub(s.LastAnalyze.Time))
+		if (!s.LastAutoAnalyze.Valid && !s.LastAnalyze.Valid) || lastAnalyze.Hours() > AnalyzeDeltaThreshold.Hours() {
 			_, err := db.Exec(fmt.Sprintf("/* apercu */ANALYZE \"%s\".\"%s\"", s.SchemaName, s.TableName))
 			if err != nil {
 				if pqErr, ok := errors.AsType[*pq.Error](err); ok && (pqErr.Code == "25006" || pqErr.Code == "42501") {
