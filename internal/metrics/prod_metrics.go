@@ -59,8 +59,8 @@ func GetDatabaseStats(db *sql.DB) (metricshelper.DatabaseMetrics, error) {
 	tablesStats := make(map[helper.FullTableName]metricshelper.TableMetrics)
 
 	// Get stats age in seconds
-	var StatsAge int64
-	err := db.QueryRow("/* apercu */SELECT EXTRACT(EPOCH FROM (now() - stats_reset)) AS stats_age_s FROM pg_stat_database WHERE datname = current_database()").Scan(&StatsAge)
+	var statsAge sql.NullFloat64
+	err := db.QueryRow("/* apercu */SELECT EXTRACT(EPOCH FROM (now() - stats_reset)) AS stats_age_s FROM pg_stat_database WHERE datname = current_database()").Scan(&statsAge)
 	if err != nil {
 		return metricshelper.DatabaseMetrics{}, fmt.Errorf("failed to get prod database stats age: %v", err)
 	}
@@ -112,9 +112,9 @@ func GetDatabaseStats(db *sql.DB) (metricshelper.DatabaseMetrics, error) {
 		}
 
 		var wps, sps *float64
-		if StatsAge > 0 {
-			wps = new(float64(s.Writes) / float64(StatsAge))
-			sps = new(float64(s.Scans) / float64(StatsAge))
+		if statsAge.Valid && statsAge.Float64 >= 0 {
+			wps = new(float64(s.Writes) / statsAge.Float64)
+			sps = new(float64(s.Scans) / statsAge.Float64)
 		}
 
 		tablesStats[helper.FullTableName{
