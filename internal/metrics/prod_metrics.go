@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/lib/pq"
@@ -146,8 +148,21 @@ func GetDatabaseStats(db *sql.DB) (metricshelper.DatabaseMetrics, error) {
 		return metricshelper.DatabaseMetrics{}, fmt.Errorf("failed to get prod database size: %v", err)
 	}
 
+	// Retrieve the server version
+	var version string
+	err = db.QueryRow("/* apercu */SHOW server_version").Scan(&version)
+	if err != nil {
+		return metricshelper.DatabaseMetrics{}, fmt.Errorf("failed to get prod database version: %v", err)
+	}
+	versionPart, _, _ := strings.Cut(version, " ")
+	v, err := strconv.ParseFloat(versionPart, 32)
+	if err != nil {
+		return metricshelper.DatabaseMetrics{}, fmt.Errorf("failed to get prod database version: %v", err)
+	}
+
 	metrics := metricshelper.DatabaseMetrics{
 		TablesMetrics: tablesStats,
+		ServerVersion: float32(v),
 		DatabaseSize:  databaseSize,
 	}
 	injectTableActivity(&metrics)

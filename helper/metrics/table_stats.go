@@ -15,6 +15,7 @@ type TableMetrics struct {
 type DatabaseMetrics struct {
 	// DatabaseSize in bytes
 	DatabaseSize  int64
+	ServerVersion float32 `json:"server_version"`
 	TablesMetrics map[helper.FullTableName]TableMetrics
 }
 
