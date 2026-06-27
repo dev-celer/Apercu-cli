@@ -13,6 +13,34 @@ type QueryEvent struct {
 	Stats        QueryEventStats `json:"stats,omitempty"`
 }
 
+type QueryEventAnalysis struct {
+	Event       *QueryEvent        `json:"event"`
+	Type        EventOperationType `json:"type"`
+	Remediation string             `json:"remediation"`
+}
+
+type EventOperationType string
+
+var (
+	EventOperationTypeMetadataOnly     EventOperationType = "metadata_only"
+	EventOperationTypeScanUnderLock    EventOperationType = "scan_under_lock"
+	EventOperationTypeRewriteUnderLock EventOperationType = "rewrite_under_lock"
+	EventOperationTypeNonBlocking      EventOperationType = "non_blocking"
+)
+
+func (t EventOperationType) severity() int {
+	switch t {
+	case EventOperationTypeRewriteUnderLock:
+		return 3
+	case EventOperationTypeScanUnderLock:
+		return 2
+	case EventOperationTypeMetadataOnly:
+		return 1
+	default:
+		return 0
+	}
+}
+
 type QueryEventStats struct {
 	Lock  *QueryLock `json:"lock,omitempty"`
 	Table string     `json:"table,omitempty"`

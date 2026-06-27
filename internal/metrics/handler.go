@@ -64,7 +64,7 @@ func (h *MetricsHandler) Close() {
 func initializeEngines(prodDb, previewDb *sql.DB, prodStats metricshelper.DatabaseMetrics, dbConfig *config.Database, fullConfig *config.Config, warningStore *warning.WarningStore) ([]engines.MetricEngine, error) {
 	enginesList := make([]engines.MetricEngine, 0)
 
-	enginesList = append(enginesList, engines.NewLocksEngine())
+	enginesList = append(enginesList, engines.NewLocksEngine(prodStats))
 
 	queryEngine, err := engines.NewExplainQueryEngine(previewDb, dbConfig, prodDb, prodStats, warningStore)
 	if err != nil {
