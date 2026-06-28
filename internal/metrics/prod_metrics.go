@@ -16,12 +16,6 @@ import (
 )
 
 const AnalyzeDeltaThreshold = time.Hour * 24
-const DefaultHotFloorReadActivity float64 = 1
-const DefaultColdCeilingReadActivity float64 = 100
-const DefaultHotFloorWriteActivity float64 = 1
-const DefaultColdCeilingWriteActivity float64 = 100
-const DefaultHotPercentile float64 = 0.75
-const DefaultWarmPercentile float64 = 0.25
 const MinTableCountForPercentile int = 10
 
 type TablePgClassStats struct {
@@ -176,8 +170,8 @@ func injectTableActivity(databaseMetrics *metricshelper.DatabaseMetrics) {
 		// Percentile analysis is unreliable on small amount of data point
 		// For small schema apply analysis based on floor / ceiling values only
 		for k, i := range databaseMetrics.TablesMetrics {
-			i.WriteActivity = getActivityFromGuards(i.WritesPerSecond, DefaultHotFloorWriteActivity, DefaultColdCeilingWriteActivity)
-			i.ReadActivity = getActivityFromGuards(i.ScanPerSecond, DefaultHotFloorReadActivity, DefaultColdCeilingReadActivity)
+			i.WriteActivity, i.WriteDecision = getActivityFromGuards(i.WritesPerSecond, metricshelper.DefaultHotFloorWriteActivity, metricshelper.DefaultColdCeilingWriteActivity)
+			i.ReadActivity, i.ReadDecision = getActivityFromGuards(i.ScanPerSecond, metricshelper.DefaultHotFloorReadActivity, metricshelper.DefaultColdCeilingReadActivity)
 			databaseMetrics.TablesMetrics[k] = i
 		}
 		return
@@ -186,10 +180,10 @@ func injectTableActivity(databaseMetrics *metricshelper.DatabaseMetrics) {
 	// Extract all data points that pass the floor threshold
 	var rDataPoint, wDataPoint []float64
 	for _, i := range databaseMetrics.TablesMetrics {
-		if i.ScanPerSecond != nil && *i.ScanPerSecond >= DefaultHotFloorReadActivity {
+		if i.ScanPerSecond != nil && *i.ScanPerSecond >= metricshelper.DefaultHotFloorReadActivity {
 			rDataPoint = append(rDataPoint, *i.ScanPerSecond)
 		}
-		if i.WritesPerSecond != nil && *i.WritesPerSecond >= DefaultHotFloorWriteActivity {
+		if i.WritesPerSecond != nil && *i.WritesPerSecond >= metricshelper.DefaultHotFloorWriteActivity {
 			wDataPoint = append(wDataPoint, *i.WritesPerSecond)
 		}
 	}
@@ -199,56 +193,62 @@ func injectTableActivity(databaseMetrics *metricshelper.DatabaseMetrics) {
 	// Extract percentile reference values
 	var rHotValuePercentile, rWarmValuePercentile, wHotValuePercentile, wWarmValuePercentile float64
 	if len(rDataPoint) >= MinTableCountForPercentile {
-		rHotValuePercentile = extractPercentileFromDatapoint(rDataPoint, DefaultHotPercentile)
-		rWarmValuePercentile = extractPercentileFromDatapoint(rDataPoint, DefaultWarmPercentile)
+		rHotValuePercentile = extractPercentileFromDatapoint(rDataPoint, metricshelper.DefaultHotPercentile)
+		rWarmValuePercentile = extractPercentileFromDatapoint(rDataPoint, metricshelper.DefaultWarmPercentile)
 	}
 	if len(wDataPoint) >= MinTableCountForPercentile {
-		wHotValuePercentile = extractPercentileFromDatapoint(wDataPoint, DefaultHotPercentile)
-		wWarmValuePercentile = extractPercentileFromDatapoint(wDataPoint, DefaultWarmPercentile)
+		wHotValuePercentile = extractPercentileFromDatapoint(wDataPoint, metricshelper.DefaultHotPercentile)
+		wWarmValuePercentile = extractPercentileFromDatapoint(wDataPoint, metricshelper.DefaultWarmPercentile)
 	}
 
 	// Assign activity to all values
 	for k, i := range databaseMetrics.TablesMetrics {
 		if len(wDataPoint) >= MinTableCountForPercentile {
-			i.WriteActivity = getActivityFromRules(i.WritesPerSecond, wHotValuePercentile, wWarmValuePercentile, DefaultHotFloorWriteActivity, DefaultColdCeilingWriteActivity)
+			i.WriteActivity, i.WriteDecision = getActivityFromRules(i.WritesPerSecond, wHotValuePercentile, wWarmValuePercentile, metricshelper.DefaultHotFloorWriteActivity, metricshelper.DefaultColdCeilingWriteActivity)
 		} else {
-			i.WriteActivity = getActivityFromGuards(i.WritesPerSecond, DefaultHotFloorWriteActivity, DefaultColdCeilingWriteActivity)
+			i.WriteActivity, i.WriteDecision = getActivityFromGuards(i.WritesPerSecond, metricshelper.DefaultHotFloorWriteActivity, metricshelper.DefaultColdCeilingWriteActivity)
 		}
 
 		if len(rDataPoint) >= MinTableCountForPercentile {
-			i.ReadActivity = getActivityFromRules(i.ScanPerSecond, rHotValuePercentile, rWarmValuePercentile, DefaultHotFloorReadActivity, DefaultColdCeilingReadActivity)
+			i.ReadActivity, i.ReadDecision = getActivityFromRules(i.ScanPerSecond, rHotValuePercentile, rWarmValuePercentile, metricshelper.DefaultHotFloorReadActivity, metricshelper.DefaultColdCeilingReadActivity)
 		} else {
-			i.ReadActivity = getActivityFromGuards(i.ScanPerSecond, DefaultHotFloorReadActivity, DefaultColdCeilingReadActivity)
+			i.ReadActivity, i.ReadDecision = getActivityFromGuards(i.ScanPerSecond, metricshelper.DefaultHotFloorReadActivity, metricshelper.DefaultColdCeilingReadActivity)
 		}
 
 		databaseMetrics.TablesMetrics[k] = i
 	}
 }
 
-func getActivityFromGuards(ops *float64, hotFloor, coldCeiling float64) metricshelper.TableActivity {
+func getActivityFromGuards(ops *float64, hotFloor, coldCeiling float64) (metricshelper.TableActivity, metricshelper.ActivityDecision) {
 	if ops == nil {
-		return metricshelper.TableActivityNone
+		return metricshelper.TableActivityNone, metricshelper.ActivityDecisionNone
 	}
 	if *ops >= coldCeiling {
-		return metricshelper.TableActivityHot
+		return metricshelper.TableActivityHot, metricshelper.ActivityDecisionLowCount
 	} else if *ops >= hotFloor {
-		return metricshelper.TableActivityWarm
+		return metricshelper.TableActivityWarm, metricshelper.ActivityDecisionLowCount
 	}
-	return metricshelper.TableActivityCold
+	return metricshelper.TableActivityCold, metricshelper.ActivityDecisionLowCount
 }
 
-func getActivityFromRules(ops *float64, hotPercentileValue, warmPercentileValue, hotFloor, coldCeiling float64) metricshelper.TableActivity {
+func getActivityFromRules(ops *float64, hotPercentileValue, warmPercentileValue, hotFloor, coldCeiling float64) (metricshelper.TableActivity, metricshelper.ActivityDecision) {
 	if ops == nil {
-		return metricshelper.TableActivityNone
+		return metricshelper.TableActivityNone, metricshelper.ActivityDecisionNone
 	}
 
-	if *ops >= hotPercentileValue && *ops >= hotFloor {
-		return metricshelper.TableActivityHot
+	if *ops >= hotPercentileValue {
+		if *ops >= hotFloor {
+			return metricshelper.TableActivityHot, metricshelper.ActivityDecisionPercentile
+		}
+		return metricshelper.TableActivityWarm, metricshelper.ActivityDecisionFloor
 	}
-	if *ops >= warmPercentileValue || *ops >= coldCeiling {
-		return metricshelper.TableActivityWarm
+	if *ops >= coldCeiling {
+		return metricshelper.TableActivityWarm, metricshelper.ActivityDecisionCeiling
 	}
-	return metricshelper.TableActivityCold
+	if *ops >= warmPercentileValue {
+		return metricshelper.TableActivityWarm, metricshelper.ActivityDecisionPercentile
+	}
+	return metricshelper.TableActivityCold, metricshelper.ActivityDecisionPercentile
 }
 
 func extractPercentileFromDatapoint(datapoint []float64, percent float64) float64 {

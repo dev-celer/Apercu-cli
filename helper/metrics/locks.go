@@ -2,6 +2,13 @@ package metrics
 
 import "time"
 
+const DefaultHotFloorReadActivity float64 = 1
+const DefaultColdCeilingReadActivity float64 = 100
+const DefaultHotFloorWriteActivity float64 = 1
+const DefaultColdCeilingWriteActivity float64 = 100
+const DefaultHotPercentile float64 = 0.75
+const DefaultWarmPercentile float64 = 0.25
+
 type QueryEvent struct {
 	SQL          string          `json:"sql"`
 	StartedAt    time.Time       `json:"started_at"`
@@ -58,6 +65,14 @@ const (
 	QueryLockRowShare             QueryLock = "ROW_SHARE"
 	QueryLockAccessShare          QueryLock = "ACCESS_SHARE"
 )
+
+func (l QueryLock) IsReadBlocking() bool {
+	return l == QueryLockAccessExclusive
+}
+
+func (l QueryLock) IsWriteBlocking() bool {
+	return l == QueryLockAccessExclusive || l == QueryLockExclusive || l == QueryLockShareRowExclusive || l == QueryLockShare
+}
 
 type LockMetrics struct {
 	LockCount     int64         `yaml:"lock_count" json:"lock_count"`
