@@ -26,7 +26,7 @@ type QueryEvent struct {
 type QueryEventAnalysis struct {
 	Event          *QueryEvent                 `json:"event"`
 	Type           EventOperationType          `json:"type"`
-	AffectedTables []helper.FullTableName      `json:"affected_columns"`
+	AffectedTables []helper.FullTableName      `json:"affected_tables"`
 	Warnings       []warning_interface.Warning `json:"warnings"`
 	Lock           QueryLock                   `json:"lock,omitempty"`
 }
