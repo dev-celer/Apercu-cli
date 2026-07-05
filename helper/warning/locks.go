@@ -196,3 +196,115 @@ func (w *LockWarning) GetStateValues() (json.RawMessage, error) {
 	}
 	return json.Marshal(v)
 }
+
+var (
+	CodeCreateIndexWithoutConcurrently             Code = "CREATE_INDEX_WITHOUT_CONCURRENTLY"
+	CodeDropIndexCascadeWithoutConcurrently        Code = "DROP_INDEX_CASCADE_WITHOUT_CONCURRENTLY"
+	CodeDropIndexWithoutConcurrently               Code = "DROP_INDEX_WITHOUT_CONCURRENTLY"
+	CodeReindexWithoutConcurrently                 Code = "REINDEX_WITHOUT_CONCURRENTLY"
+	CodeRefreshMaterializedViewWithoutConcurrently Code = "REFRESH_MATERIALIZED_VIEW_WITHOUT_CONCURRENTLY"
+	CodeCluster                                    Code = "CLUSTER"
+	CodeVacuumFull                                 Code = "VACUUM_FULL"
+	CodeCreateTrigger                              Code = "CREATE_TRIGGER"
+	CodeCreateRule                                 Code = "CREATE_RULE"
+	CodeAlterRule                                  Code = "ALTER_RULE"
+	CodeAlterType                                  Code = "ALTER_TYPE"
+	CodeAlterTableDropConstraint                   Code = "ALTER_TABLE_DROP_CONSTRAINT"
+	CodeAlterTableDropColumn                       Code = "ALTER_TABLE_DROP_COLUMN"
+	CodeAlterTableLogged                           Code = "ALTER_TABLE_LOGGED"
+	CodeAlterTableTablespace                       Code = "ALTER_TABLE_TABLESPACE"
+	CodeAlterTableFillFactor                       Code = "ALTER_TABLE_FILL_FACTOR"
+	CodeAlterTableReset                            Code = "ALTER_TABLE_RESET"
+	CodeAlterTableSwitchTrigger                    Code = "ALTER_TABLE_SWITCH_TRIGGER"
+	CodeAlterTableRename                           Code = "ALTER_TABLE_RENAME"
+	CodeAddColumnGeneratedAlwaysAsStored           Code = "ADD_COLUMN_GENERATED_ALWAYS_AS_STORED"
+	CodeAddColumnGeneratedAlwaysAsIdentity         Code = "ADD_COLUMN_GENERATED_ALWAYS_AS_IDENTITY"
+	CodeAddColumnVolatileDefault                   Code = "ADD_COLUMN_VOLATILE_DEFAULT"
+	CodeAddColumn                                  Code = "ADD_COLUMN"
+	CodeAlterColumnDefault                         Code = "ALTER_COLUMN_DEFAULT"
+	CodeAlterColumnDropNotNull                     Code = "ALTER_COLUMN_DROP_NOT_NULL"
+	CodeAlterColumnSetNotNull                      Code = "ALTER_COLUMN_SET_NOT_NULL"
+	CodeAlterColumnSetTypeNotWidening              Code = "ALTER_COLUMN_SET_TYPE_NOT_WIDENING"
+	CodeAlterColumnSetTypeWidening                 Code = "ALTER_COLUMN_SET_TYPE_WIDENING"
+	CodeAlterColumnSetStorage                      Code = "ALTER_COLUMN_SET_STORAGE"
+	CodeAlterColumnSetStatistics                   Code = "ALTER_COLUMN_SET_STATISTICS"
+	CodeAlterTableAddConstraintNotValid            Code = "ALTER_TABLE_ADD_CONSTRAINT_NOT_VALID"
+	CodeAlterTableAddConstraint                    Code = "ALTER_TABLE_ADD_CONSTRAINT"
+	CodeAlterTableAddUniqueWithoutIndex            Code = "ALTER_TABLE_ADD_UNIQUE_WITHOUT_INDEX"
+	CodeAlterTableAddUniqueWithIndex               Code = "ALTER_TABLE_ADD_UNIQUE_WITH_INDEX"
+	CodeAlterTableAddConstraintExclude             Code = "ALTER_TABLE_ADD_CONSTRAINT_EXCLUDE"
+)
+
+func NewLockWarnings(query *metrics.QueryEventAnalysis, code Code, pgVersion float32, prodStats *metrics.DatabaseMetrics) []*LockWarning {
+	if query == nil {
+		return nil
+	}
+
+	var remediation string
+	switch code {
+	case CodeCreateIndexWithoutConcurrently:
+		remediation = "Use the keyword 'CONCURRENTLY' with 'CREATE INDEX' to prevent a lock from taking place"
+	case CodeDropIndexCascadeWithoutConcurrently:
+		remediation = "Use the keyword 'CONCURRENTLY' with 'DROP INDEX' to prevent a lock from taking place, note that 'CASCADE' is not supported with 'CONCURRENTLY', you will need to drop each objects that depend on this index manually"
+	case CodeDropIndexWithoutConcurrently:
+		remediation = "Use the keyword 'CONCURRENTLY' with 'DROP INDEX' to prevent a lock from taking place"
+	case CodeReindexWithoutConcurrently:
+		remediation = "You can use the keywork 'CONCURRENTLY' with 'REINDEX' to prevent a lock from taking place, note that if 'REINDEX CONCURRENTLY' fail, it will leave behind a broken index that need to be cleaned up manually"
+	case CodeRefreshMaterializedViewWithoutConcurrently:
+		remediation = "Use the keyword 'CONCURRENTLY' with 'REFRESH MATERIALIZED VIEW' to prevent a lock from taking place"
+	case CodeCluster:
+	case CodeVacuumFull:
+	case CodeCreateTrigger:
+	case CodeCreateRule:
+	case CodeAlterRule:
+	case CodeAlterType:
+	case CodeAlterTableDropConstraint:
+	case CodeAlterTableDropColumn:
+	case CodeAlterTableLogged:
+	case CodeAlterTableTablespace:
+	case CodeAlterTableFillFactor:
+	case CodeAlterTableReset:
+	case CodeAlterTableSwitchTrigger:
+	case CodeAlterTableRename:
+	case CodeAddColumnGeneratedAlwaysAsStored:
+		remediation = "Avoid adding a new column with 'GENERATED ALWAYS AS ... STORED' where possible, instead you can create a simple nullable column, create a trigger 'BEFORE INSERT OR UPDATE' with your default, backfill the rows than set to NOT NULL"
+	case CodeAddColumnGeneratedAlwaysAsIdentity:
+		remediation = "Avoid adding directly a new column with 'GENERATED ALWAYS AS IDENTITY', instead you can create a nullable column, backfill the rows, set 'NOT NULL', than attach the 'GENERATED ALWAYS AS IDENTITY' property"
+	case CodeAddColumnVolatileDefault:
+		remediation = "When adding a new column with volatile default, we recommend to first add a nullable column without default, set default for new rows then backfill existing rows in batches"
+	case CodeAddColumn:
+	case CodeAlterColumnSetNotNull:
+	case CodeAlterColumnDropNotNull:
+	case CodeAlterColumnDefault:
+	case CodeAlterColumnSetStatistics:
+	case CodeAlterColumnSetStorage:
+	case CodeAlterColumnSetTypeNotWidening:
+		remediation = "Add a new column of the target type, backfill it, swap via RENAME then dropping the old column"
+	case CodeAlterColumnSetTypeWidening:
+	case CodeAlterTableAddConstraintNotValid:
+	case CodeAlterTableAddConstraint:
+		remediation = "Add your constraint with 'NOT VALID', then VALIDATE CONSTRAINT in a separate statement"
+	case CodeAlterTableAddUniqueWithIndex:
+	case CodeAlterTableAddUniqueWithoutIndex:
+		remediation = "First create a unique index concurrently then add your UNIQUE CONSTRAINT / PRIMARY KEY with 'USING INDEX <idx>'"
+	case CodeAlterTableAddConstraintExclude:
+	default:
+		return nil
+	}
+
+	warnings := make([]*LockWarning, 0, len(query.AffectedTables))
+	for _, table := range query.AffectedTables {
+		warnings = append(warnings, &LockWarning{
+			code:          code,
+			operationType: query.Type,
+			query:         query.Event.SQL,
+			table:         table,
+			tableStats:    prodStats.TablesMetrics[table],
+			lock:          query.Lock,
+			pgVersion:     pgVersion,
+			remediation:   remediation,
+		})
+	}
+
+	return warnings
+}

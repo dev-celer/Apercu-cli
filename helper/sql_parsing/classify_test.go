@@ -1,4 +1,4 @@
-package metrics
+package sql_parsing
 
 import "testing"
 

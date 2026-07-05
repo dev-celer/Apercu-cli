@@ -1,6 +1,10 @@
 package metrics
 
-import "time"
+import (
+	"apercu-cli/helper"
+	"apercu-cli/helper/warning_interface"
+	"time"
+)
 
 const DefaultHotFloorReadActivity float64 = 1
 const DefaultColdCeilingReadActivity float64 = 100
@@ -10,20 +14,21 @@ const DefaultHotPercentile float64 = 0.75
 const DefaultWarmPercentile float64 = 0.25
 
 type QueryEvent struct {
-	SQL          string          `json:"sql"`
-	StartedAt    time.Time       `json:"started_at"`
-	Duration     time.Duration   `json:"duration"`
-	CommandTag   string          `json:"command_tag"`
-	RowsAffected int64           `json:"rows_affected"`
-	LocksTimeout *int64          `json:"locks_timeout,omitempty"`
-	Error        string          `json:"error,omitempty"`
-	Stats        QueryEventStats `json:"stats,omitempty"`
+	SQL          string        `json:"sql"`
+	StartedAt    time.Time     `json:"started_at"`
+	Duration     time.Duration `json:"duration"`
+	CommandTag   string        `json:"command_tag"`
+	RowsAffected int64         `json:"rows_affected"`
+	LocksTimeout *int64        `json:"locks_timeout,omitempty"`
+	Error        string        `json:"error,omitempty"`
 }
 
 type QueryEventAnalysis struct {
-	Event       *QueryEvent        `json:"event"`
-	Type        EventOperationType `json:"type"`
-	Remediation string             `json:"remediation"`
+	Event          *QueryEvent                 `json:"event"`
+	Type           EventOperationType          `json:"type"`
+	AffectedTables []helper.FullTableName      `json:"affected_columns"`
+	Warnings       []warning_interface.Warning `json:"warnings"`
+	Lock           QueryLock                   `json:"lock,omitempty"`
 }
 
 type EventOperationType string
@@ -35,7 +40,7 @@ var (
 	EventOperationTypeNonBlocking      EventOperationType = "non_blocking"
 )
 
-func (t EventOperationType) severity() int {
+func (t EventOperationType) Severity() int {
 	switch t {
 	case EventOperationTypeRewriteUnderLock:
 		return 3
@@ -46,11 +51,6 @@ func (t EventOperationType) severity() int {
 	default:
 		return 0
 	}
-}
-
-type QueryEventStats struct {
-	Lock  *QueryLock `json:"lock,omitempty"`
-	Table string     `json:"table,omitempty"`
 }
 
 type QueryLock string

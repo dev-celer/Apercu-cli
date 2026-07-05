@@ -2,6 +2,7 @@ package warning
 
 import (
 	"apercu-cli/config"
+	"apercu-cli/helper/warning_interface"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -11,36 +12,16 @@ import (
 	"strings"
 )
 
-type Warning interface {
-	GetText() string
-	GetTextLong() string
-	GetLevel() Level
-	GetCode() Code
-	GetFullCode() string
-	GetIsIdempotent() bool
-	GetStateValues() (json.RawMessage, error)
-}
+type Warning = warning_interface.Warning
 
-type Code string
+type Code = warning_interface.Code
 
-type Level uint8
-
-func (l Level) String() string {
-	switch l {
-	case WarningLevelLow:
-		return "low"
-	case WarningLevelMedium:
-		return "medium"
-	case WarningLevelHigh:
-		return "high"
-	}
-	return "unknown"
-}
+type Level = warning_interface.Level
 
 const (
-	WarningLevelLow    Level = 1
-	WarningLevelMedium Level = 2
-	WarningLevelHigh   Level = 3
+	WarningLevelLow    = warning_interface.WarningLevelLow
+	WarningLevelMedium = warning_interface.WarningLevelMedium
+	WarningLevelHigh   = warning_interface.WarningLevelHigh
 )
 
 func PrintWarning(w Warning) {

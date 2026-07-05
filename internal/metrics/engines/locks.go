@@ -1,7 +1,10 @@
 package engines
 
 import (
+	"apercu-cli/helper"
 	metricshelper "apercu-cli/helper/metrics"
+	parsinghelper "apercu-cli/helper/sql_parsing"
+	"apercu-cli/helper/warning"
 	"apercu-cli/output"
 	"encoding/json"
 	"log/slog"
@@ -12,16 +15,22 @@ import (
 type LocksEngine struct {
 	ProdStats     metricshelper.DatabaseMetrics
 	PgProxyEvents []metricshelper.QueryEventAnalysis
+	WarningStore  *warning.WarningStore
 }
 
-func NewLocksEngine(prodStats metricshelper.DatabaseMetrics) *LocksEngine {
+func NewLocksEngine(prodStats metricshelper.DatabaseMetrics, warningStore *warning.WarningStore) *LocksEngine {
 	return &LocksEngine{
 		ProdStats:     prodStats,
 		PgProxyEvents: make([]metricshelper.QueryEventAnalysis, 0),
+		WarningStore:  warningStore,
 	}
 }
 
 func (e *LocksEngine) CollectPreMigrationMetrics() error { return nil }
+
+func parseTables(sql string) []helper.FullTableName {
+
+}
 
 func (e *LocksEngine) SendPgProxyLogs(logs string) {
 	slog.Debug("Start pg proxy logs parsing for locks detection")
@@ -35,11 +44,12 @@ func (e *LocksEngine) SendPgProxyLogs(logs string) {
 			continue
 		}
 
+		lock := parsinghelper.GetLockType(query.SQL)
 		// Filter locks type
-		if query.Stats.Lock == nil {
+		if lock == nil {
 			continue
 		}
-		switch *query.Stats.Lock {
+		switch *lock {
 		case metricshelper.QueryLockAccessExclusive:
 		case metricshelper.QueryLockExclusive:
 		case metricshelper.QueryLockShareRowExclusive:
@@ -49,8 +59,11 @@ func (e *LocksEngine) SendPgProxyLogs(logs string) {
 		}
 
 		e.PgProxyEvents = append(e.PgProxyEvents, metricshelper.QueryEventAnalysis{
-			Event: &query,
-			Type:  metricshelper.EventOperationTypeNonBlocking,
+			Event:          &query,
+			Type:           metricshelper.EventOperationTypeNonBlocking,
+			AffectedTables: parseTables(query.SQL),
+			Warnings:       make([]warning.Warning, 0),
+			Lock:           *lock,
 		})
 	}
 	slog.Debug("Pg proxy logs parsing for locks detection complete", "locks_count", len(e.PgProxyEvents))
@@ -63,9 +76,7 @@ func (e *LocksEngine) CollectPostMigrationMetrics() error {
 		if query.Event == nil {
 			continue
 		}
-		kind, remediation := metricshelper.ClassifyOperation(query.Event.SQL, e.ProdStats.ServerVersion)
-		query.Type = kind
-		query.Remediation = remediation
+		parsinghelper.ClassifyOperation(query, e.ProdStats.ServerVersion, e.WarningStore, &e.ProdStats)
 	}
 	return nil
 }
@@ -76,12 +87,12 @@ func (e *LocksEngine) StoreMetricsToOutput(metrics *output.OutputDatabaseMetrics
 	}
 
 	for _, query := range e.PgProxyEvents {
-		if query.Event.Stats.Lock == nil || query.Event.Stats.Table == "" {
+		if len(query.AffectedTables) == 0 {
 			continue
 		}
 
 		// Get lock map
-		l, ok := metrics.Locks[*query.Event.Stats.Lock]
+		l, ok := metrics.Locks[query.Lock]
 		if !ok {
 			l = make(map[string]metricshelper.LockMetrics)
 		}
@@ -105,7 +116,7 @@ func (e *LocksEngine) StoreMetricsToOutput(metrics *output.OutputDatabaseMetrics
 		}
 
 		l[query.Event.Stats.Table] = t
-		metrics.Locks[*query.Event.Stats.Lock] = l
+		metrics.Locks[query.Lock] = l
 	}
 
 	return nil
