@@ -48,19 +48,17 @@ func NewMigrationOutput() *OutputDatabaseMigration {
 }
 
 type OutputDatabaseMetrics struct {
-	Prod           metricshelper.DatabaseMetrics                                    `yaml:"prod,omitempty" json:"prod,omitempty"`
-	SchemaDiff     map[string]*metricshelper.SchemaDiff                             `yaml:"schema_diff,omitempty" json:"schema_diff,omitempty"`
-	Locks          map[metricshelper.QueryLock]map[string]metricshelper.LockMetrics `yaml:"locks,omitempty" json:"locks,omitempty"`
-	RewrittenTable []helper.FullTableName                                           `yaml:"rewritten_table,omitempty" json:"rewritten_table,omitempty"`
-	Explains       []OutputDatabaseExplainQuery                                     `yaml:"explains,omitempty" json:"explains,omitempty"`
-	Storage        *OutputDatabaseStorageMetrics                                    `yaml:"storage,omitempty" json:"storage,omitempty"`
+	Prod           metricshelper.DatabaseMetrics        `yaml:"prod,omitempty" json:"prod,omitempty"`
+	SchemaDiff     map[string]*metricshelper.SchemaDiff `yaml:"schema_diff,omitempty" json:"schema_diff,omitempty"`
+	RewrittenTable []helper.FullTableName               `yaml:"rewritten_table,omitempty" json:"rewritten_table,omitempty"`
+	Explains       []OutputDatabaseExplainQuery         `yaml:"explains,omitempty" json:"explains,omitempty"`
+	Storage        *OutputDatabaseStorageMetrics        `yaml:"storage,omitempty" json:"storage,omitempty"`
 }
 
 func NewOutputDatabaseMetrics() *OutputDatabaseMetrics {
 	return &OutputDatabaseMetrics{
 		SchemaDiff:     make(map[string]*metricshelper.SchemaDiff),
 		RewrittenTable: make([]helper.FullTableName, 0),
-		Locks:          make(map[metricshelper.QueryLock]map[string]metricshelper.LockMetrics),
 		Explains:       make([]OutputDatabaseExplainQuery, 0),
 	}
 }
@@ -284,12 +282,6 @@ After Migration Size: {{size_pretty $db.Migration.Metrics.Storage.FinalSize}}
 Size Delta: {{size_pretty $db.Migration.Metrics.Storage.SizeDelta}}
 --- WAL Detail ---
 WAL Size Delta: {{size_pretty $db.Migration.Metrics.Storage.WALDelta}}
-{{- end}}
-{{- if $db.Migration.Metrics.Locks}}
---- Locks detail ---
-{{range $lockType, $tables := $db.Migration.Metrics.Locks}}{{$lockType}}:
-{{range $table, $stats := $tables}}{{$table}} | count {{$stats.LockCount}} | mean {{$stats.MeanDuration}} | max {{$stats.MaxDuration}}
-{{end}}{{end}}
 {{- end}}
 ` + "```" + `
 

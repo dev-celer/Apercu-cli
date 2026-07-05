@@ -75,7 +75,6 @@ func TestRenderMarkdown_MigrationAndSeeding(t *testing.T) {
 					Metrics: &OutputDatabaseMetrics{
 						Prod:       metricshelper.DatabaseMetrics{},
 						SchemaDiff: make(map[string]*metricshelper.SchemaDiff),
-						Locks:      map[metricshelper.QueryLock]map[string]metricshelper.LockMetrics{},
 						Explains:   make([]OutputDatabaseExplainQuery, 0),
 						Storage: &OutputDatabaseStorageMetrics{
 							InitialSize: 10,

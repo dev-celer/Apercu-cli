@@ -1,7 +1,6 @@
 package engines
 
 import (
-	"apercu-cli/helper"
 	metricshelper "apercu-cli/helper/metrics"
 	parsinghelper "apercu-cli/helper/sql_parsing"
 	"apercu-cli/helper/warning"
@@ -9,7 +8,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"strings"
-	"time"
 )
 
 type LocksEngine struct {
@@ -27,10 +25,6 @@ func NewLocksEngine(prodStats metricshelper.DatabaseMetrics, warningStore *warni
 }
 
 func (e *LocksEngine) CollectPreMigrationMetrics() error { return nil }
-
-func parseTables(sql string) []helper.FullTableName {
-
-}
 
 func (e *LocksEngine) SendPgProxyLogs(logs string) {
 	slog.Debug("Start pg proxy logs parsing for locks detection")
@@ -61,7 +55,7 @@ func (e *LocksEngine) SendPgProxyLogs(logs string) {
 		e.PgProxyEvents = append(e.PgProxyEvents, metricshelper.QueryEventAnalysis{
 			Event:          &query,
 			Type:           metricshelper.EventOperationTypeNonBlocking,
-			AffectedTables: parseTables(query.SQL),
+			AffectedTables: parsinghelper.ParseTables(query.SQL),
 			Warnings:       make([]warning.Warning, 0),
 			Lock:           *lock,
 		})
@@ -82,42 +76,5 @@ func (e *LocksEngine) CollectPostMigrationMetrics() error {
 }
 
 func (e *LocksEngine) StoreMetricsToOutput(metrics *output.OutputDatabaseMetrics) error {
-	if metrics.Locks == nil {
-		metrics.Locks = make(map[metricshelper.QueryLock]map[string]metricshelper.LockMetrics)
-	}
-
-	for _, query := range e.PgProxyEvents {
-		if len(query.AffectedTables) == 0 {
-			continue
-		}
-
-		// Get lock map
-		l, ok := metrics.Locks[query.Lock]
-		if !ok {
-			l = make(map[string]metricshelper.LockMetrics)
-		}
-
-		// Get table map
-		t, ok := l[query.Event.Stats.Table]
-		if !ok {
-			t = metricshelper.LockMetrics{
-				LockCount:     1,
-				TotalDuration: query.Event.Duration,
-				MeanDuration:  query.Event.Duration,
-				MaxDuration:   query.Event.Duration,
-			}
-		} else {
-			t.LockCount++
-			t.TotalDuration += query.Event.Duration
-			t.MeanDuration = t.TotalDuration / time.Duration(t.LockCount)
-			if t.MaxDuration < query.Event.Duration {
-				t.MaxDuration = query.Event.Duration
-			}
-		}
-
-		l[query.Event.Stats.Table] = t
-		metrics.Locks[query.Lock] = l
-	}
-
 	return nil
 }
