@@ -20,6 +20,7 @@ func ClassifyOperation(query *metricshelper.QueryEventAnalysis, serverVersion fl
 	upper := strings.ToUpper(strings.TrimSpace(query.Event.SQL))
 	if upper == "" {
 		query.Type = metricshelper.EventOperationTypeNonBlocking
+		return
 	}
 
 	hasPrefix := func(p string) bool { return strings.HasPrefix(upper, p) }
