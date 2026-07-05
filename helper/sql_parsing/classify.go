@@ -7,11 +7,11 @@ import (
 )
 
 func appendWarnings(w []*warning.LockWarning, warningStore *warning.WarningStore, query *metricshelper.QueryEventAnalysis) {
-	if warningStore != nil {
-		for _, i := range w {
+	for _, i := range w {
+		if warningStore != nil {
 			warningStore.AddWarning(i)
-			query.Warnings = append(query.Warnings, i)
 		}
+		query.Warnings = append(query.Warnings, i)
 	}
 }
 
