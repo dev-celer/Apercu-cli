@@ -11,16 +11,18 @@ import (
 )
 
 type LocksEngine struct {
-	ProdStats     metricshelper.DatabaseMetrics
-	PgProxyEvents []metricshelper.QueryEventAnalysis
-	WarningStore  *warning.WarningStore
+	ProdStats          metricshelper.DatabaseMetrics
+	PgProxyEvents      []metricshelper.QueryEventAnalysis
+	WarningStore       *warning.WarningStore
+	initialLockTimeout int64
 }
 
 func NewLocksEngine(prodStats metricshelper.DatabaseMetrics, warningStore *warning.WarningStore) *LocksEngine {
 	return &LocksEngine{
-		ProdStats:     prodStats,
-		PgProxyEvents: make([]metricshelper.QueryEventAnalysis, 0),
-		WarningStore:  warningStore,
+		ProdStats:          prodStats,
+		PgProxyEvents:      make([]metricshelper.QueryEventAnalysis, 0),
+		WarningStore:       warningStore,
+		initialLockTimeout: 0,
 	}
 }
 
@@ -30,12 +32,24 @@ func (e *LocksEngine) SendPgProxyLogs(logs string) {
 	slog.Debug("Start pg proxy logs parsing for locks detection")
 	e.PgProxyEvents = make([]metricshelper.QueryEventAnalysis, 0)
 
+	currentLockTimeout := e.initialLockTimeout
+
 	for line := range strings.Lines(logs) {
 		query := metricshelper.QueryEvent{}
 		err := json.Unmarshal([]byte(line), &query)
 		if err != nil {
 			slog.Debug("Error parsing query line", "line", line, "error", err)
 			continue
+		}
+
+		// Detect if the lock_timeout value was changed
+		hasChanged, lockTimeout := parsinghelper.GetLockTimeoutValue(query.SQL)
+		if hasChanged {
+			if lockTimeout == nil {
+				currentLockTimeout = e.initialLockTimeout
+			} else {
+				currentLockTimeout = *lockTimeout
+			}
 		}
 
 		lock := parsinghelper.GetLockType(query.SQL)
@@ -52,10 +66,20 @@ func (e *LocksEngine) SendPgProxyLogs(logs string) {
 			continue
 		}
 
+		tables := parsinghelper.ParseTables(query.SQL)
+
+		// Ensure that lock_timeout is set
+		if currentLockTimeout == 0 {
+			for _, table := range tables {
+				w := warning.NewLockTimeoutWarning(table)
+				e.WarningStore.AddWarning(w)
+			}
+		}
+
 		e.PgProxyEvents = append(e.PgProxyEvents, metricshelper.QueryEventAnalysis{
 			Event:          &query,
 			Type:           metricshelper.EventOperationTypeNonBlocking,
-			AffectedTables: parsinghelper.ParseTables(query.SQL),
+			AffectedTables: tables,
 			Warnings:       make([]warning.Warning, 0),
 			Lock:           *lock,
 		})

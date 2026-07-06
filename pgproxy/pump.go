@@ -173,12 +173,9 @@ func observeUpstream(msg pgproto3.BackendMessage, state *connState) {
 			CommandTag:   state.pendingTag,
 			Error:        state.pendingError,
 			RowsAffected: parseRowsAffected(state.pendingTag),
-			LocksTimeout: state.locksTimeout,
 		}
 
 		state.ResetPending()
-		handleSetLocksTimeoutEvent(&ev)
-		state.locksTimeout = ev.LocksTimeout
 		handleEvent(ev)
 	}
 }
