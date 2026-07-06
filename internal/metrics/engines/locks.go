@@ -31,7 +31,7 @@ func NewLocksEngine(prodDb *sql.DB, prodStats metricshelper.DatabaseMetrics, war
 
 func (e *LocksEngine) CollectPreMigrationMetrics() error {
 	// Get the current value of lock_timeout from the production database before any migration statement
-	err := e.prodDb.QueryRow("SELECT setting::int FROM pg_settings WHERE name = 'lock_timeout';").Scan(&e.initialLockTimeout)
+	err := e.prodDb.QueryRow("SELECT reset_val::int FROM pg_settings WHERE name = 'lock_timeout';").Scan(&e.initialLockTimeout)
 	if err != nil {
 		return err
 	}
