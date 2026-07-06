@@ -5,20 +5,23 @@ import (
 	parsinghelper "apercu-cli/helper/sql_parsing"
 	"apercu-cli/helper/warning"
 	"apercu-cli/output"
+	"database/sql"
 	"encoding/json"
 	"log/slog"
 	"strings"
 )
 
 type LocksEngine struct {
+	prodDb             *sql.DB
 	ProdStats          metricshelper.DatabaseMetrics
 	PgProxyEvents      []metricshelper.QueryEventAnalysis
 	WarningStore       *warning.WarningStore
 	initialLockTimeout int64
 }
 
-func NewLocksEngine(prodStats metricshelper.DatabaseMetrics, warningStore *warning.WarningStore) *LocksEngine {
+func NewLocksEngine(prodDb *sql.DB, prodStats metricshelper.DatabaseMetrics, warningStore *warning.WarningStore) *LocksEngine {
 	return &LocksEngine{
+		prodDb:             prodDb,
 		ProdStats:          prodStats,
 		PgProxyEvents:      make([]metricshelper.QueryEventAnalysis, 0),
 		WarningStore:       warningStore,
@@ -26,7 +29,14 @@ func NewLocksEngine(prodStats metricshelper.DatabaseMetrics, warningStore *warni
 	}
 }
 
-func (e *LocksEngine) CollectPreMigrationMetrics() error { return nil }
+func (e *LocksEngine) CollectPreMigrationMetrics() error {
+	// Get the current value of lock_timeout from the production database before any migration statement
+	err := e.prodDb.QueryRow("SELECT setting::int FROM pg_settings WHERE name = 'lock_timeout';").Scan(&e.initialLockTimeout)
+	if err != nil {
+		return err
+	}
+	return nil
+}
 
 func (e *LocksEngine) SendPgProxyLogs(logs string) {
 	slog.Debug("Start pg proxy logs parsing for locks detection")
