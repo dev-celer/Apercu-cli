@@ -20,7 +20,6 @@ type connState struct {
 	pendingStart  time.Time
 	pendingTag    string
 	pendingError  string
-	locksTimeout  *int64
 }
 
 func newConnState() *connState {
