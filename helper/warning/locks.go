@@ -294,12 +294,22 @@ func NewLockWarnings(query *metrics.QueryEventAnalysis, code Code, pgVersion flo
 
 	warnings := make([]*LockWarning, 0, len(query.AffectedTables))
 	for _, table := range query.AffectedTables {
+		var prodTableMetric metrics.TableMetrics
+		if prodStats != nil {
+			// If the table wasn't found on the prod database, ignore the warning
+			x, ok := prodStats.TablesMetrics[table]
+			prodTableMetric = x
+			if !ok {
+				continue
+			}
+		}
+
 		warnings = append(warnings, &LockWarning{
 			code:          code,
 			operationType: query.Type,
 			query:         query.Event.SQL,
 			table:         table,
-			tableStats:    prodStats.TablesMetrics[table],
+			tableStats:    prodTableMetric,
 			lock:          query.Lock,
 			pgVersion:     pgVersion,
 			remediation:   remediation,
