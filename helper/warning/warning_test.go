@@ -268,6 +268,99 @@ func TestReconcile_IgnoredIdempotentFilteredOut(t *testing.T) {
 	assert.False(t, ok, "ignored warning must not be persisted")
 }
 
+func TestCollapseLockTimeoutWarnings(t *testing.T) {
+	t.Parallel()
+
+	lockOrders := NewLockTimeoutWarning(helper.FullTableName{Schema: "public", Table: "orders"})
+	lockUsers := NewLockTimeoutWarning(helper.FullTableName{Schema: "public", Table: "users"})
+	stateFile := NewStateFileWarning("/tmp/x")
+	wal := NewWALSizeWarning(2*1024*1024*1024, 1024*1024*1024)
+
+	cases := []struct {
+		name             string
+		in               []Warning
+		wantOther        []Warning
+		wantCollapsed    bool
+		wantTablesInLock int
+	}{
+		{
+			name: "empty",
+		},
+		{
+			name:      "no lock timeout warning",
+			in:        []Warning{stateFile, wal},
+			wantOther: []Warning{stateFile, wal},
+		},
+		{
+			name:          "single lock timeout warning is not collapsed",
+			in:            []Warning{lockOrders},
+			wantCollapsed: false,
+			wantOther:     []Warning{lockOrders},
+		},
+		{
+			name:             "several lock timeout warnings collapse into one",
+			in:               []Warning{lockOrders, lockUsers},
+			wantCollapsed:    true,
+			wantTablesInLock: 2,
+		},
+		{
+			name:             "mixed warnings keep the others and collapse the locks",
+			in:               []Warning{stateFile, lockOrders, wal, lockUsers},
+			wantOther:        []Warning{stateFile, wal},
+			wantCollapsed:    true,
+			wantTablesInLock: 2,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := collapseLockTimeoutWarnings(tc.in)
+
+			var others []Warning
+			var collapsed []*LockTimeoutCollapsed
+			for _, w := range got {
+				require.NotNil(t, w, "collapse must never emit a nil warning")
+				if c, ok := w.(*LockTimeoutCollapsed); ok {
+					collapsed = append(collapsed, c)
+					continue
+				}
+				others = append(others, w)
+			}
+
+			assert.Equal(t, tc.wantOther, others, "non lock warnings must be preserved in order")
+
+			if !tc.wantCollapsed {
+				assert.Empty(t, collapsed, "no collapsed warning expected when there is no lock timeout warning")
+				return
+			}
+
+			require.Len(t, collapsed, 1, "lock timeout warnings must collapse into exactly one warning")
+			assert.Len(t, collapsed[0].tables, tc.wantTablesInLock)
+
+			// The collapsed warning must be usable: rendering it is what the
+			// markdown template does, and a nil entry would panic there.
+			assert.NotEmpty(t, collapsed[0].GetText())
+			assert.Equal(t, string(CodeLockTimeoutNotSet), collapsed[0].GetFullCode())
+		})
+	}
+}
+
+func TestGetWarnings_CollapsesLockTimeouts(t *testing.T) {
+	t.Parallel()
+
+	store := NewWarningStore()
+	store.AddWarning(NewStateFileWarning("/tmp/x"))
+	store.AddWarning(NewLockTimeoutWarning(helper.FullTableName{Schema: "public", Table: "orders"}))
+	store.AddWarning(NewLockTimeoutWarning(helper.FullTableName{Schema: "public", Table: "users"}))
+
+	assert.Len(t, store.GetWarningsRaw(), 3, "raw warnings must not be collapsed")
+
+	got := store.GetWarnings()
+	require.Len(t, got, 2, "the two lock timeout warnings must collapse into one")
+	assert.Equal(t, CodeStateFileFailedToRead, got[0].GetCode())
+	assert.IsType(t, &LockTimeoutCollapsed{}, got[1])
+}
+
 func mustState(t *testing.T, w Warning) json.RawMessage {
 	t.Helper()
 	v, err := w.GetStateValues()
