@@ -145,7 +145,7 @@ func TestWarningStore_AddDedup(t *testing.T) {
 	store.AddWarning(w)   // same pointer, must dedup
 	store.AddWarning(nil) // must be ignored
 
-	assert.Len(t, store.GetWarnings(), 1)
+	assert.Len(t, store.GetWarningsRaw(), 1)
 }
 
 func TestWarningStore_AddDedupByIdentity(t *testing.T) {
@@ -157,7 +157,7 @@ func TestWarningStore_AddDedupByIdentity(t *testing.T) {
 	store.AddWarning(NewStateFileWarning("/tmp/x"))
 	store.AddWarning(NewStateFileWarning("/tmp/x"))
 
-	assert.Len(t, store.GetWarnings(), 1,
+	assert.Len(t, store.GetWarningsRaw(), 1,
 		"warnings with the same full code should be de-duplicated")
 }
 
@@ -222,7 +222,7 @@ func TestReconcile_SolvedNonIdempotent(t *testing.T) {
 
 	assert.Equal(t, 1, solved, "a disappeared non-idempotent warning is solved")
 	assert.Equal(t, 0, added)
-	assert.Empty(t, store.GetWarnings(), "solved warning must not be re-added")
+	assert.Empty(t, store.GetWarningsRaw(), "solved warning must not be re-added")
 	assert.Empty(t, dbState.LastWarnings, "solved warning must not be persisted again")
 }
 
@@ -242,7 +242,7 @@ func TestReconcile_IdempotentReAddedWhenAbsent(t *testing.T) {
 
 	assert.Equal(t, 0, solved)
 	assert.Equal(t, 0, added)
-	require.Len(t, store.GetWarnings(), 1, "idempotent warning should be carried over")
+	require.Len(t, store.GetWarningsRaw(), 1, "idempotent warning should be carried over")
 	_, ok := dbState.LastWarnings[prev.GetFullCode()]
 	assert.True(t, ok, "carried-over warning must be persisted")
 }
@@ -263,7 +263,7 @@ func TestReconcile_IgnoredIdempotentFilteredOut(t *testing.T) {
 
 	assert.Equal(t, 0, added)
 	assert.Equal(t, 0, solved)
-	assert.Empty(t, store.GetWarnings(), "ignored idempotent warning must be filtered out")
+	assert.Empty(t, store.GetWarningsRaw(), "ignored idempotent warning must be filtered out")
 	_, ok := dbState.LastWarnings[w.GetFullCode()]
 	assert.False(t, ok, "ignored warning must not be persisted")
 }

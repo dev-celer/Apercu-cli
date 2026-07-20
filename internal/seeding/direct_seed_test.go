@@ -210,7 +210,7 @@ func TestGetSeedFilesToApply(t *testing.T) {
 		ds.getSeedFilesToApply()
 		assert.Len(t, ds.seedFilesPath, 0)
 		assert.Len(t, ds.output.Errors, 0)
-		assert.Len(t, store.GetWarnings(), 0)
+		assert.Len(t, store.GetWarningsRaw(), 0)
 	})
 
 	t.Run("seed file path", func(t *testing.T) {
@@ -229,7 +229,7 @@ func TestGetSeedFilesToApply(t *testing.T) {
 		assert.Len(t, ds.seedFilesPath, 1)
 		assert.Equal(t, ds.seedFilesPath[0], filepath.Join(dirPath, "seed1.sql"))
 		assert.Len(t, ds.output.Errors, 0)
-		assert.Len(t, store.GetWarnings(), 0)
+		assert.Len(t, store.GetWarningsRaw(), 0)
 	})
 
 	t.Run("seed folder path", func(t *testing.T) {
@@ -248,7 +248,7 @@ func TestGetSeedFilesToApply(t *testing.T) {
 		assert.Len(t, ds.seedFilesPath, 1)
 		assert.Equal(t, ds.seedFilesPath[0], filepath.Join(dirPath, "seed1", "seed2.sql"))
 		assert.Len(t, ds.output.Errors, 0)
-		assert.Len(t, store.GetWarnings(), 0)
+		assert.Len(t, store.GetWarningsRaw(), 0)
 	})
 
 	t.Run("seed folder and file path", func(t *testing.T) {
@@ -269,7 +269,7 @@ func TestGetSeedFilesToApply(t *testing.T) {
 		assert.Equal(t, ds.seedFilesPath[0], filepath.Join(dirPath, "seed1", "seed2.sql"))
 		assert.Equal(t, ds.seedFilesPath[1], filepath.Join(dirPath, "seed1.sql"))
 		assert.Len(t, ds.output.Errors, 0)
-		assert.Len(t, store.GetWarnings(), 0)
+		assert.Len(t, store.GetWarningsRaw(), 0)
 	})
 
 	t.Run("missing path", func(t *testing.T) {
@@ -289,7 +289,7 @@ func TestGetSeedFilesToApply(t *testing.T) {
 		assert.Len(t, ds.seedFilesPath, 1)
 		assert.Equal(t, ds.seedFilesPath[0], filepath.Join(dirPath, "seed1.sql"))
 		assert.Len(t, ds.output.Errors, 0)
-		assert.Len(t, store.GetWarnings(), 1)
+		assert.Len(t, store.GetWarningsRaw(), 1)
 	})
 
 	t.Run("no valid path", func(t *testing.T) {
@@ -308,6 +308,6 @@ func TestGetSeedFilesToApply(t *testing.T) {
 		ds.getSeedFilesToApply()
 		assert.Len(t, ds.seedFilesPath, 0)
 		assert.Len(t, ds.output.Errors, 0)
-		assert.Len(t, store.GetWarnings(), 2)
+		assert.Len(t, store.GetWarningsRaw(), 2)
 	})
 }

@@ -106,8 +106,28 @@ func (s *WarningStore) AddWarningsAndPrint(w []Warning) {
 	}
 }
 
-func (s *WarningStore) GetWarnings() []Warning {
+func (s *WarningStore) GetWarningsRaw() []Warning {
 	return s.warnings
+}
+
+func (s *WarningStore) GetWarnings() []Warning {
+	w := s.warnings
+	w = collapseLockTimeoutWarnings(w)
+	return w
+}
+
+func collapseLockTimeoutWarnings(warnings []Warning) []Warning {
+	var filteredWarnings []Warning
+	var lockWarnings []*LockTimeout
+	for _, w := range warnings {
+		x, ok := w.(*LockTimeout)
+		if !ok {
+			filteredWarnings = append(filteredWarnings, w)
+		}
+		lockWarnings = append(lockWarnings, x)
+	}
+
+	return append(filteredWarnings, NewLockTimeoutCollapsed(lockWarnings...))
 }
 
 // ReconcileWarningsWithState will read previous warnings, ignored warnings from state.

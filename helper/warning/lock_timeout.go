@@ -43,6 +43,10 @@ func (w *LockTimeout) GetIsIdempotent() bool {
 	return false
 }
 
+func (w *LockTimeout) GetTable() helper.FullTableName {
+	return w.table
+}
+
 type LockTimeoutState struct {
 	Table helper.FullTableName `json:"table"`
 }
@@ -52,4 +56,45 @@ func (w *LockTimeout) GetStateValues() (json.RawMessage, error) {
 		Table: w.table,
 	}
 	return json.Marshal(v)
+}
+
+type LockTimeoutCollapsed struct {
+	tables []helper.FullTableName
+}
+
+func (w *LockTimeoutCollapsed) GetText() string {
+	return fmt.Sprintf("The lock_timeout value wasn't set while a locking statement was sent on %d tables, this can cause lock queue regardless of the statement duration", len(w.tables))
+}
+
+func (w *LockTimeoutCollapsed) GetTextLong() string {
+	return w.GetText()
+}
+
+func (w *LockTimeoutCollapsed) GetLevel() warning_interface.Level {
+	return WarningLevelHigh
+}
+
+func (w *LockTimeoutCollapsed) GetCode() warning_interface.Code {
+	return CodeLockTimeoutNotSet
+}
+
+func (w *LockTimeoutCollapsed) GetFullCode() string {
+	return string(w.GetCode())
+}
+
+func (w *LockTimeoutCollapsed) GetIsIdempotent() bool {
+	return false
+}
+
+func (w *LockTimeoutCollapsed) GetStateValues() (json.RawMessage, error) {
+	return json.Marshal("{}")
+}
+
+func NewLockTimeoutCollapsed(warnings ...*LockTimeout) *LockTimeoutCollapsed {
+	var tables []helper.FullTableName
+	for _, w := range warnings {
+		tables = append(tables, w.table)
+	}
+
+	return &LockTimeoutCollapsed{tables: tables}
 }

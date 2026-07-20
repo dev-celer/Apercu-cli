@@ -16,7 +16,7 @@ func TestGetPreviewDatabaseHandler_NilSource(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Nil(t, handler)
 	assert.Nil(t, prodConn)
-	assert.Empty(t, store.GetWarnings())
+	assert.Empty(t, store.GetWarningsRaw())
 }
 
 func TestGetPreviewDatabaseHandler_UnsupportedProvider(t *testing.T) {
@@ -29,7 +29,7 @@ func TestGetPreviewDatabaseHandler_UnsupportedProvider(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, handler)
 	assert.Nil(t, prodConn)
-	assert.Empty(t, store.GetWarnings())
+	assert.Empty(t, store.GetWarningsRaw())
 	assert.Contains(t, err.Error(), "unsupported source database provider")
 }
 
@@ -46,7 +46,7 @@ func TestGetPreviewDatabaseHandler_MissingNeonConfig(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, handler)
 	assert.Nil(t, prodConn)
-	assert.Empty(t, store.GetWarnings())
+	assert.Empty(t, store.GetWarningsRaw())
 	assert.Contains(t, err.Error(), "missing neon source database configuration")
 }
 
@@ -56,7 +56,7 @@ func TestGetPruningDatabaseHandler_NilSource(t *testing.T) {
 	handler, err := GetPruningDatabaseHandler(config.Database{Source: nil}, store)
 	assert.NoError(t, err)
 	assert.Nil(t, handler)
-	assert.Empty(t, store.GetWarnings())
+	assert.Empty(t, store.GetWarningsRaw())
 }
 
 func TestGetPruningDatabaseHandler_UnsupportedProvider(t *testing.T) {
@@ -68,7 +68,7 @@ func TestGetPruningDatabaseHandler_UnsupportedProvider(t *testing.T) {
 	}, store)
 	assert.Error(t, err)
 	assert.Nil(t, handler)
-	assert.Empty(t, store.GetWarnings())
+	assert.Empty(t, store.GetWarningsRaw())
 	assert.Contains(t, err.Error(), "unsupported source database provider")
 }
 
@@ -84,7 +84,7 @@ func TestGetPruningDatabaseHandler_MissingNeonConfig(t *testing.T) {
 	}, store)
 	assert.Error(t, err)
 	assert.Nil(t, handler)
-	assert.Empty(t, store.GetWarnings())
+	assert.Empty(t, store.GetWarningsRaw())
 	assert.Contains(t, err.Error(), "missing neon source database configuration")
 }
 
@@ -103,7 +103,7 @@ func TestGetPruningDatabaseHandler_UsesSourceValuesWithoutAnonymization(t *testi
 	}, store)
 	require.NoError(t, err)
 	require.NotNil(t, handler)
-	assert.Empty(t, store.GetWarnings())
+	assert.Empty(t, store.GetWarningsRaw())
 	pruneHandler, ok := handler.(*NeonPruneHandler)
 	require.True(t, ok)
 	assert.Equal(t, "src-project", pruneHandler.projectId)
@@ -120,7 +120,7 @@ func TestGetAnonymizationDatabaseHandlers_NilSourceOrAnonymization(t *testing.T)
 	assert.NoError(t, err)
 	assert.Nil(t, source)
 	assert.Nil(t, storage)
-	assert.Empty(t, store.GetWarnings())
+	assert.Empty(t, store.GetWarningsRaw())
 
 	source, storage, err = GetAnonymizationDatabaseHandlers(config.Database{
 		Source:        &config.DatabaseSource{Provider: config.DatabaseProviderNeon},
@@ -129,7 +129,7 @@ func TestGetAnonymizationDatabaseHandlers_NilSourceOrAnonymization(t *testing.T)
 	assert.NoError(t, err)
 	assert.Nil(t, source)
 	assert.Nil(t, storage)
-	assert.Empty(t, store.GetWarnings())
+	assert.Empty(t, store.GetWarningsRaw())
 }
 
 func TestGetAnonymizationDatabaseHandlers_UnsupportedProvider(t *testing.T) {
@@ -142,7 +142,7 @@ func TestGetAnonymizationDatabaseHandlers_UnsupportedProvider(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, source)
 	assert.Nil(t, storage)
-	assert.Empty(t, store.GetWarnings())
+	assert.Empty(t, store.GetWarningsRaw())
 	assert.Contains(t, err.Error(), "unsupported source database provider")
 }
 
@@ -161,7 +161,7 @@ func TestGetAnonymizationDatabaseHandlers_MissingNeonStorage(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, source)
 	assert.Nil(t, storage)
-	assert.Empty(t, store.GetWarnings())
+	assert.Empty(t, store.GetWarningsRaw())
 	assert.Contains(t, err.Error(), "missing storage database configuration")
 }
 
@@ -182,6 +182,6 @@ func TestGetAnonymizationDatabaseHandlers_MissingNeonSource(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, source)
 	assert.Nil(t, storage)
-	assert.Empty(t, store.GetWarnings())
+	assert.Empty(t, store.GetWarningsRaw())
 	assert.Contains(t, err.Error(), "missing neon source database configuration")
 }
