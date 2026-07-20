@@ -123,8 +123,13 @@ func collapseLockTimeoutWarnings(warnings []Warning) []Warning {
 		x, ok := w.(*LockTimeout)
 		if !ok {
 			filteredWarnings = append(filteredWarnings, w)
+			continue
 		}
 		lockWarnings = append(lockWarnings, x)
+	}
+
+	if len(lockWarnings) == 0 {
+		return filteredWarnings
 	}
 
 	return append(filteredWarnings, NewLockTimeoutCollapsed(lockWarnings...))
