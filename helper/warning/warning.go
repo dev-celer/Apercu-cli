@@ -131,6 +131,10 @@ func collapseLockTimeoutWarnings(warnings []Warning) []Warning {
 	if len(lockWarnings) == 0 {
 		return filteredWarnings
 	}
+	if len(lockWarnings) == 1 {
+		// If a single lock warning is found, don't collapse it
+		return append(filteredWarnings, lockWarnings[0])
+	}
 
 	return append(filteredWarnings, NewLockTimeoutCollapsed(lockWarnings...))
 }
