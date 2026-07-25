@@ -71,9 +71,7 @@ func (e *SizeEngine) CollectPostMigrationMetrics() error {
 }
 
 func (e *SizeEngine) StoreMetricsToOutput(m *output.OutputDatabaseMetrics) error {
-	sizeDelta := e.finalSize - e.initialSize
 	walDelta := e.finalWAL - e.initialWAL
-	tempDelta := e.finalTempBytes - e.initialTempBytes
 
 	var diffFromProd float64
 	if e.initialSize > 0 && e.initialSize < e.prodMetrics.DatabaseSize {
@@ -84,15 +82,10 @@ func (e *SizeEngine) StoreMetricsToOutput(m *output.OutputDatabaseMetrics) error
 
 	estimatedProdWALDelta := int64(float64(walDelta) * diffFromProd)
 
-	m.Storage = &output.OutputDatabaseStorageMetrics{
-		InitialSize:            e.initialSize,
-		FinalSize:              e.finalSize,
-		SizeDelta:              sizeDelta,
-		WALDelta:               walDelta,
-		TempDelta:              tempDelta,
-		EstimatedTempDelta:     int64(float64(tempDelta) * diffFromProd),
-		EstimatedProdWALDelta:  estimatedProdWALDelta,
-		EstimatedProdSizeDelta: int64(float64(sizeDelta) * diffFromProd),
+	m.Storage = output.OutputDatabaseStorageMetrics{
+		InitialSize: e.initialSize,
+		FinalSize:   e.finalSize,
+		WALDelta:    walDelta,
 	}
 
 	e.warningStore.AddWarning(warning.NewWALSizeWarning(estimatedProdWALDelta, e.prodMetrics.DatabaseSize))

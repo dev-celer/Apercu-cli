@@ -44,7 +44,7 @@ func preview(cmd *cobra.Command, args []string) error {
 		dbName = name
 		break
 	}
-	dbOutput := output.NewPreviewOutputDatabase()
+	previewOutput := output.NewPreviewOutput()
 
 	// Get state
 	var state config.State
@@ -53,7 +53,7 @@ func preview(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			slog.Debug("Error loading state file", "path", statePath, "error", err)
 			w := warning.NewStateFileWarning(statePath)
-			dbOutput.Warnings.AddWarningAndPrint(w)
+			previewOutput.Warnings.AddWarningAndPrint(w)
 		}
 	} else {
 		state = *config.NewState()
@@ -67,10 +67,9 @@ func preview(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create the preview database if it doesn't exist
-	prodConn, dbHandler, err := database.GetPreviewDatabaseHandler(dbConfig, dbOutput.Warnings)
+	prodConn, dbHandler, err := database.GetPreviewDatabaseHandler(dbConfig, previewOutput.Warnings)
 	if err != nil {
-		dbOutput.Errors = append(dbOutput.Errors, err.Error())
-		return ErrorAndExit(err, dbOutput, dbName)
+		return ErrorAndExit(err, previewOutput, dbName)
 	}
 	if dbHandler == nil {
 		return nil
@@ -78,50 +77,45 @@ func preview(cmd *cobra.Command, args []string) error {
 
 	exist, err := dbHandler.Exists()
 	if err != nil {
-		dbOutput.Errors = append(dbOutput.Errors, err.Error())
-		return ErrorAndExit(err, dbOutput, dbName)
+		return ErrorAndExit(err, previewOutput, dbName)
 	}
 	if !exist {
 		if err := dbHandler.Create(); err != nil {
-			dbOutput.Errors = append(dbOutput.Errors, err.Error())
-			return ErrorAndExit(err, dbOutput, dbName)
+			return ErrorAndExit(err, previewOutput, dbName)
 		}
 	}
 	previewConn, err := dbHandler.GetConnectionFields()
 	if err != nil {
-		dbOutput.Errors = append(dbOutput.Errors, err.Error())
-		return ErrorAndExit(err, dbOutput, dbName)
+		return ErrorAndExit(err, previewOutput, dbName)
 	}
 
 	// Initialize migration handler
 	ctx := cmd.Context()
-	migrationHandler, err := migration.GetMigrationHandler(dbConfig, &previewConn, dbOutput.Warnings)
+	migrationHandler, err := migration.GetMigrationHandler(dbConfig, &previewConn, previewOutput.Warnings)
 	if err != nil {
-		return ErrorAndExit(err, dbOutput, dbName)
+		return ErrorAndExit(err, previewOutput, dbName)
 	}
 
 	// Initialize metrics handler
-	metricHandler, err := metrics.NewMetricsHandler(prodConn.Url, previewConn.Url, &dbConfig, &configFile, dbOutput.Warnings)
+	metricHandler, err := metrics.NewMetricsHandler(prodConn.Url, previewConn.Url, &dbConfig, &configFile, previewOutput.Warnings)
 	if err != nil {
-		return ErrorAndExit(err, dbOutput, dbName)
+		return ErrorAndExit(err, previewOutput, dbName)
 	}
 
 	// Apply migration
 	migrationMessage, err := ApplyMigration(ctx, migrationHandler, metricHandler)
 	if err != nil {
-		dbOutput.Migration = migrationHandler.GetOutput()
-		return ErrorAndExit(err, dbOutput, dbName)
+		return ErrorAndExit(err, previewOutput, dbName)
 	}
 	if migrationHandler != nil {
-		dbOutput.Migration = migrationHandler.GetOutput()
+		previewOutput.Migration = migrationHandler.GetOutput()
 	}
 
 	// Apply the seeding
-	seedHandler, err := seeding.GetSeedingHandler(dbConfig, &dbState, previewConn, dbOutput.Warnings)
+	seedHandler, err := seeding.GetSeedingHandler(dbConfig, &dbState, previewConn, previewOutput.Warnings)
 	if err != nil {
-		dbOutput.Seeding = output.NewSeedingOutput()
-		dbOutput.Seeding.Errors = append(dbOutput.Seeding.Errors, err.Error())
-		return ErrorAndExit(err, dbOutput, dbName)
+		previewOutput.Seeding = output.NewSeedingOutput()
+		return ErrorAndExit(err, previewOutput, dbName)
 	}
 	defer func() {
 		if seedHandler != nil {
@@ -130,17 +124,17 @@ func preview(cmd *cobra.Command, args []string) error {
 	}()
 	seedingMessage := ApplySeeding(seedHandler)
 	if seedHandler != nil {
-		dbOutput.Seeding = seedHandler.GetOutput()
+		previewOutput.Seeding = seedHandler.GetOutput()
 	}
 
 	// Reconcile warnings with the state
-	dbOutput.Warnings.ReconcileWarningsWithState(&dbState)
+	previewOutput.Warnings.ReconcileWarningsWithState(&dbState)
 
 	// Save the state
 	state.Databases[dbName] = dbState
 	if statePath != "" {
 		if err := state.Save(statePath); err != nil {
-			return ErrorAndExit(err, dbOutput, dbName)
+			return ErrorAndExit(err, previewOutput, dbName)
 		}
 	}
 
@@ -152,21 +146,15 @@ func preview(cmd *cobra.Command, args []string) error {
 	}
 	_, _ = fmt.Fprintln(log.Writer())
 
-	outputData := output.PreviewOutput{
-		Databases: map[string]output.PreviewOutputDatabase{
-			dbName: *dbOutput,
-		},
-	}
-
 	if markdownOutput != "" {
-		if err := SaveMarkdownFile(markdownOutput, &outputData); err != nil {
+		if err := SaveMarkdownFile(markdownOutput, previewOutput); err != nil {
 			_, _ = fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
 	}
 
 	if outputFile != "" {
-		if err := SaveOutputInFile(outputFile, &outputData); err != nil {
+		if err := SaveOutputInFile(outputFile, previewOutput); err != nil {
 			_, _ = fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}

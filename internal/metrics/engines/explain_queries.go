@@ -41,7 +41,7 @@ type ExplainQueryEngine struct {
 	queries        map[string][]string
 	fetchedQueries []string
 	prodStats      metricshelper.DatabaseMetrics
-	output         []output.OutputDatabaseExplainQuery
+	output         map[string][]output.OutputDatabaseExplainQuery
 	warningStore   *warning.WarningStore
 }
 
@@ -203,7 +203,7 @@ func NewExplainQueryEngine(previewDb *sql.DB, dbConfig *config.Database, prodDb 
 		queries:        queries,
 		fetchedQueries: fetchedQueries,
 		prodStats:      prodStats,
-		output:         make([]output.OutputDatabaseExplainQuery, 0),
+		output:         make(map[string][]output.OutputDatabaseExplainQuery),
 		warningStore:   store,
 	}, nil
 }
@@ -217,6 +217,7 @@ func (e *ExplainQueryEngine) CollectPreMigrationMetrics() error {
 
 	// Collect metrics for user provided queries
 	for file, queries := range e.queries {
+		o := make([]output.OutputDatabaseExplainQuery, 0)
 		for _, query := range queries {
 			queryRun, err := e.explainQuery(query)
 			var preMigrationRun output.OutputDatabaseMigrationExplainQueryRun
@@ -226,15 +227,16 @@ func (e *ExplainQueryEngine) CollectPreMigrationMetrics() error {
 				preMigrationRun.ExplainedQuery = queryRun
 			}
 
-			e.output = append(e.output, output.OutputDatabaseExplainQuery{
-				File:            file,
+			o = append(o, output.OutputDatabaseExplainQuery{
 				Query:           query,
 				PreMigrationRun: &preMigrationRun,
 			})
 		}
+		e.output[file] = o
 	}
 
 	// Collect metrics for fetched queries
+	o := make([]output.OutputDatabaseExplainQuery, 0)
 	for _, query := range e.fetchedQueries {
 		queryRun, err := e.explainQuery(query)
 		var preMigrationRun output.OutputDatabaseMigrationExplainQueryRun
@@ -244,11 +246,13 @@ func (e *ExplainQueryEngine) CollectPreMigrationMetrics() error {
 			preMigrationRun.ExplainedQuery = queryRun
 		}
 
-		e.output = append(e.output, output.OutputDatabaseExplainQuery{
-			File:            "",
+		o = append(o, output.OutputDatabaseExplainQuery{
 			Query:           query,
 			PreMigrationRun: &preMigrationRun,
 		})
+	}
+	if len(o) > 0 {
+		e.output["pg_stat_statements"] = o
 	}
 	return nil
 }
@@ -265,8 +269,12 @@ func (e *ExplainQueryEngine) CollectPostMigrationMetrics() error {
 	// Collect metrics for user provided queries
 	for file, queries := range e.queries {
 		for _, query := range queries {
-			idx := slices.IndexFunc(e.output, func(s output.OutputDatabaseExplainQuery) bool {
-				return s.Query == query && s.File == file
+			x, ok := e.output[file]
+			if !ok {
+				continue
+			}
+			idx := slices.IndexFunc(x, func(s output.OutputDatabaseExplainQuery) bool {
+				return s.Query == query
 			})
 			if idx == -1 {
 				continue
@@ -279,16 +287,20 @@ func (e *ExplainQueryEngine) CollectPostMigrationMetrics() error {
 			} else {
 				postMigrationRun.ExplainedQuery = queryRun
 			}
-			e.output[idx].PostMigrationRun = &postMigrationRun
+			e.output[file][idx].PostMigrationRun = &postMigrationRun
 
-			e.analyzeAndAttach(idx)
+			e.analyzeAndAttach(&e.output["pg_stat_statements"][idx])
 		}
 	}
 
 	// Collect metrics for fetched queries
+	pgStats, ok := e.output["pg_stat_statements"]
+	if !ok {
+		return nil
+	}
 	for _, query := range e.fetchedQueries {
-		idx := slices.IndexFunc(e.output, func(s output.OutputDatabaseExplainQuery) bool {
-			return s.Query == query && s.File == ""
+		idx := slices.IndexFunc(pgStats, func(s output.OutputDatabaseExplainQuery) bool {
+			return s.Query == query
 		})
 		if idx == -1 {
 			continue
@@ -301,17 +313,16 @@ func (e *ExplainQueryEngine) CollectPostMigrationMetrics() error {
 		} else {
 			postMigrationRun.ExplainedQuery = queryRun
 		}
-		e.output[idx].PostMigrationRun = &postMigrationRun
+		e.output["pg_stat_statements"][idx].PostMigrationRun = &postMigrationRun
 
-		e.analyzeAndAttach(idx)
+		e.analyzeAndAttach(&e.output["pg_stat_statements"][idx])
 	}
 	return nil
 }
 
 // analyzeAndAttach runs the plan-regression analyzer on the pre/post explain
 // results for output entry idx and attaches any findings as warnings.
-func (e *ExplainQueryEngine) analyzeAndAttach(idx int) {
-	out := &e.output[idx]
+func (e *ExplainQueryEngine) analyzeAndAttach(out *output.OutputDatabaseExplainQuery) {
 	if out.PreMigrationRun == nil || out.PostMigrationRun == nil {
 		return
 	}
@@ -331,7 +342,13 @@ func (e *ExplainQueryEngine) analyzeAndAttach(idx int) {
 
 func (e *ExplainQueryEngine) StoreMetricsToOutput(metrics *output.OutputDatabaseMetrics) error {
 	if metrics.Explains != nil {
-		metrics.Explains = append(metrics.Explains, e.output...)
+		for source, o := range e.output {
+			if x, ok := metrics.Explains[source]; ok {
+				metrics.Explains[source] = append(x, o...)
+			} else {
+				metrics.Explains[source] = o
+			}
+		}
 	} else {
 		metrics.Explains = e.output
 	}

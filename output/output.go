@@ -7,80 +7,75 @@ import (
 	"apercu-cli/helper/warning"
 	"bytes"
 	"fmt"
-	"slices"
+	"strings"
 	"text/template"
 )
 
 type PreviewOutput struct {
-	Databases map[string]PreviewOutputDatabase `yaml:"databases,omitempty" json:"databases,omitempty"`
+	Decision  OutputDecision          `yaml:"decision" json:"decision"`
+	Migration OutputDatabaseMigration `yaml:"migration,omitempty" json:"migration,omitempty"`
+	Seeding   OutputDatabaseSeeding   `yaml:"seeding,omitempty" json:"seeding,omitempty"`
+	Warnings  *warning.WarningStore   `yaml:"warnings,omitempty" json:"warnings,omitempty"`
 }
 
-type PreviewOutputDatabase struct {
-	Migration *OutputDatabaseMigration `yaml:"migration,omitempty" json:"migration,omitempty"`
-	Seeding   *OutputDatabaseSeeding   `yaml:"seeding,omitempty" json:"seeding,omitempty"`
-	Warnings  *warning.WarningStore    `yaml:"warnings,omitempty" json:"warnings,omitempty"`
-	Errors    []string                 `yaml:"errors,omitempty" json:"errors,omitempty"`
-}
-
-func NewPreviewOutputDatabase() *PreviewOutputDatabase {
-	return &PreviewOutputDatabase{
+func NewPreviewOutput() *PreviewOutput {
+	return &PreviewOutput{
 		Warnings: warning.NewWarningStore(),
-		Errors:   make([]string, 0),
 	}
 }
 
+type OutputDecision string
+
+const (
+	OutputDecisionSafe   OutputDecision = "safe"
+	OutputDecisionReview OutputDecision = "review"
+	OutputDecisionUnsafe OutputDecision = "unsafe"
+)
+
 type OutputDatabaseMigration struct {
-	Logs        *string                `yaml:"logs,omitempty" json:"logs,omitempty"`
-	Count       int                    `yaml:"count" json:"count"`
-	Duration    string                 `yaml:"duration" json:"duration"`
-	PgProxyLogs string                 `yaml:"pg_proxy_logs,omitempty" json:"pg_proxy_logs,omitempty"`
-	Errors      []string               `yaml:"errors,omitempty" json:"errors,omitempty"`
-	Metrics     *OutputDatabaseMetrics `yaml:"metrics,omitempty" json:"metrics,omitempty"`
+	Logs     *string               `yaml:"logs,omitempty" json:"logs,omitempty"`
+	Count    int                   `yaml:"count" json:"count"`
+	Duration string                `yaml:"duration" json:"duration"`
+	Metrics  OutputDatabaseMetrics `yaml:"metrics,omitempty" json:"metrics,omitempty"`
+	// Temporary storage of the pg proxy logs, not produce in any output objects
+	PgProxyLogs string
 }
 
-func NewMigrationOutput() *OutputDatabaseMigration {
-	return &OutputDatabaseMigration{
+func NewMigrationOutput() OutputDatabaseMigration {
+	return OutputDatabaseMigration{
 		Logs:     nil,
 		Count:    0,
 		Duration: "",
-		Errors:   make([]string, 0),
 	}
 }
 
 type OutputDatabaseMetrics struct {
-	Prod           metricshelper.DatabaseMetrics        `yaml:"prod,omitempty" json:"prod,omitempty"`
-	SchemaDiff     map[string]*metricshelper.SchemaDiff `yaml:"schema_diff,omitempty" json:"schema_diff,omitempty"`
-	RewrittenTable []helper.FullTableName               `yaml:"rewritten_table,omitempty" json:"rewritten_table,omitempty"`
-	Explains       []OutputDatabaseExplainQuery         `yaml:"explains,omitempty" json:"explains,omitempty"`
-	Storage        *OutputDatabaseStorageMetrics        `yaml:"storage,omitempty" json:"storage,omitempty"`
+	Prod           metricshelper.DatabaseMetrics           `yaml:"prod,omitempty" json:"prod,omitempty"`
+	SchemaDiff     map[string]*metricshelper.SchemaDiff    `yaml:"schema_diff,omitempty" json:"schema_diff,omitempty"`
+	RewrittenTable []helper.FullTableName                  `yaml:"rewritten_table,omitempty" json:"rewritten_table,omitempty"`
+	Explains       map[string][]OutputDatabaseExplainQuery `yaml:"explains,omitempty" json:"explains,omitempty"`
+	Storage        OutputDatabaseStorageMetrics            `yaml:"storage,omitempty" json:"storage,omitempty"`
 }
 
 func NewOutputDatabaseMetrics() *OutputDatabaseMetrics {
 	return &OutputDatabaseMetrics{
 		SchemaDiff:     make(map[string]*metricshelper.SchemaDiff),
 		RewrittenTable: make([]helper.FullTableName, 0),
-		Explains:       make([]OutputDatabaseExplainQuery, 0),
+		Explains:       make(map[string][]OutputDatabaseExplainQuery),
 	}
 }
 
 type OutputDatabaseStorageMetrics struct {
-	InitialSize            int64 `yaml:"initial_size" json:"initial_size"`
-	FinalSize              int64 `yaml:"final_size" json:"final_size"`
-	SizeDelta              int64 `yaml:"size_delta" json:"size_delta"`
-	WALDelta               int64 `yaml:"wal_delta" json:"wal_delta"`
-	TempDelta              int64 `yaml:"temp_delta" json:"temp_delta"`
-	EstimatedProdSizeDelta int64 `yaml:"estimated_prod_size_delta" json:"estimated_prod_size_delta"`
-	EstimatedProdWALDelta  int64 `yaml:"estimated_prod_wal_delta" json:"estimated_prod_wal_delta"`
-	EstimatedTempDelta     int64 `yaml:"estimated_temp_delta" json:"estimated_temp_delta"`
+	InitialSize int64 `yaml:"initial_size" json:"initial_size"`
+	FinalSize   int64 `yaml:"final_size" json:"final_size"`
+	WALDelta    int64 `yaml:"wal_delta" json:"wal_delta"`
 }
 
 type OutputDatabaseExplainQuery struct {
-	// File while be set to "" if the query what retrieved from the prod database pg_stat_statements
-	File             string                                  `yaml:"file,omitempty" json:"file,omitempty"`
 	Query            string                                  `yaml:"query" json:"query"`
-	Warnings         []warning.Warning                       `yaml:"warnings,omitempty" json:"warnings,omitempty"`
 	PreMigrationRun  *OutputDatabaseMigrationExplainQueryRun `yaml:"pre_migration_run,omitempty" json:"pre_migration_run,omitempty"`
 	PostMigrationRun *OutputDatabaseMigrationExplainQueryRun `yaml:"post_migration_run,omitempty" json:"post_migration_run,omitempty"`
+	Regression       bool                                    `yaml:"regression" json:"regression"`
 }
 
 type OutputDatabaseMigrationExplainQueryRun struct {
@@ -89,34 +84,30 @@ type OutputDatabaseMigrationExplainQueryRun struct {
 }
 
 type OutputDatabaseSeeding struct {
-	Logs         *string  `yaml:"logs,omitempty" json:"logs,omitempty"`
-	SuccessCount int      `yaml:"success_count" json:"success_count"`
-	FailedCount  int      `yaml:"failed_count" json:"failed_count"`
-	Duration     string   `yaml:"duration" json:"duration"`
-	Errors       []string `yaml:"errors,omitempty" json:"errors,omitempty"`
+	Logs         *string `yaml:"logs,omitempty" json:"logs,omitempty"`
+	SuccessCount int     `yaml:"success_count" json:"success_count"`
+	FailedCount  int     `yaml:"failed_count" json:"failed_count"`
+	Duration     string  `yaml:"duration" json:"duration"`
 }
 
-func NewSeedingOutput() *OutputDatabaseSeeding {
-	return &OutputDatabaseSeeding{
+func NewSeedingOutput() OutputDatabaseSeeding {
+	return OutputDatabaseSeeding{
 		Logs:         nil,
 		SuccessCount: 0,
 		FailedCount:  0,
 		Duration:     "",
-		Errors:       make([]string, 0),
 	}
 }
 
 type OutputDatabaseAnonymization struct {
-	Logs     *string  `yaml:"logs,omitempty" json:"logs,omitempty"`
-	Duration string   `yaml:"duration" json:"duration"`
-	Errors   []string `yaml:"errors,omitempty" json:"errors,omitempty"`
+	Logs     *string `yaml:"logs,omitempty" json:"logs,omitempty"`
+	Duration string  `yaml:"duration" json:"duration"`
 }
 
 func NewAnonymizationOutput() *OutputDatabaseAnonymization {
 	return &OutputDatabaseAnonymization{
 		Logs:     nil,
 		Duration: "",
-		Errors:   make([]string, 0),
 	}
 }
 
@@ -127,212 +118,216 @@ var templateFuncs = template.FuncMap{
 		}
 		return *s
 	},
-	"get_warnings": func(output PreviewOutputDatabase) []warning.Warning {
-		if output.Warnings == nil {
+	"get_decision_badge": func(decision OutputDecision) string {
+		switch decision {
+		case OutputDecisionSafe:
+			return "safe_to_merge-green?style=for-the-badge"
+		case OutputDecisionReview:
+			return "review_recommended-orange?style=for-the-badge"
+		case OutputDecisionUnsafe:
+			return "do_not_merge-red?style=for-the-badge"
+		}
+		return ""
+	},
+	"get_migration_summary": func(migration OutputDatabaseMigration, warnings *warning.WarningStore) string {
+		var s string
+		if warnings != nil && len(warnings.GetWarnings()) > 0 {
+			s = fmt.Sprintf("%d warning(s) generated", len(warnings.GetWarnings()))
+			if migration.Count != 0 {
+				s += fmt.Sprintf(" across %d migration(s)", migration.Count)
+			}
+		} else if migration.Count != 0 {
+			s = fmt.Sprintf("%d migration(s) applied", migration.Count)
+		}
+		return s
+	},
+	"has_warnings": func(warnings *warning.WarningStore) bool {
+		if warnings == nil {
+			return false
+		}
+		return len(warnings.GetWarnings()) > 0
+	},
+	"get_warnings": func(warnings *warning.WarningStore) []warning.Warning {
+		if warnings == nil {
 			return nil
 		}
-		return output.Warnings.GetWarnings()
+		return warnings.GetWarnings()
+	},
+	"get_warning_severity": func(w warning.Warning) string {
+		switch w.GetLevel() {
+		case warning.WarningLevelLow:
+			return "🔵 Low"
+		case warning.WarningLevelMedium:
+			return "🟠 Medium"
+		case warning.WarningLevelHigh:
+			return "🔴 High"
+		}
+		return ""
+	},
+	"get_warning_code": func(w warning.Warning) string {
+		return string(w.GetCode())
+	},
+	"get_warning_description": func(w warning.Warning) string {
+		return w.GetText()
 	},
 	"size_pretty": func(i int64) string {
 		return formathelper.BytesSizePretty(i)
 	},
+	"sub": func(a, b int64) int64 {
+		return a - b
+	},
 	"usize_pretty": func(i uint64) string {
 		return formathelper.UBytesSizePretty(i)
 	},
-	"print_warning": func(w warning.Warning) string {
-		return fmt.Sprintf("%s - %s", w.GetFullCode(), w.GetText())
+	"get_schema_diff_resume": func(diff map[string]*metricshelper.SchemaDiff) string {
+		var created, deleted, updated int
+		for _, i := range diff {
+			if i == nil {
+				continue
+			}
+			created += len(i.CreatedTables)
+			deleted += len(i.DeletedTables)
+			updated += len(i.UpdatedTables)
+		}
+		var s []string
+		if created != 0 {
+			s = append(s, fmt.Sprintf("%d created", created))
+		}
+		if deleted != 0 {
+			s = append(s, fmt.Sprintf("%d deleted", deleted))
+		}
+		if updated != 0 {
+			s = append(s, fmt.Sprintf("%d updated", updated))
+		}
+		return strings.Join(s, ", ")
 	},
-	"print_schemas_diff": func(schemasDiff map[string]*metricshelper.SchemaDiff) string {
+	"print_schema_diff": func(schemasDiff map[string]*metricshelper.SchemaDiff) string {
 		text := metricshelper.GetSchemasDiffText(schemasDiff)
 		if text == nil {
 			return ""
 		}
 		return *text
 	},
-	"print_explain": func(e []OutputDatabaseExplainQuery) string {
-		displayedFile := make([]string, 0)
-		var outputStr string
-
-		for _, explain := range e {
-			if slices.Contains(displayedFile, explain.File) {
-				continue
-			}
-			currentFile := explain.File
-			displayedFile = append(displayedFile, currentFile)
-			outputStr += "<details>\n"
-
-			// Check if file contain warnings
-			bWarning := false
-			for _, explain := range e {
-				if explain.File == currentFile && len(explain.Warnings) > 0 {
-					bWarning = true
-					break
+	"get_explain_resume": func(e map[string][]OutputDatabaseExplainQuery) string {
+		var regression int
+		for _, i := range e {
+			for _, j := range i {
+				if j.Regression {
+					regression++
 				}
 			}
-			if bWarning {
-				outputStr += fmt.Sprintf("<summary><span style=\"color:orange\"><b>%s</b></span></summary>\n", currentFile)
-			} else {
-				outputStr += fmt.Sprintf("<summary><b>%s</b></summary>\n\n", currentFile)
-			}
-
-			for _, explain := range e {
-				if explain.File != currentFile {
-					continue
-				}
-
-				// Display details header
-				outputStr += "<details>\n"
-				var query string
-				if len(explain.Query) > 120 {
-					query = explain.Query[:120] + "..."
-				} else {
-					query = explain.Query
-				}
-				if len(explain.Warnings) > 0 {
-					outputStr += fmt.Sprintf("<summary><span style=\"color:orange\"><b>%s</b></span></summary>\n", query)
-				} else {
-					outputStr += fmt.Sprintf("<summary><b>%s</b></summary>\n\n", query)
-				}
-
-				// Display warnings
-				if len(explain.Warnings) > 0 {
-					outputStr += "> [!WARNING]\n"
-				}
-				for _, warning := range explain.Warnings {
-					outputStr += fmt.Sprintf("> - %s\n", warning.GetTextLong())
-				}
-
-				// Display explained query
-				if explain.PreMigrationRun != nil {
-					outputStr += fmt.Sprintf("**Pre migration:**\n```\n")
-					if explain.PreMigrationRun.Error != nil {
-						outputStr += fmt.Sprintf("ERROR: %s\n", explain.PreMigrationRun.Error)
-					} else if explain.PreMigrationRun.ExplainedQuery != nil {
-						outputStr += explain.PreMigrationRun.ExplainedQuery.String()
-					}
-					outputStr += "```\n"
-				}
-				if explain.PostMigrationRun != nil {
-					outputStr += fmt.Sprintf("**Post migration:**\n```\n")
-					if explain.PostMigrationRun.Error != nil {
-						outputStr += fmt.Sprintf("ERROR: %s\n", explain.PostMigrationRun.Error)
-					} else if explain.PostMigrationRun.ExplainedQuery != nil {
-						outputStr += explain.PostMigrationRun.ExplainedQuery.String()
-					}
-					outputStr += "```\n"
-				}
-
-				outputStr += "\n</details>\n"
-			}
-
-			outputStr += "\n</details>\n"
 		}
-		return outputStr
+
+		return fmt.Sprintf("%d total - %d regression", len(e), regression)
+	},
+	"explain_count_regression": func(e []OutputDatabaseExplainQuery) int {
+		var regression int
+		for _, i := range e {
+			if i.Regression {
+				regression++
+			}
+		}
+		return regression
+	},
+	"get_seeding_resume": func(s OutputDatabaseSeeding) string {
+		return fmt.Sprintf("%d succeeded - %d failed", s.SuccessCount, s.FailedCount)
 	},
 }
 
 var markdownTmpl = template.Must(template.New("markdown").Funcs(templateFuncs).Parse(
-	`# Apercu Output
-{{range $name, $db := .Databases}}
-## {{$name}}
-{{- if $db.Migration}}
-{{- if $db.Warnings}}
+	`## Apercu migration report ![status](https://img.shields.io/badge/{{get_decision_badge .Decision}}
 
-> [!WARNING]
-{{range get_warnings $db}}> - {{print_warning .}}
-{{end}}
+> **Migration took {{.Migration.Duration}}**
+>
+{{- if get_migration_summary .Migration .Warnings}}
+> **{{get_migration_summary .Migration .Warnings}}**
+>
 {{- end}}
-{{- if $db.Errors}}
+> **{{size_pretty .Migration.Metrics.Storage.WALDelta}} WAL generated**
+>
+> **{{size_pretty (sub .Migration.Metrics.Storage.FinalSize .Migration.Metrics.Storage.InitialSize)}} database size increase**
+{{- if has_warnings .Warnings}}
 
-> [!CAUTION]
-{{range $db.Errors}}> - {{.}}
+|Severity|Code|Description|
+|---|---|---|
+{{range $i, $warning := get_warnings .Warnings}}
+|{{get_warning_severity $warning}}|{{get_warning_code $warning}}|{{get_warning_description $warning}}|
 {{end}}
-{{- end}}
-
-### Migration
-
-{{$db.Migration.Count}} migration(s) ran in {{$db.Migration.Duration}}
-{{- if $db.Migration.Errors}}
-
-> [!CAUTION]
-{{range $db.Migration.Errors}}> - {{.}}
-{{end}}
-{{- end}}
-{{- if $db.Migration.Metrics}}
-{{- if $db.Migration.Metrics.SchemaDiff }}
 
 <details>
-<summary><b>Schema Diff</b></summary>
+<summary><b>⚠ Warning details</b></summary>
+</details>
+{{- end}}
+{{- if gt (len .Migration.Metrics.SchemaDiff) 0}}
+
+<details>
+<summary><b>🗄️ Schema diff</b><sub>{{get_schema_diff_resume .Migration.Metrics.SchemaDiff}}</sub></summary>
 
 ` + "```diff" + `
-{{print_schemas_diff $db.Migration.Metrics.SchemaDiff}}
+{{print_schema_diff .Migration.Metrics.SchemaDiff}}
 ` + "```" + `
 
 </details>
 {{- end}}
+{{- if gt (len .Migration.Metrics.Explains) 0}}
 
 <details>
-<summary><b>Stats</b></summary>
+<summary><b>Explained Queries</b><sub>{{get_explain_resume .Migration.Metrics.Explains}}</sub></summary>
 
-` + "```" + `
-{{- if $db.Migration.Metrics.Storage}}
---- Size detail ---
-Before Migration Size: {{size_pretty $db.Migration.Metrics.Storage.InitialSize}}
-After Migration Size: {{size_pretty $db.Migration.Metrics.Storage.FinalSize}}
-Size Delta: {{size_pretty $db.Migration.Metrics.Storage.SizeDelta}}
---- WAL Detail ---
-WAL Size Delta: {{size_pretty $db.Migration.Metrics.Storage.WALDelta}}
+{{range $source, $explains := .Migration.Metrics.Explains}}
+
+<details>
+{{- if gt (explain_count_regression $explains) 0 }}
+<summary><span style="color:orange"><b>{{$source}}</b><sub>{{explain_count_regression $explains}}</sub></span></summary>
+{{- else}}
+<summary><b>{{$source}}</b></summary>
 {{- end}}
+
+{{range $i, $explain := $explains}}
+` + "```sql" + `
+{{$explain.Query}}
 ` + "```" + `
 
-</details>
+{{- if $explain.PreMigrationRun.ExplainedQuery}}
+**Pre migration:**
+` + "```" + `
+{{$explain.PreMigrationRun.ExplainedQuery}}
+` + "```" + `
+{{- end}}
+{{- if $explain.PostMigrationRun.ExplainedQuery}}
+**Post migration:**
+` + "```" + `
+{{$explain.PostMigrationRun.ExplainedQuery}}
+` + "```" + `
+{{- end}}
 
-
-{{- if $db.Migration.Metrics.Explains}}
-<details>
-<summary><b>Explained Queries</b></summary>
-
-{{print_explain $db.Migration.Metrics.Explains}}
-
-</details>
-{{- end }}
 {{end}}
-
-{{- if $db.Migration.Logs}}
-
-<details>
-<summary><b>Logs</b></summary>
-
-` + "```" + `
-{{deref $db.Migration.Logs}}
-` + "```" + `
-
 </details>
-{{- end}}
-{{- end}}
-{{- if $db.Seeding}}
-
-### Seeding
-
-{{$db.Seeding.SuccessCount}} succeeded · {{$db.Seeding.FailedCount}} failed · {{$db.Seeding.Duration}}
-{{- if $db.Seeding.Errors}}
-
-> [!CAUTION]
-{{range $db.Seeding.Errors}}> - {{.}}
 {{end}}
+</details>
 {{- end}}
-{{- if $db.Seeding.Logs}}
+
+{{- if .Migration.Logs}}
 
 <details>
-<summary><b>Logs</b></summary>
+<summary><b>🗃️ Migration logs</b></summary>
 
 ` + "```" + `
-{{deref $db.Seeding.Logs}}
+{{.Migration.Logs}}
 ` + "```" + `
 
 </details>
 {{- end}}
-{{- end}}
+{{- if .Seeding.Logs}}
+
+<details>
+<summary><b>🌱 Seeding logs</b><sub>{{get_seeding_resume .Seeding}}</sub></summary>
+
+` + "```" + `
+{{.Seeding.Logs}}
+` + "```" + `
+
+</details>
 {{- end}}
 `))
 

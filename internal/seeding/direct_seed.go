@@ -26,7 +26,7 @@ type DirectSeed struct {
 	state         *config.DatabaseState
 	seedFilesPath []string
 	seedFiles     []config.DatabaseSeed
-	output        *output.OutputDatabaseSeeding
+	output        output.OutputDatabaseSeeding
 	warningStore  *warning.WarningStore
 }
 
@@ -136,7 +136,6 @@ func NewDirectSeed(conn helper.ConnectionFields, seedFiles []config.DatabaseSeed
 	outputData := output.NewSeedingOutput()
 	db, err := sql.Open("postgres", conn.Url)
 	if err != nil {
-		outputData.Errors = append(outputData.Errors, err.Error())
 		return nil, errors.New(fmt.Sprintf("Failed to connect to database: %v", err))
 	}
 
@@ -207,6 +206,6 @@ func (h *DirectSeed) Apply() {
 	h.output.Duration = time.Now().Sub(startTime).String()
 }
 
-func (h *DirectSeed) GetOutput() *output.OutputDatabaseSeeding {
+func (h *DirectSeed) GetOutput() output.OutputDatabaseSeeding {
 	return h.output
 }

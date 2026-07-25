@@ -64,7 +64,6 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 			_, _ = fmt.Fprintln(log.Writer(), "\n-----Migration runner output-----")
 			_, _ = fmt.Fprintln(log.Writer(), *migrationOutput.Logs)
 			_, _ = fmt.Fprintln(log.Writer(), "---------------------------------")
-			migrationOutput.Errors = append(migrationOutput.Errors, err.Error())
 		}
 		return "", fmt.Errorf("migration failed: %w", err)
 	}
@@ -83,9 +82,10 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 	}
 	metricsOutput, err := metricHandler.GetOutput()
 	if err != nil {
-		migrationOutput.Errors = append(migrationOutput.Errors, err.Error())
+		slog.Error("Error collecting post migration metrics", "err", err)
+	} else {
+		migrationOutput.Metrics = *metricsOutput
 	}
-	migrationOutput.Metrics = metricsOutput
 	metricHandler.Close()
 
 	// Generate the migration message
@@ -126,21 +126,15 @@ func SaveMarkdownFile(path string, output *output.PreviewOutput) error {
 	return nil
 }
 
-func ErrorAndExit(err error, dbOutput *output.PreviewOutputDatabase, dbName string) error {
-	outputData := output.PreviewOutput{
-		Databases: map[string]output.PreviewOutputDatabase{
-			dbName: *dbOutput,
-		},
-	}
-
+func ErrorAndExit(err error, outputData *output.PreviewOutput, dbName string) error {
 	if markdownOutput != "" {
-		if err := SaveMarkdownFile(markdownOutput, &outputData); err != nil {
+		if err := SaveMarkdownFile(markdownOutput, outputData); err != nil {
 			_, _ = fmt.Fprintln(os.Stderr, err)
 		}
 	}
 
 	if outputFile != "" {
-		if err := SaveOutputInFile(outputFile, &outputData); err != nil {
+		if err := SaveOutputInFile(outputFile, outputData); err != nil {
 			return err
 		}
 	}

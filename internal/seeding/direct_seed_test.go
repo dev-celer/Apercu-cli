@@ -209,7 +209,6 @@ func TestGetSeedFilesToApply(t *testing.T) {
 
 		ds.getSeedFilesToApply()
 		assert.Len(t, ds.seedFilesPath, 0)
-		assert.Len(t, ds.output.Errors, 0)
 		assert.Len(t, store.GetWarningsRaw(), 0)
 	})
 
@@ -228,7 +227,6 @@ func TestGetSeedFilesToApply(t *testing.T) {
 		ds.getSeedFilesToApply()
 		assert.Len(t, ds.seedFilesPath, 1)
 		assert.Equal(t, ds.seedFilesPath[0], filepath.Join(dirPath, "seed1.sql"))
-		assert.Len(t, ds.output.Errors, 0)
 		assert.Len(t, store.GetWarningsRaw(), 0)
 	})
 
@@ -247,7 +245,6 @@ func TestGetSeedFilesToApply(t *testing.T) {
 		ds.getSeedFilesToApply()
 		assert.Len(t, ds.seedFilesPath, 1)
 		assert.Equal(t, ds.seedFilesPath[0], filepath.Join(dirPath, "seed1", "seed2.sql"))
-		assert.Len(t, ds.output.Errors, 0)
 		assert.Len(t, store.GetWarningsRaw(), 0)
 	})
 
@@ -268,7 +265,6 @@ func TestGetSeedFilesToApply(t *testing.T) {
 		assert.Len(t, ds.seedFilesPath, 2)
 		assert.Equal(t, ds.seedFilesPath[0], filepath.Join(dirPath, "seed1", "seed2.sql"))
 		assert.Equal(t, ds.seedFilesPath[1], filepath.Join(dirPath, "seed1.sql"))
-		assert.Len(t, ds.output.Errors, 0)
 		assert.Len(t, store.GetWarningsRaw(), 0)
 	})
 
@@ -288,7 +284,6 @@ func TestGetSeedFilesToApply(t *testing.T) {
 		ds.getSeedFilesToApply()
 		assert.Len(t, ds.seedFilesPath, 1)
 		assert.Equal(t, ds.seedFilesPath[0], filepath.Join(dirPath, "seed1.sql"))
-		assert.Len(t, ds.output.Errors, 0)
 		assert.Len(t, store.GetWarningsRaw(), 1)
 	})
 
@@ -307,7 +302,6 @@ func TestGetSeedFilesToApply(t *testing.T) {
 
 		ds.getSeedFilesToApply()
 		assert.Len(t, ds.seedFilesPath, 0)
-		assert.Len(t, ds.output.Errors, 0)
 		assert.Len(t, store.GetWarningsRaw(), 2)
 	})
 }
