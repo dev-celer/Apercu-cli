@@ -260,7 +260,7 @@ var templateFuncs = template.FuncMap{
 }
 
 var markdownTmpl = template.Must(template.New("markdown").Funcs(templateFuncs).Parse(
-	`## Apercu migration report ![status](https://img.shields.io/badge/{{get_decision_badge .Decision}}
+	`## Apercu migration report ![status](https://img.shields.io/badge/{{get_decision_badge .Decision}})
 
 > **Migration took {{.Migration.Duration}}**
 >
