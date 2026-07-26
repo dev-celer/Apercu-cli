@@ -7,6 +7,7 @@ import (
 	"apercu-cli/helper/warning"
 	"bytes"
 	"fmt"
+	"strconv"
 	"strings"
 	"text/template"
 )
@@ -20,6 +21,7 @@ type PreviewOutput struct {
 
 func NewPreviewOutput() *PreviewOutput {
 	return &PreviewOutput{
+		Decision: OutputDecisionReview,
 		Warnings: warning.NewWarningStore(),
 	}
 }
@@ -153,6 +155,26 @@ var templateFuncs = template.FuncMap{
 		}
 		return warnings.GetWarnings()
 	},
+	"get_warnings_per_query": func(warnings *warning.WarningStore) []warning.WarningPerQuery {
+		if warnings == nil {
+			return nil
+		}
+		return warnings.GetWarningsPerQuery()
+	},
+	"get_prod_table_row_count": func(table helper.FullTableName, prodMetrics metricshelper.DatabaseMetrics) string {
+		m, ok := prodMetrics.TablesMetrics[table]
+		if !ok {
+			return "N/A"
+		}
+		return strconv.Itoa(int(m.RowCount))
+	},
+	"get_prod_table_size": func(table helper.FullTableName, prodMetrics metricshelper.DatabaseMetrics) string {
+		m, ok := prodMetrics.TablesMetrics[table]
+		if !ok {
+			return "N/A"
+		}
+		return formathelper.BytesSizePretty(m.TableSize)
+	},
 	"get_warning_severity": func(w warning.Warning) string {
 		switch w.GetLevel() {
 		case warning.WarningLevelLow:
@@ -166,6 +188,9 @@ var templateFuncs = template.FuncMap{
 	},
 	"get_warning_code": func(w warning.Warning) string {
 		return string(w.GetCode())
+	},
+	"get_warning_full_code": func(w warning.Warning) string {
+		return w.GetFullCode()
 	},
 	"get_warning_description": func(w warning.Warning) string {
 		return w.GetText()
@@ -256,6 +281,22 @@ var markdownTmpl = template.Must(template.New("markdown").Funcs(templateFuncs).P
 
 <details>
 <summary><b>⚠ Warning details</b></summary>
+
+{{range $i, $warning := get_warnings_per_query .Warnings}}
+` + "```sql" + `
+{{$warning.Query}}
+` + "```" + `
+|Affected tables|Row count|Size|
+|---|--:|--:|
+{{range $i, $table := $warning.AffectedTables}}
+|{{$table}}|{{get_prod_table_row_count $table .Migration.Metrics.Prod}}|{{get_prod_table_size $table .Migration.Metrics.Prod}}|
+{{end}}
+
+{{range $i, $w := $warning.Warnings}}
+{{get_warning_severity $w}} - {{get_warning_full_code $w}} - {{get_warning_description $w}}
+{{end}}
+{{end}}
+
 </details>
 {{- end}}
 {{- if gt (len .Migration.Metrics.SchemaDiff) 0}}

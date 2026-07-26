@@ -10,7 +10,7 @@ import (
 
 type LockWarning struct {
 	code          Code
-	query         string
+	query         *helper.QueryWithAffectedTables
 	lock          metrics.QueryLock
 	operationType metrics.EventOperationType
 	pgVersion     float32
@@ -185,8 +185,8 @@ func (w *LockWarning) GetIsIdempotent() bool {
 }
 
 type LockWarningState struct {
-	Query      string               `json:"query"`
-	TableStats metrics.TableMetrics `json:"table_stats"`
+	Query      *helper.QueryWithAffectedTables `json:"query"`
+	TableStats metrics.TableMetrics            `json:"table_stats"`
 }
 
 func (w *LockWarning) GetStateValues() (json.RawMessage, error) {
@@ -195,6 +195,10 @@ func (w *LockWarning) GetStateValues() (json.RawMessage, error) {
 		TableStats: w.tableStats,
 	}
 	return json.Marshal(v)
+}
+
+func (w *LockWarning) GetQuery() *helper.QueryWithAffectedTables {
+	return w.query
 }
 
 var (
@@ -292,6 +296,11 @@ func NewLockWarnings(query *metrics.QueryEventAnalysis, code Code, pgVersion flo
 		return nil
 	}
 
+	q := helper.QueryWithAffectedTables{
+		Query:          query.Event.SQL,
+		AffectedTables: query.AffectedTables,
+	}
+
 	warnings := make([]*LockWarning, 0, len(query.AffectedTables))
 	for _, table := range query.AffectedTables {
 		var prodTableMetric metrics.TableMetrics
@@ -307,7 +316,7 @@ func NewLockWarnings(query *metrics.QueryEventAnalysis, code Code, pgVersion flo
 		warnings = append(warnings, &LockWarning{
 			code:          code,
 			operationType: query.Type,
-			query:         query.Event.SQL,
+			query:         &q,
 			table:         table,
 			tableStats:    prodTableMetric,
 			lock:          query.Lock,

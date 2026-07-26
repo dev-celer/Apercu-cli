@@ -22,6 +22,11 @@ type FullTableName struct {
 	Table  string `json:"table" yaml:"table"`
 }
 
+type QueryWithAffectedTables struct {
+	Query          string          `json:"query" yaml:"query"`
+	AffectedTables []FullTableName `json:"affected_tables" yaml:"affected_tables"`
+}
+
 func (t FullTableName) String() string {
 	if strings.Contains(t.Schema, ".") {
 		t.Schema = fmt.Sprintf("\"%s\"", t.Schema)

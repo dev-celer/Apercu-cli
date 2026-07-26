@@ -81,6 +81,10 @@ func (w *TableRewriteWarning) GetStateValues() (json.RawMessage, error) {
 	return json.Marshal(v)
 }
 
+func (w *TableRewriteWarning) GetQuery() *helper.QueryWithAffectedTables {
+	return nil
+}
+
 func init() {
 	warningConverter[CodeTableRewritten] = func(state json.RawMessage) Warning {
 		v := TableRewriteWarningState{}

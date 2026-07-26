@@ -1,6 +1,7 @@
 package warning
 
 import (
+	databasehelper "apercu-cli/helper"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -37,6 +38,10 @@ func (w *MissingEnvVarsWarning) GetFullCode() string {
 
 func (w *MissingEnvVarsWarning) GetIsIdempotent() bool {
 	return true
+}
+
+func (w *MissingEnvVarsWarning) GetQuery() *databasehelper.QueryWithAffectedTables {
+	return nil
 }
 
 type MissingEnvVarsWarningState struct {

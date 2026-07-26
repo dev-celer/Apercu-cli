@@ -1,6 +1,9 @@
 package warning
 
-import "encoding/json"
+import (
+	"apercu-cli/helper"
+	"encoding/json"
+)
 
 const (
 	CodeMigrationTableNotFound Code = "NO_MIGRATION_TABLE"
@@ -32,6 +35,10 @@ func (w *MigrationTableNotFound) GetIsIdempotent() bool {
 
 func (w *MigrationTableNotFound) GetStateValues() (json.RawMessage, error) {
 	return json.RawMessage("{}"), nil
+}
+
+func (w *MigrationTableNotFound) GetQuery() *helper.QueryWithAffectedTables {
+	return nil
 }
 
 func init() {

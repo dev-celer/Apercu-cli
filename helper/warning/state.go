@@ -1,6 +1,7 @@
 package warning
 
 import (
+	"apercu-cli/helper"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -51,6 +52,10 @@ func NewStateFileWarning(filePath string) *StateFileWarning {
 	return &StateFileWarning{
 		path: filePath,
 	}
+}
+
+func (w *StateFileWarning) GetQuery() *helper.QueryWithAffectedTables {
+	return nil
 }
 
 func init() {

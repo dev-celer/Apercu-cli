@@ -1,6 +1,7 @@
 package warning
 
 import (
+	"apercu-cli/helper"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -63,6 +64,10 @@ func NewSeedingError(code Code, filepath string) *SeedingError {
 		code: code,
 		path: filepath,
 	}
+}
+
+func (w *SeedingError) GetQuery() *helper.QueryWithAffectedTables {
+	return nil
 }
 
 func init() {

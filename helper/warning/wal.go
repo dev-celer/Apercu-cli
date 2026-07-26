@@ -1,6 +1,7 @@
 package warning
 
 import (
+	"apercu-cli/helper"
 	"apercu-cli/helper/format"
 	"encoding/json"
 	"fmt"
@@ -133,6 +134,10 @@ func (w *WALSizeWarning) GetStateValues() (json.RawMessage, error) {
 		ProdDatabaseSize: w.prodDatabaseSize,
 	}
 	return json.Marshal(v)
+}
+
+func (w *WALSizeWarning) GetQuery() *helper.QueryWithAffectedTables {
+	return nil
 }
 
 func init() {

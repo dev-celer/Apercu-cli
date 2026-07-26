@@ -2,6 +2,7 @@ package warning
 
 import (
 	"apercu-cli/config"
+	"apercu-cli/helper"
 	"apercu-cli/helper/warning_interface"
 	"encoding/json"
 	"fmt"
@@ -104,6 +105,36 @@ func (s *WarningStore) AddWarningsAndPrint(w []Warning) {
 	for _, w := range w {
 		s.AddWarningAndPrint(w)
 	}
+}
+
+type WarningPerQuery struct {
+	Query          string
+	AffectedTables []helper.FullTableName
+	Warnings       []Warning
+}
+
+func (s *WarningStore) GetWarningsPerQuery() []WarningPerQuery {
+	out := make([]WarningPerQuery, 0)
+	for _, w := range s.warnings {
+		// Ignore all warning that aren't linked to a query
+		if w.GetQuery() == nil {
+			continue
+		}
+
+		idx := slices.IndexFunc(out, func(q WarningPerQuery) bool { return q.Query == w.GetQuery().Query })
+		if idx == -1 {
+			out = append(out, WarningPerQuery{
+				Query:          w.GetQuery().Query,
+				AffectedTables: w.GetQuery().AffectedTables,
+				Warnings:       []Warning{w},
+			})
+			continue
+		}
+
+		out[idx].Warnings = append(out[idx].Warnings, w)
+	}
+
+	return out
 }
 
 func (s *WarningStore) GetWarningsRaw() []Warning {

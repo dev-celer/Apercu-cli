@@ -1,6 +1,9 @@
 package warning_interface
 
-import "encoding/json"
+import (
+	databasehelper "apercu-cli/helper"
+	"encoding/json"
+)
 
 type Warning interface {
 	GetText() string
@@ -10,6 +13,7 @@ type Warning interface {
 	GetFullCode() string
 	GetIsIdempotent() bool
 	GetStateValues() (json.RawMessage, error)
+	GetQuery() *databasehelper.QueryWithAffectedTables
 }
 
 type Code string

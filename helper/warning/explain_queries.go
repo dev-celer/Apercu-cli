@@ -1,6 +1,7 @@
 package warning
 
 import (
+	databasehelper "apercu-cli/helper"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -62,6 +63,10 @@ func (w *ExplainQueryFile) GetFullCode() string {
 
 func (w *ExplainQueryFile) GetIsIdempotent() bool {
 	return true
+}
+
+func (w *ExplainQueryFile) GetQuery() *databasehelper.QueryWithAffectedTables {
+	return nil
 }
 
 type ExplainQueryState struct {
@@ -166,6 +171,10 @@ func (w *ExplainQueryProdFetch) GetStateValues() (json.RawMessage, error) {
 	return json.RawMessage("{}"), nil
 }
 
+func (w *ExplainQueryProdFetch) GetQuery() *databasehelper.QueryWithAffectedTables {
+	return nil
+}
+
 func init() {
 	warningConverter[CodeExplainQueryStatStatementsMissing] = func(state json.RawMessage) Warning {
 		return NewExplainQueryProdFetchWarning(CodeExplainQueryStatStatementsMissing, "")
@@ -222,6 +231,10 @@ func (w *ExplainPlanOrderingRegression) GetStateValues() (json.RawMessage, error
 		Key:   w.key,
 	}
 	return json.Marshal(v)
+}
+
+func (w *ExplainPlanOrderingRegression) GetQuery() *databasehelper.QueryWithAffectedTables {
+	return nil
 }
 
 func init() {
@@ -292,6 +305,10 @@ func (w *ExplainPlanScanRegression) GetStateValues() (json.RawMessage, error) {
 		Key:    w.key,
 	}
 	return json.Marshal(v)
+}
+
+func (w *ExplainPlanScanRegression) GetQuery() *databasehelper.QueryWithAffectedTables {
+	return nil
 }
 
 func init() {

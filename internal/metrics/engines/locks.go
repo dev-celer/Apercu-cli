@@ -1,6 +1,7 @@
 package engines
 
 import (
+	"apercu-cli/helper"
 	metricshelper "apercu-cli/helper/metrics"
 	parsinghelper "apercu-cli/helper/sql_parsing"
 	"apercu-cli/helper/warning"
@@ -80,8 +81,12 @@ func (e *LocksEngine) SendPgProxyLogs(logs string) {
 
 		// Ensure that lock_timeout is set
 		if currentLockTimeout == 0 {
+			q := helper.QueryWithAffectedTables{
+				Query:          query.SQL,
+				AffectedTables: tables,
+			}
 			for _, table := range tables {
-				w := warning.NewLockTimeoutWarning(table)
+				w := warning.NewLockTimeoutWarning(table, &q)
 				e.WarningStore.AddWarning(w)
 			}
 		}

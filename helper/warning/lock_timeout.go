@@ -5,6 +5,7 @@ import (
 	"apercu-cli/helper/warning_interface"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 )
 
 const (
@@ -12,11 +13,15 @@ const (
 )
 
 type LockTimeout struct {
+	query *helper.QueryWithAffectedTables
 	table helper.FullTableName
 }
 
-func NewLockTimeoutWarning(table helper.FullTableName) *LockTimeout {
-	return &LockTimeout{table: table}
+func NewLockTimeoutWarning(table helper.FullTableName, query *helper.QueryWithAffectedTables) *LockTimeout {
+	return &LockTimeout{
+		query: query,
+		table: table,
+	}
 }
 
 func (w *LockTimeout) GetText() string {
@@ -47,15 +52,34 @@ func (w *LockTimeout) GetTable() helper.FullTableName {
 	return w.table
 }
 
+func (w *LockTimeout) GetQuery() *helper.QueryWithAffectedTables {
+	return w.query
+}
+
 type LockTimeoutState struct {
-	Table helper.FullTableName `json:"table"`
+	Table helper.FullTableName            `json:"table"`
+	Query *helper.QueryWithAffectedTables `json:"query"`
 }
 
 func (w *LockTimeout) GetStateValues() (json.RawMessage, error) {
 	v := LockTimeoutState{
 		Table: w.table,
+		Query: w.query,
 	}
 	return json.Marshal(v)
+}
+
+func init() {
+	warningConverter[CodeLockTimeoutNotSet] = func(state json.RawMessage) Warning {
+		v := LockTimeoutState{}
+		err := json.Unmarshal(state, &v)
+		if err != nil {
+			slog.Debug("Failed to unmarshal state", "error", err)
+			return nil
+		}
+
+		return NewLockTimeoutWarning(v.Table, v.Query)
+	}
 }
 
 type LockTimeoutCollapsed struct {
@@ -88,6 +112,10 @@ func (w *LockTimeoutCollapsed) GetIsIdempotent() bool {
 
 func (w *LockTimeoutCollapsed) GetStateValues() (json.RawMessage, error) {
 	return json.Marshal("{}")
+}
+
+func (w *LockTimeoutCollapsed) GetQuery() *helper.QueryWithAffectedTables {
+	return nil
 }
 
 func NewLockTimeoutCollapsed(warnings ...*LockTimeout) *LockTimeoutCollapsed {

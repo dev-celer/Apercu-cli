@@ -271,8 +271,12 @@ func TestReconcile_IgnoredIdempotentFilteredOut(t *testing.T) {
 func TestCollapseLockTimeoutWarnings(t *testing.T) {
 	t.Parallel()
 
-	lockOrders := NewLockTimeoutWarning(helper.FullTableName{Schema: "public", Table: "orders"})
-	lockUsers := NewLockTimeoutWarning(helper.FullTableName{Schema: "public", Table: "users"})
+	q := &helper.QueryWithAffectedTables{
+		Query:          "SQL",
+		AffectedTables: make([]helper.FullTableName, 0),
+	}
+	lockOrders := NewLockTimeoutWarning(helper.FullTableName{Schema: "public", Table: "orders"}, q)
+	lockUsers := NewLockTimeoutWarning(helper.FullTableName{Schema: "public", Table: "users"}, q)
 	stateFile := NewStateFileWarning("/tmp/x")
 	wal := NewWALSizeWarning(2*1024*1024*1024, 1024*1024*1024)
 
@@ -348,10 +352,14 @@ func TestCollapseLockTimeoutWarnings(t *testing.T) {
 func TestGetWarnings_CollapsesLockTimeouts(t *testing.T) {
 	t.Parallel()
 
+	q := &helper.QueryWithAffectedTables{
+		Query:          "SQL",
+		AffectedTables: make([]helper.FullTableName, 0),
+	}
 	store := NewWarningStore()
 	store.AddWarning(NewStateFileWarning("/tmp/x"))
-	store.AddWarning(NewLockTimeoutWarning(helper.FullTableName{Schema: "public", Table: "orders"}))
-	store.AddWarning(NewLockTimeoutWarning(helper.FullTableName{Schema: "public", Table: "users"}))
+	store.AddWarning(NewLockTimeoutWarning(helper.FullTableName{Schema: "public", Table: "orders"}, q))
+	store.AddWarning(NewLockTimeoutWarning(helper.FullTableName{Schema: "public", Table: "users"}, q))
 
 	assert.Len(t, store.GetWarningsRaw(), 3, "raw warnings must not be collapsed")
 

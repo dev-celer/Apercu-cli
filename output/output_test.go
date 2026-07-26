@@ -1,6 +1,7 @@
 package output
 
 import (
+	"apercu-cli/helper"
 	metricshelper "apercu-cli/helper/metrics"
 	"apercu-cli/helper/warning"
 	"encoding/json"
@@ -39,6 +40,8 @@ func (w *mockedWarning) GetFullCode() string { return string(w.GetCode()) }
 func (w *mockedWarning) GetIsIdempotent() bool { return w.isIdempotent }
 
 func (w *mockedWarning) GetStateValues() (json.RawMessage, error) { return json.RawMessage{}, nil }
+
+func (w *mockedWarning) GetQuery() *helper.QueryWithAffectedTables { return nil }
 
 func (w *mockedWarning) PrintWarning() {}
 
