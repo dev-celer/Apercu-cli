@@ -42,7 +42,7 @@ func getPgClassDatabaseStats(db *sql.DB) ([]TablePgClassStats, error) {
 	stats := make([]TablePgClassStats, 0)
 	for rows.Next() {
 		var s TablePgClassStats
-		if err := rows.Scan(&s.RelId, &s.TableName, &s.SchemaName, &s.RowCount, &s.Writes, &s.Scans, &s.LastAnalyze, &s.LastAutoAnalyze); err != nil {
+		if err := rows.Scan(&s.RelId, &s.TableName, &s.SchemaName, &s.RowCount, &s.LastAnalyze, &s.LastAutoAnalyze, &s.Writes, &s.Scans); err != nil {
 			return nil, errors.New(fmt.Sprintf("Failed to scan returned rows: %v", err))
 		}
 		stats = append(stats, s)
