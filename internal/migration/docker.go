@@ -250,6 +250,11 @@ func (h *DockerHandler) Apply(ctx context.Context) error {
 				return err
 			}
 
+			// Print Migration logs
+			_, _ = fmt.Fprintln(log.Writer(), "----- Migration container logs -----")
+			_, _ = fmt.Fprintln(log.Writer(), buffer.String())
+			_, _ = fmt.Fprintln(log.Writer(), "------------------------------------")
+
 			return errors.New(fmt.Sprintf("Docker container exited with status code: %d", status.StatusCode))
 		}
 	}
