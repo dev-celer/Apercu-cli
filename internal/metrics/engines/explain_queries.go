@@ -289,7 +289,7 @@ func (e *ExplainQueryEngine) CollectPostMigrationMetrics() error {
 			}
 			e.output[file][idx].PostMigrationRun = &postMigrationRun
 
-			e.analyzeAndAttach(&e.output["pg_stat_statements"][idx])
+			e.analyzeAndAttach(&e.output[file][idx])
 		}
 	}
 
