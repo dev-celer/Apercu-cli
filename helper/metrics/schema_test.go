@@ -56,8 +56,8 @@ func TestTableDiff_HasChanges(t *testing.T) {
 		t.Parallel()
 		d := NewTableDiff("test_table")
 		d.UpdatedColumns = append(d.UpdatedColumns, struct {
-			Old Column
-			New Column
+			Old Column `json:"old" yaml:"old"`
+			New Column `json:"new" yaml:"new"`
 		}{
 			Old: Column{Name: "id", DataType: "integer"},
 			New: Column{Name: "id", DataType: "bigint"},
@@ -86,8 +86,8 @@ func TestTableDiff_HasChanges(t *testing.T) {
 		t.Parallel()
 		d := NewTableDiff("test_table")
 		d.UpdatedIndexes = append(d.UpdatedIndexes, struct {
-			Old Index
-			New Index
+			Old Index `json:"old" yaml:"old"`
+			New Index `json:"new" yaml:"new"`
 		}{Old: Index{Name: "idx", Definition: "a"}, New: Index{Name: "idx", Definition: "b"}})
 		assert.True(t, d.HasChanges())
 	})
@@ -107,8 +107,8 @@ func TestTableDiff_HasChanges(t *testing.T) {
 		t.Parallel()
 		d := NewTableDiff("test_table")
 		d.UpdatedConstraints = append(d.UpdatedConstraints, struct {
-			Old Constraint
-			New Constraint
+			Old Constraint `json:"old" yaml:"old"`
+			New Constraint `json:"new" yaml:"new"`
 		}{Old: Constraint{Name: "c", Definition: "a"}, New: Constraint{Name: "c", Definition: "b"}})
 		assert.True(t, d.HasChanges())
 	})

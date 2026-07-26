@@ -37,6 +37,32 @@ func (t FullTableName) String() string {
 	return fmt.Sprintf("%s.%s", t.Schema, t.Table)
 }
 
+func (t FullTableName) MarshalText() ([]byte, error) {
+	return []byte(t.String()), nil
+}
+
+func (t *FullTableName) UnmarshalText(data []byte) error {
+	s := string(data)
+	if before, after, ok := strings.Cut(s, "."); ok {
+		t.Schema, t.Table = before, after
+	} else {
+		t.Schema, t.Table = "public", s
+	}
+	return nil
+}
+
+func (t FullTableName) MarshalYAML() (any, error) {
+	return t.String(), nil
+}
+
+func (t *FullTableName) UnmarshalYAML(unmarshal func(any) error) error {
+	var s string
+	if err := unmarshal(&s); err != nil {
+		return err
+	}
+	return t.UnmarshalText([]byte(s))
+}
+
 var reg = regexp.MustCompile(`postgresql:\/\/(.+?):(.+?)@(.+?)[\/:](\d*)\/?(.+?)?(?:\?|$)`)
 
 func ExtractConnectionFieldsFromUrl(databaseUrl string) (ConnectionFields, error) {

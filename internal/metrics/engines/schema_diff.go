@@ -370,7 +370,10 @@ func getTableDiff(oldTable, newTable metricshelper.Table) *metricshelper.TableDi
 		// Check if column has been updated
 		oldColumn := oldTable.Columns[oldIndex]
 		if hasColumnChanged(oldColumn, newTableColumn) {
-			diff.UpdatedColumns = append(diff.UpdatedColumns, struct{ Old, New metricshelper.Column }{oldColumn, newTableColumn})
+			diff.UpdatedColumns = append(diff.UpdatedColumns, struct {
+				Old metricshelper.Column `json:"old" yaml:"old"`
+				New metricshelper.Column `json:"new" yaml:"new"`
+			}{oldColumn, newTableColumn})
 		} else {
 			diff.UnchangedColumns = append(diff.UnchangedColumns, oldColumn)
 		}
@@ -393,7 +396,10 @@ func getTableDiff(oldTable, newTable metricshelper.Table) *metricshelper.TableDi
 		}
 		oldConstraint := oldTable.Constraints[oldIndex]
 		if hasConstraintChanged(oldConstraint, newConstraint) {
-			diff.UpdatedConstraints = append(diff.UpdatedConstraints, struct{ Old, New metricshelper.Constraint }{oldConstraint, newConstraint})
+			diff.UpdatedConstraints = append(diff.UpdatedConstraints, struct {
+				Old metricshelper.Constraint `json:"old" yaml:"old"`
+				New metricshelper.Constraint `json:"new" yaml:"new"`
+			}{oldConstraint, newConstraint})
 		}
 	}
 
@@ -414,7 +420,10 @@ func getTableDiff(oldTable, newTable metricshelper.Table) *metricshelper.TableDi
 		}
 		oldIdx := oldTable.Indexes[oldIndex]
 		if hasIndexChanged(oldIdx, newIndex) {
-			diff.UpdatedIndexes = append(diff.UpdatedIndexes, struct{ Old, New metricshelper.Index }{oldIdx, newIndex})
+			diff.UpdatedIndexes = append(diff.UpdatedIndexes, struct {
+				Old metricshelper.Index `json:"old" yaml:"old"`
+				New metricshelper.Index `json:"new" yaml:"new"`
+			}{oldIdx, newIndex})
 		}
 	}
 

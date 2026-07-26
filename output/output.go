@@ -14,8 +14,8 @@ import (
 
 type PreviewOutput struct {
 	Decision  OutputDecision          `yaml:"decision" json:"decision"`
-	Migration OutputDatabaseMigration `yaml:"migration,omitempty" json:"migration,omitempty"`
-	Seeding   OutputDatabaseSeeding   `yaml:"seeding,omitempty" json:"seeding,omitempty"`
+	Migration OutputDatabaseMigration `yaml:"migration" json:"migration"`
+	Seeding   OutputDatabaseSeeding   `yaml:"seeding" json:"seeding"`
 	Warnings  *warning.WarningStore   `yaml:"warnings,omitempty" json:"warnings,omitempty"`
 }
 
@@ -38,9 +38,9 @@ type OutputDatabaseMigration struct {
 	Logs     *string               `yaml:"logs,omitempty" json:"logs,omitempty"`
 	Count    int                   `yaml:"count" json:"count"`
 	Duration string                `yaml:"duration" json:"duration"`
-	Metrics  OutputDatabaseMetrics `yaml:"metrics,omitempty" json:"metrics,omitempty"`
+	Metrics  OutputDatabaseMetrics `yaml:"metrics" json:"metrics"`
 	// Temporary storage of the pg proxy logs, not produce in any output objects
-	PgProxyLogs string
+	PgProxyLogs string `json:"-" yaml:"-"`
 }
 
 func NewMigrationOutput() OutputDatabaseMigration {
@@ -52,11 +52,11 @@ func NewMigrationOutput() OutputDatabaseMigration {
 }
 
 type OutputDatabaseMetrics struct {
-	Prod           metricshelper.DatabaseMetrics           `yaml:"prod,omitempty" json:"prod,omitempty"`
+	Prod           metricshelper.DatabaseMetrics           `yaml:"prod" json:"prod"`
 	SchemaDiff     map[string]*metricshelper.SchemaDiff    `yaml:"schema_diff,omitempty" json:"schema_diff,omitempty"`
 	RewrittenTable []helper.FullTableName                  `yaml:"rewritten_table,omitempty" json:"rewritten_table,omitempty"`
 	Explains       map[string][]OutputDatabaseExplainQuery `yaml:"explains,omitempty" json:"explains,omitempty"`
-	Storage        OutputDatabaseStorageMetrics            `yaml:"storage,omitempty" json:"storage,omitempty"`
+	Storage        OutputDatabaseStorageMetrics            `yaml:"storage" json:"storage"`
 }
 
 func NewOutputDatabaseMetrics() *OutputDatabaseMetrics {
@@ -82,7 +82,7 @@ type OutputDatabaseExplainQuery struct {
 
 type OutputDatabaseMigrationExplainQueryRun struct {
 	ExplainedQuery *metricshelper.ExplainResult `yaml:"explained_query,omitempty" json:"explained_query,omitempty"`
-	Error          error                        `yaml:"error,omitempty" json:"error,omitempty"`
+	Error          string                       `yaml:"error,omitempty" json:"error,omitempty"`
 }
 
 type OutputDatabaseSeeding struct {

@@ -67,11 +67,11 @@ func ConvertStatesToWarnings(states map[string]json.RawMessage) []Warning {
 var warningConverter map[Code]func(state json.RawMessage) Warning = make(map[Code]func(state json.RawMessage) Warning)
 
 type WarningStore struct {
-	warnings []Warning
+	Warnings []Warning `json:"warnings" yaml:"warnings"`
 }
 
 func NewWarningStore() *WarningStore {
-	return &WarningStore{warnings: make([]Warning, 0)}
+	return &WarningStore{Warnings: make([]Warning, 0)}
 }
 
 func (s *WarningStore) AddWarning(w Warning) {
@@ -83,10 +83,10 @@ func (s *WarningStore) AddWarning(w Warning) {
 		return
 	}
 
-	if !slices.ContainsFunc(s.warnings, func(warning Warning) bool {
+	if !slices.ContainsFunc(s.Warnings, func(warning Warning) bool {
 		return w.GetFullCode() == warning.GetFullCode()
 	}) {
-		s.warnings = append(s.warnings, w)
+		s.Warnings = append(s.Warnings, w)
 	}
 }
 
@@ -115,7 +115,7 @@ type WarningPerQuery struct {
 
 func (s *WarningStore) GetWarningsPerQuery() []WarningPerQuery {
 	out := make([]WarningPerQuery, 0)
-	for _, w := range s.warnings {
+	for _, w := range s.Warnings {
 		// Ignore all warning that aren't linked to a query
 		if w.GetQuery() == nil {
 			continue
@@ -138,11 +138,11 @@ func (s *WarningStore) GetWarningsPerQuery() []WarningPerQuery {
 }
 
 func (s *WarningStore) GetWarningsRaw() []Warning {
-	return s.warnings
+	return s.Warnings
 }
 
 func (s *WarningStore) GetWarnings() []Warning {
-	w := s.warnings
+	w := s.Warnings
 	w = collapseLockTimeoutWarnings(w)
 	return w
 }
@@ -181,7 +181,7 @@ func (s *WarningStore) ReconcileWarningsWithState(state *config.DatabaseState) (
 	}
 
 	// Filter out ignored warning from the present warnings
-	s.warnings = slices.DeleteFunc(s.warnings, func(w Warning) bool {
+	s.Warnings = slices.DeleteFunc(s.Warnings, func(w Warning) bool {
 		// Check if warning is present in state ignored warnings
 		_, ignored := state.IgnoredWarnings[w.GetFullCode()]
 
@@ -203,7 +203,7 @@ func (s *WarningStore) ReconcileWarningsWithState(state *config.DatabaseState) (
 	})
 
 	// Count the new warnings
-	for _, w := range s.warnings {
+	for _, w := range s.Warnings {
 		// Check if warning is present in state last warnings
 		_, last := state.LastWarnings[w.GetFullCode()]
 		// If no, consider as new
@@ -229,7 +229,7 @@ func (s *WarningStore) ReconcileWarningsWithState(state *config.DatabaseState) (
 
 	// Update the state
 	state.LastWarnings = make(map[string]json.RawMessage)
-	for _, w := range s.warnings {
+	for _, w := range s.Warnings {
 		v, err := w.GetStateValues()
 		if err != nil {
 			slog.Error("Failed to store warnings to state", "code", w.GetFullCode(), "error", err)
@@ -240,6 +240,64 @@ func (s *WarningStore) ReconcileWarningsWithState(state *config.DatabaseState) (
 	return
 }
 
+func (s *WarningStore) toState() (map[string]json.RawMessage, error) {
+	state := make(map[string]json.RawMessage, len(s.Warnings))
+	for _, w := range s.Warnings {
+		v, err := w.GetStateValues()
+		if err != nil {
+			return nil, fmt.Errorf("failed to serialize warning %s: %w", w.GetFullCode(), err)
+		}
+		state[w.GetFullCode()] = v
+	}
+	return state, nil
+}
+
 func (s *WarningStore) MarshalJSON() (data []byte, err error) {
-	return json.Marshal(s.warnings)
+	state, err := s.toState()
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(state)
+}
+
+func (s *WarningStore) UnmarshalJSON(data []byte) error {
+	var state map[string]json.RawMessage
+	if err := json.Unmarshal(data, &state); err != nil {
+		return err
+	}
+	s.Warnings = ConvertStatesToWarnings(state)
+	return nil
+}
+
+func (s *WarningStore) MarshalYAML() (any, error) {
+	state, err := s.toState()
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]any, len(state))
+	for fullCode, raw := range state {
+		var v any
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return nil, fmt.Errorf("failed to serialize warning %s: %w", fullCode, err)
+		}
+		out[fullCode] = v
+	}
+	return out, nil
+}
+
+func (s *WarningStore) UnmarshalYAML(unmarshal func(any) error) error {
+	var decoded map[string]any
+	if err := unmarshal(&decoded); err != nil {
+		return err
+	}
+	state := make(map[string]json.RawMessage, len(decoded))
+	for fullCode, v := range decoded {
+		raw, err := json.Marshal(v)
+		if err != nil {
+			return fmt.Errorf("failed to deserialize warning %s: %w", fullCode, err)
+		}
+		state[fullCode] = raw
+	}
+	s.Warnings = ConvertStatesToWarnings(state)
+	return nil
 }

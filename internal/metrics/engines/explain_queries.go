@@ -222,7 +222,7 @@ func (e *ExplainQueryEngine) CollectPreMigrationMetrics() error {
 			queryRun, err := e.explainQuery(query)
 			var preMigrationRun output.OutputDatabaseMigrationExplainQueryRun
 			if err != nil {
-				preMigrationRun.Error = err
+				preMigrationRun.Error = err.Error()
 			} else {
 				preMigrationRun.ExplainedQuery = queryRun
 			}
@@ -241,7 +241,7 @@ func (e *ExplainQueryEngine) CollectPreMigrationMetrics() error {
 		queryRun, err := e.explainQuery(query)
 		var preMigrationRun output.OutputDatabaseMigrationExplainQueryRun
 		if err != nil {
-			preMigrationRun.Error = err
+			preMigrationRun.Error = err.Error()
 		} else {
 			preMigrationRun.ExplainedQuery = queryRun
 		}
@@ -283,7 +283,7 @@ func (e *ExplainQueryEngine) CollectPostMigrationMetrics() error {
 			queryRun, err := e.explainQuery(query)
 			var postMigrationRun output.OutputDatabaseMigrationExplainQueryRun
 			if err != nil {
-				postMigrationRun.Error = err
+				postMigrationRun.Error = err.Error()
 			} else {
 				postMigrationRun.ExplainedQuery = queryRun
 			}
@@ -309,7 +309,7 @@ func (e *ExplainQueryEngine) CollectPostMigrationMetrics() error {
 		queryRun, err := e.explainQuery(query)
 		var postMigrationRun output.OutputDatabaseMigrationExplainQueryRun
 		if err != nil {
-			postMigrationRun.Error = err
+			postMigrationRun.Error = err.Error()
 		} else {
 			postMigrationRun.ExplainedQuery = queryRun
 		}
@@ -326,7 +326,7 @@ func (e *ExplainQueryEngine) analyzeAndAttach(out *output.OutputDatabaseExplainQ
 	if out.PreMigrationRun == nil || out.PostMigrationRun == nil {
 		return
 	}
-	if out.PreMigrationRun.Error != nil || out.PostMigrationRun.Error != nil {
+	if out.PreMigrationRun.Error != "" || out.PostMigrationRun.Error != "" {
 		return
 	}
 	if out.PreMigrationRun.ExplainedQuery == nil || out.PostMigrationRun.ExplainedQuery == nil {

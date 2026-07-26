@@ -26,9 +26,9 @@ var (
 
 type DatabaseMetrics struct {
 	// DatabaseSize in bytes
-	DatabaseSize  int64
-	ServerVersion float32 `json:"server_version"`
-	TablesMetrics map[helper.FullTableName]TableMetrics
+	DatabaseSize  int64                                 `json:"database_size" yaml:"database_size"`
+	ServerVersion float32                               `json:"server_version" yaml:"server_version"`
+	TablesMetrics map[helper.FullTableName]TableMetrics `json:"tables_metrics" yaml:"tables_metrics"`
 }
 
 type TableActivity string

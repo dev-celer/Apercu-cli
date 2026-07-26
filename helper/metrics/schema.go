@@ -5,7 +5,7 @@ import (
 )
 
 type Schema struct {
-	Tables []Table
+	Tables []Table `json:"tables"`
 }
 
 func NewSchema() *Schema {
@@ -16,9 +16,9 @@ func NewSchema() *Schema {
 
 type Table struct {
 	Name        string
-	Columns     []Column
-	Indexes     []Index
-	Constraints []Constraint
+	Columns     []Column     `yaml:"columns,omitempty" json:"columns,omitempty"`
+	Indexes     []Index      `yaml:"indexes,omitempty" json:"indexes,omitempty"`
+	Constraints []Constraint `yaml:"constraints,omitempty" json:"constraints,omitempty"`
 }
 
 func NewTable(name string) *Table {
@@ -31,9 +31,9 @@ func NewTable(name string) *Table {
 }
 
 type Column struct {
-	Name     string
-	DataType string
-	Nullable bool
+	Name     string `yaml:"name" json:"name"`
+	DataType string `yaml:"data_type" json:"data_type"`
+	Nullable bool   `yaml:"nullable" json:"nullable"`
 }
 
 func NewColumn(name string, dataType string, nullable bool) *Column {
@@ -54,9 +54,9 @@ func (c Column) text() string {
 }
 
 type Index struct {
-	Name       string
-	Definition string
-	Unique     bool
+	Name       string `yaml:"name" json:"name"`
+	Definition string `yaml:"definition" json:"definition"`
+	Unique     bool   `yaml:"unique" json:"unique"`
 }
 
 func NewIndex(name string, definition string, unique bool) *Index {
@@ -68,9 +68,9 @@ func NewIndex(name string, definition string, unique bool) *Index {
 }
 
 type Constraint struct {
-	Name       string
-	Type       string
-	Definition string
+	Name       string `yaml:"name" json:"name"`
+	Type       string `yaml:"type" json:"type"`
+	Definition string `yaml:"definition" json:"definition"`
 }
 
 func NewConstraint(name string, constraintType string, definition string) *Constraint {
@@ -82,9 +82,9 @@ func NewConstraint(name string, constraintType string, definition string) *Const
 }
 
 type SchemaDiff struct {
-	DeletedTables []Table
-	CreatedTables []Table
-	UpdatedTables []TableDiff
+	DeletedTables []Table     `json:"deleted_tables" yaml:"deleted_tables"`
+	CreatedTables []Table     `json:"created_tables" yaml:"created_tables"`
+	UpdatedTables []TableDiff `json:"updated_tables" yaml:"updated_tables"`
 }
 
 func NewSchemaDiff() SchemaDiff {
@@ -100,26 +100,26 @@ func (d *SchemaDiff) HasChanges() bool {
 }
 
 type TableDiff struct {
-	Name             string
-	UnchangedColumns []Column
-	DeletedColumns   []Column
-	CreatedColumns   []Column
+	Name             string   `json:"name" yaml:"name"`
+	UnchangedColumns []Column `json:"unchanged_columns" yaml:"unchanged_columns"`
+	DeletedColumns   []Column `json:"deleted_columns" yaml:"deleted_columns"`
+	CreatedColumns   []Column `json:"created_columns" yaml:"created_columns"`
 	UpdatedColumns   []struct {
-		Old Column
-		New Column
-	}
-	DeletedIndexes []Index
-	CreatedIndexes []Index
+		Old Column `json:"old" yaml:"old"`
+		New Column `json:"new" yaml:"new"`
+	} `json:"updated_columns" yaml:"updated_columns"`
+	DeletedIndexes []Index `json:"deleted_indexes" yaml:"deleted_indexes"`
+	CreatedIndexes []Index `json:"created_indexes" yaml:"created_indexes"`
 	UpdatedIndexes []struct {
-		Old Index
-		New Index
-	}
-	DeletedConstraints []Constraint
-	CreatedConstraints []Constraint
+		Old Index `json:"old" yaml:"old"`
+		New Index `json:"new" yaml:"new"`
+	} `json:"updated_indexes" yaml:"updated_indexes"`
+	DeletedConstraints []Constraint `json:"deleted_constraints" yaml:"deleted_constraints"`
+	CreatedConstraints []Constraint `json:"created_constraints" yaml:"created_constraints"`
 	UpdatedConstraints []struct {
-		Old Constraint
-		New Constraint
-	}
+		Old Constraint `json:"old" yaml:"old"`
+		New Constraint `json:"new" yaml:"new"`
+	} `json:"updated_constraints" yaml:"updated_constraints"`
 }
 
 func NewTableDiff(name string) TableDiff {
@@ -128,20 +128,20 @@ func NewTableDiff(name string) TableDiff {
 		DeletedColumns: make([]Column, 0),
 		CreatedColumns: make([]Column, 0),
 		UpdatedColumns: make([]struct {
-			Old Column
-			New Column
+			Old Column `json:"old" yaml:"old"`
+			New Column `json:"new" yaml:"new"`
 		}, 0),
 		DeletedIndexes: make([]Index, 0),
 		CreatedIndexes: make([]Index, 0),
 		UpdatedIndexes: make([]struct {
-			Old Index
-			New Index
+			Old Index `json:"old" yaml:"old"`
+			New Index `json:"new" yaml:"new"`
 		}, 0),
 		DeletedConstraints: make([]Constraint, 0),
 		CreatedConstraints: make([]Constraint, 0),
 		UpdatedConstraints: make([]struct {
-			Old Constraint
-			New Constraint
+			Old Constraint `json:"old" yaml:"old"`
+			New Constraint `json:"new" yaml:"new"`
 		}, 0),
 	}
 }
