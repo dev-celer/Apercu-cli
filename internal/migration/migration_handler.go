@@ -14,7 +14,7 @@ import (
 
 type HandlerInterface interface {
 	Apply(ctx context.Context) error
-	GetOutput() output.OutputDatabaseMigration
+	GetOutput() *output.OutputDatabaseMigration
 }
 
 // GetMigrationHandler return an migration.HandlerInterface Object or an error

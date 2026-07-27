@@ -68,11 +68,11 @@ func TestRenderMarkdown_MigrationAndSeeding(t *testing.T) {
 	warningStore := warning.NewWarningStore()
 	warningStore.AddWarning(newMockedWarning("top-level warn", false, nil))
 	o := PreviewOutput{
-		Migration: OutputDatabaseMigration{
+		Migration: &OutputDatabaseMigration{
 			Count:    3,
 			Duration: "2s",
 			Logs:     strPtr("running migration 1\nrunning migration 2"),
-			Metrics: OutputDatabaseMetrics{
+			Metrics: &OutputDatabaseMetrics{
 				Prod:       metricshelper.DatabaseMetrics{},
 				SchemaDiff: make(map[string]*metricshelper.SchemaDiff),
 				Explains:   make(map[string][]OutputDatabaseExplainQuery),
@@ -83,7 +83,7 @@ func TestRenderMarkdown_MigrationAndSeeding(t *testing.T) {
 				},
 			},
 		},
-		Seeding: OutputDatabaseSeeding{
+		Seeding: &OutputDatabaseSeeding{
 			Logs:         new("seeding..."),
 			SuccessCount: 4,
 			FailedCount:  1,

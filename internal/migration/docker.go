@@ -33,7 +33,7 @@ type DockerHandler struct {
 	localFolder  string
 	warningStore *warning.WarningStore
 	database     *helper.ConnectionFields
-	output       output.OutputDatabaseMigration
+	output       *output.OutputDatabaseMigration
 }
 
 func NewDockerHandler(image string, command []string, env map[string]string, workDir string, localFolder string, database *helper.ConnectionFields, warningStore *warning.WarningStore) *DockerHandler {
@@ -305,6 +305,6 @@ func (h *DockerHandler) Apply(ctx context.Context) error {
 	return nil
 }
 
-func (h *DockerHandler) GetOutput() output.OutputDatabaseMigration {
+func (h *DockerHandler) GetOutput() *output.OutputDatabaseMigration {
 	return h.output
 }

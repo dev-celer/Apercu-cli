@@ -13,10 +13,10 @@ import (
 )
 
 type PreviewOutput struct {
-	Decision  OutputDecision          `yaml:"decision" json:"decision"`
-	Migration OutputDatabaseMigration `yaml:"migration" json:"migration"`
-	Seeding   OutputDatabaseSeeding   `yaml:"seeding" json:"seeding"`
-	Warnings  *warning.WarningStore   `yaml:"warnings,omitempty" json:"warnings,omitempty"`
+	Decision  OutputDecision           `yaml:"decision" json:"decision"`
+	Migration *OutputDatabaseMigration `yaml:"migration" json:"migration"`
+	Seeding   *OutputDatabaseSeeding   `yaml:"seeding" json:"seeding"`
+	Warnings  *warning.WarningStore    `yaml:"warnings,omitempty" json:"warnings,omitempty"`
 }
 
 func NewPreviewOutput() *PreviewOutput {
@@ -35,16 +35,16 @@ const (
 )
 
 type OutputDatabaseMigration struct {
-	Logs     *string               `yaml:"logs,omitempty" json:"logs,omitempty"`
-	Count    int                   `yaml:"count" json:"count"`
-	Duration string                `yaml:"duration" json:"duration"`
-	Metrics  OutputDatabaseMetrics `yaml:"metrics" json:"metrics"`
+	Logs     *string                `yaml:"logs,omitempty" json:"logs,omitempty"`
+	Count    int                    `yaml:"count" json:"count"`
+	Duration string                 `yaml:"duration" json:"duration"`
+	Metrics  *OutputDatabaseMetrics `yaml:"metrics" json:"metrics"`
 	// Temporary storage of the pg proxy logs, not produce in any output objects
 	PgProxyLogs string `json:"-" yaml:"-"`
 }
 
-func NewMigrationOutput() OutputDatabaseMigration {
-	return OutputDatabaseMigration{
+func NewMigrationOutput() *OutputDatabaseMigration {
+	return &OutputDatabaseMigration{
 		Logs:     nil,
 		Count:    0,
 		Duration: "",
@@ -92,8 +92,8 @@ type OutputDatabaseSeeding struct {
 	Duration     string  `yaml:"duration" json:"duration"`
 }
 
-func NewSeedingOutput() OutputDatabaseSeeding {
-	return OutputDatabaseSeeding{
+func NewSeedingOutput() *OutputDatabaseSeeding {
+	return &OutputDatabaseSeeding{
 		Logs:         nil,
 		SuccessCount: 0,
 		FailedCount:  0,

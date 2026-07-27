@@ -11,7 +11,7 @@ import (
 type HandlerInterface interface {
 	Close() error
 	Apply()
-	GetOutput() output.OutputDatabaseSeeding
+	GetOutput() *output.OutputDatabaseSeeding
 }
 
 func GetSeedingHandler(dbConfig config.Database, state *config.DatabaseState, connection helper.ConnectionFields, warningStore *warning.WarningStore) (HandlerInterface, error) {

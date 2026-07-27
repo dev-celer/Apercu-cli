@@ -56,6 +56,7 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 		return "", err
 	}
 
+	// Get the migration output pointer
 	migrationOutput := migrationHandler.GetOutput()
 
 	// Apply the migrations
@@ -84,7 +85,7 @@ func ApplyMigration(ctx context.Context, migrationHandler migration.HandlerInter
 	if err != nil {
 		slog.Error("Error collecting post migration metrics", "err", err)
 	} else {
-		migrationOutput.Metrics = *metricsOutput
+		migrationOutput.Metrics = metricsOutput
 	}
 	metricHandler.Close()
 

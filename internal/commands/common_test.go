@@ -11,13 +11,13 @@ import (
 // --- Seeding mock ---
 
 type mockSeedingHandler struct {
-	output output.OutputDatabaseSeeding
+	output *output.OutputDatabaseSeeding
 }
 
-func (h *mockSeedingHandler) Close() error                            { return nil }
-func (h *mockSeedingHandler) Apply()                                  {}
-func (h *mockSeedingHandler) GetOutput() output.OutputDatabaseSeeding { return h.output }
-func (h *mockSeedingHandler) GetWarnings() []warning.Warning          { return make([]warning.Warning, 0) }
+func (h *mockSeedingHandler) Close() error                             { return nil }
+func (h *mockSeedingHandler) Apply()                                   {}
+func (h *mockSeedingHandler) GetOutput() *output.OutputDatabaseSeeding { return h.output }
+func (h *mockSeedingHandler) GetWarnings() []warning.Warning           { return make([]warning.Warning, 0) }
 
 func TestApplySeeding_NilHandler(t *testing.T) {
 	t.Parallel()
@@ -28,7 +28,7 @@ func TestApplySeeding_NilHandler(t *testing.T) {
 func TestApplySeeding_Success(t *testing.T) {
 	t.Parallel()
 	handler := &mockSeedingHandler{
-		output: output.OutputDatabaseSeeding{
+		output: &output.OutputDatabaseSeeding{
 			SuccessCount: 3,
 			FailedCount:  0,
 			Duration:     "500ms",
@@ -44,7 +44,7 @@ func TestApplySeeding_Success(t *testing.T) {
 func TestApplySeeding_PartialFailures(t *testing.T) {
 	t.Parallel()
 	handler := &mockSeedingHandler{
-		output: output.OutputDatabaseSeeding{
+		output: &output.OutputDatabaseSeeding{
 			SuccessCount: 2,
 			FailedCount:  1,
 		},
@@ -58,7 +58,7 @@ func TestApplySeeding_PartialFailures(t *testing.T) {
 func TestApplySeeding_NoDuration(t *testing.T) {
 	t.Parallel()
 	handler := &mockSeedingHandler{
-		output: output.OutputDatabaseSeeding{
+		output: &output.OutputDatabaseSeeding{
 			SuccessCount: 1,
 			Duration:     "",
 		},

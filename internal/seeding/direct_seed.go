@@ -26,7 +26,7 @@ type DirectSeed struct {
 	state         *config.DatabaseState
 	seedFilesPath []string
 	seedFiles     []config.DatabaseSeed
-	output        output.OutputDatabaseSeeding
+	output        *output.OutputDatabaseSeeding
 	warningStore  *warning.WarningStore
 }
 
@@ -206,6 +206,6 @@ func (h *DirectSeed) Apply() {
 	h.output.Duration = time.Now().Sub(startTime).String()
 }
 
-func (h *DirectSeed) GetOutput() output.OutputDatabaseSeeding {
+func (h *DirectSeed) GetOutput() *output.OutputDatabaseSeeding {
 	return h.output
 }
