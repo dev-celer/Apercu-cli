@@ -260,112 +260,129 @@ var templateFuncs = template.FuncMap{
 }
 
 var markdownTmpl = template.Must(template.New("markdown").Funcs(templateFuncs).Parse(
-	`## Apercu migration report ![status](https://img.shields.io/badge/{{get_decision_badge .Decision}})
+	`## Apercu migration report ![status](https://img.shields.io/badge/{{get_decision_badge $.Decision}})
 
-> **Migration took {{.Migration.Duration}}**
+{{- if $.Migration }}
+> **Migration took {{$.Migration.Duration}}**
 >
-{{- if get_migration_summary .Migration .Warnings}}
-> **{{get_migration_summary .Migration .Warnings}}**
+{{- if get_migration_summary $.Migration $.Warnings}}
+> **{{get_migration_summary $.Migration $.Warnings}}**
 >
-{{- end}}
-> **{{size_pretty .Migration.Metrics.Storage.WALDelta}} WAL generated**
+{{- end }}
+{{- if $.Migration.Metrics }}
+> **{{size_pretty $.Migration.Metrics.Storage.WALDelta}} WAL generated**
 >
-> **{{size_pretty (sub .Migration.Metrics.Storage.FinalSize .Migration.Metrics.Storage.InitialSize)}} database size increase**
+> **{{size_pretty (sub $.Migration.Metrics.Storage.FinalSize $.Migration.Metrics.Storage.InitialSize)}} database size increase**
+{{- end }}
+{{- end }}
 {{- if has_warnings .Warnings}}
 
 |Severity|Code|Description|
 |---|---|---|
-{{range $i, $warning := get_warnings .Warnings}}
+{{- range $i, $warning := get_warnings $.Warnings}}
 |{{get_warning_severity $warning}}|{{get_warning_code $warning}}|{{get_warning_description $warning}}|
-{{end}}
+{{- end}}
 
 <details>
 <summary><b>⚠ Warning details</b></summary>
-
-{{range $i, $warning := get_warnings_per_query .Warnings}}
+{{range $i, $warning := get_warnings_per_query $.Warnings}}
 ` + "```sql" + `
 {{$warning.Query}}
 ` + "```" + `
+{{- if and $.Migration $.Migration.Metrics }}
+
 |Affected tables|Row count|Size|
 |---|--:|--:|
-{{range $i, $table := $warning.AffectedTables}}
-|{{$table}}|{{get_prod_table_row_count $table .Migration.Metrics.Prod}}|{{get_prod_table_size $table .Migration.Metrics.Prod}}|
-{{end}}
+{{- range $i, $table := $warning.AffectedTables}}
+|{{$table}}|{{get_prod_table_row_count $table $.Migration.Metrics.Prod}}|{{get_prod_table_size $table $.Migration.Metrics.Prod}}|
+{{- end}}
+{{- end}}
 
 {{range $i, $w := $warning.Warnings}}
+
 {{get_warning_severity $w}} - {{get_warning_full_code $w}} - {{get_warning_description $w}}
 {{end}}
-{{end}}
+
+---
+
+{{- end}}
 
 </details>
 {{- end}}
-{{- if gt (len .Migration.Metrics.SchemaDiff) 0}}
+{{- if and $.Migration $.Migration.Metrics }}
+{{- if gt (len $.Migration.Metrics.SchemaDiff) 0}}
 
 <details>
-<summary><b>🗄️ Schema diff</b><sub>{{get_schema_diff_resume .Migration.Metrics.SchemaDiff}}</sub></summary>
+<summary><b>🗄️ Schema diff</b><sub>{{get_schema_diff_resume $.Migration.Metrics.SchemaDiff}}</sub></summary>
 
 ` + "```diff" + `
-{{print_schema_diff .Migration.Metrics.SchemaDiff}}
+{{- print_schema_diff $.Migration.Metrics.SchemaDiff}}
 ` + "```" + `
 
 </details>
 {{- end}}
-{{- if gt (len .Migration.Metrics.Explains) 0}}
+{{- if gt (len $.Migration.Metrics.Explains) 0}}
 
 <details>
-<summary><b>Explained Queries</b><sub>{{get_explain_resume .Migration.Metrics.Explains}}</sub></summary>
+<summary><b>🔎 Explained Queries</b><sub>{{get_explain_resume $.Migration.Metrics.Explains}}</sub></summary>
 
-{{range $source, $explains := .Migration.Metrics.Explains}}
+{{- range $source, $explains := $.Migration.Metrics.Explains}}
 
 <details>
 {{- if gt (explain_count_regression $explains) 0 }}
 <summary><span style="color:orange"><b>{{$source}}</b><sub>{{explain_count_regression $explains}}</sub></span></summary>
 {{- else}}
 <summary><b>{{$source}}</b></summary>
-{{- end}}
+{{- end }}
 
-{{range $i, $explain := $explains}}
+{{- range $i, $explain := $explains}}
+
 ` + "```sql" + `
 {{$explain.Query}}
 ` + "```" + `
 
 {{- if $explain.PreMigrationRun.ExplainedQuery}}
+
 **Pre migration:**
 ` + "```" + `
 {{$explain.PreMigrationRun.ExplainedQuery}}
 ` + "```" + `
 {{- end}}
 {{- if $explain.PostMigrationRun.ExplainedQuery}}
+
 **Post migration:**
 ` + "```" + `
 {{$explain.PostMigrationRun.ExplainedQuery}}
 ` + "```" + `
-{{- end}}
+{{- end }}
 
-{{end}}
-</details>
-{{end}}
+---
+
+{{- end}}
 </details>
 {{- end}}
+</details>
+{{- end}}
+{{- end }}
 
-{{- if .Migration.Logs}}
+{{- if and $.Migration $.Migration.Logs}}
 
 <details>
 <summary><b>🗃️ Migration logs</b></summary>
 
 ` + "```" + `
-{{.Migration.Logs}}
+{{$.Migration.Logs}}
 ` + "```" + `
 
 </details>
 {{- end}}
-{{- if .Seeding.Logs}}
+{{- if and $.Seeding $.Seeding.Logs}}
 
 <details>
-<summary><b>🌱 Seeding logs</b><sub>{{get_seeding_resume .Seeding}}</sub></summary>
+<summary><b>🌱 Seeding logs</b><sub>{{get_seeding_resume $.Seeding}}</sub></summary>
 
 ` + "```" + `
-{{.Seeding.Logs}}
+{{$.Seeding.Logs}}
 ` + "```" + `
 
 </details>
