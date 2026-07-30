@@ -6,6 +6,7 @@ import (
 	"apercu-cli/helper/metrics"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 )
 
 type LockWarning struct {
@@ -202,6 +203,7 @@ type LockWarningState struct {
 	Query         *helper.QueryWithAffectedTables `json:"query"`
 	Lock          metrics.QueryLock               `json:"lock"`
 	OperationType metrics.EventOperationType      `json:"operation_type"`
+	Table         helper.FullTableName            `json:"table"`
 }
 
 func (w *LockWarning) GetStateValues() (json.RawMessage, error) {
@@ -209,6 +211,7 @@ func (w *LockWarning) GetStateValues() (json.RawMessage, error) {
 		Query:         w.query,
 		Lock:          w.lock,
 		OperationType: w.operationType,
+		Table:         w.table,
 	}
 	return json.Marshal(v)
 }
@@ -255,61 +258,60 @@ var (
 	CodeAlterTableAddConstraintExclude             Code = "ALTER_TABLE_ADD_CONSTRAINT_EXCLUDE"
 )
 
-func NewLockWarnings(query *metrics.QueryEventAnalysis, code Code, pgVersion float32, prodStats *metrics.DatabaseMetrics) []*LockWarning {
+// lockWarningRemediation holds every code handled by LockWarning, mapped to its
+// remediation. A code with no remediation is still expected to be present here,
+// a code absent from this map is not a lock warning.
+var lockWarningRemediation = map[Code]string{
+	CodeCreateIndexWithoutConcurrently:             "Use the keyword 'CONCURRENTLY' with 'CREATE INDEX' to prevent a lock from taking place",
+	CodeDropIndexCascadeWithoutConcurrently:        "Use the keyword 'CONCURRENTLY' with 'DROP INDEX' to prevent a lock from taking place, note that 'CASCADE' is not supported with 'CONCURRENTLY', you will need to drop each objects that depend on this index manually",
+	CodeDropIndexWithoutConcurrently:               "Use the keyword 'CONCURRENTLY' with 'DROP INDEX' to prevent a lock from taking place",
+	CodeReindexWithoutConcurrently:                 "You can use the keywork 'CONCURRENTLY' with 'REINDEX' to prevent a lock from taking place, note that if 'REINDEX CONCURRENTLY' fail, it will leave behind a broken index that need to be cleaned up manually",
+	CodeRefreshMaterializedViewWithoutConcurrently: "Use the keyword 'CONCURRENTLY' with 'REFRESH MATERIALIZED VIEW' to prevent a lock from taking place",
+	CodeCluster:                            "",
+	CodeVacuumFull:                         "",
+	CodeCreateTrigger:                      "",
+	CodeCreateRule:                         "",
+	CodeAlterRule:                          "",
+	CodeAlterType:                          "",
+	CodeAlterTableDropConstraint:           "",
+	CodeAlterTableDropColumn:               "",
+	CodeAlterTableLogged:                   "",
+	CodeAlterTableTablespace:               "",
+	CodeAlterTableFillFactor:               "",
+	CodeAlterTableReset:                    "",
+	CodeAlterTableSwitchTrigger:            "",
+	CodeAlterTableRename:                   "",
+	CodeAddColumnGeneratedAlwaysAsStored:   "Avoid adding a new column with 'GENERATED ALWAYS AS ... STORED' where possible, instead you can create a simple nullable column, create a trigger 'BEFORE INSERT OR UPDATE' with your default, backfill the rows than set to NOT NULL",
+	CodeAddColumnGeneratedAlwaysAsIdentity: "Avoid adding directly a new column with 'GENERATED ALWAYS AS IDENTITY', instead you can create a nullable column, backfill the rows, set 'NOT NULL', than attach the 'GENERATED ALWAYS AS IDENTITY' property",
+	CodeAddColumnVolatileDefault:           "When adding a new column with volatile default, we recommend to first add a nullable column without default, set default for new rows then backfill existing rows in batches",
+	CodeAddColumn:                          "",
+	CodeAlterColumnSetNotNull:              "",
+	CodeAlterColumnDropNotNull:             "",
+	CodeAlterColumnDefault:                 "",
+	CodeAlterColumnSetStatistics:           "",
+	CodeAlterColumnSetStorage:              "",
+	CodeAlterColumnSetTypeNotWidening:      "Add a new column of the target type, backfill it, swap via RENAME then dropping the old column",
+	CodeAlterColumnSetTypeWidening:         "",
+	CodeAlterTableAddConstraintNotValid:    "",
+	CodeAlterTableAddConstraint:            "Add your constraint with 'NOT VALID', then VALIDATE CONSTRAINT in a separate statement",
+	CodeAlterTableAddUniqueWithIndex:       "",
+	CodeAlterTableAddUniqueWithoutIndex:    "First create a unique index concurrently then add your UNIQUE CONSTRAINT / PRIMARY KEY with 'USING INDEX <idx>'",
+	CodeAlterTableAddConstraintExclude:     "",
+}
+
+func NewLockWarnings(query *metrics.QueryEventAnalysis, code Code, prodStats *metrics.DatabaseMetrics) []*LockWarning {
 	if query == nil {
 		return nil
 	}
 
-	var remediation string
-	switch code {
-	case CodeCreateIndexWithoutConcurrently:
-		remediation = "Use the keyword 'CONCURRENTLY' with 'CREATE INDEX' to prevent a lock from taking place"
-	case CodeDropIndexCascadeWithoutConcurrently:
-		remediation = "Use the keyword 'CONCURRENTLY' with 'DROP INDEX' to prevent a lock from taking place, note that 'CASCADE' is not supported with 'CONCURRENTLY', you will need to drop each objects that depend on this index manually"
-	case CodeDropIndexWithoutConcurrently:
-		remediation = "Use the keyword 'CONCURRENTLY' with 'DROP INDEX' to prevent a lock from taking place"
-	case CodeReindexWithoutConcurrently:
-		remediation = "You can use the keywork 'CONCURRENTLY' with 'REINDEX' to prevent a lock from taking place, note that if 'REINDEX CONCURRENTLY' fail, it will leave behind a broken index that need to be cleaned up manually"
-	case CodeRefreshMaterializedViewWithoutConcurrently:
-		remediation = "Use the keyword 'CONCURRENTLY' with 'REFRESH MATERIALIZED VIEW' to prevent a lock from taking place"
-	case CodeCluster:
-	case CodeVacuumFull:
-	case CodeCreateTrigger:
-	case CodeCreateRule:
-	case CodeAlterRule:
-	case CodeAlterType:
-	case CodeAlterTableDropConstraint:
-	case CodeAlterTableDropColumn:
-	case CodeAlterTableLogged:
-	case CodeAlterTableTablespace:
-	case CodeAlterTableFillFactor:
-	case CodeAlterTableReset:
-	case CodeAlterTableSwitchTrigger:
-	case CodeAlterTableRename:
-	case CodeAddColumnGeneratedAlwaysAsStored:
-		remediation = "Avoid adding a new column with 'GENERATED ALWAYS AS ... STORED' where possible, instead you can create a simple nullable column, create a trigger 'BEFORE INSERT OR UPDATE' with your default, backfill the rows than set to NOT NULL"
-	case CodeAddColumnGeneratedAlwaysAsIdentity:
-		remediation = "Avoid adding directly a new column with 'GENERATED ALWAYS AS IDENTITY', instead you can create a nullable column, backfill the rows, set 'NOT NULL', than attach the 'GENERATED ALWAYS AS IDENTITY' property"
-	case CodeAddColumnVolatileDefault:
-		remediation = "When adding a new column with volatile default, we recommend to first add a nullable column without default, set default for new rows then backfill existing rows in batches"
-	case CodeAddColumn:
-	case CodeAlterColumnSetNotNull:
-	case CodeAlterColumnDropNotNull:
-	case CodeAlterColumnDefault:
-	case CodeAlterColumnSetStatistics:
-	case CodeAlterColumnSetStorage:
-	case CodeAlterColumnSetTypeNotWidening:
-		remediation = "Add a new column of the target type, backfill it, swap via RENAME then dropping the old column"
-	case CodeAlterColumnSetTypeWidening:
-	case CodeAlterTableAddConstraintNotValid:
-	case CodeAlterTableAddConstraint:
-		remediation = "Add your constraint with 'NOT VALID', then VALIDATE CONSTRAINT in a separate statement"
-	case CodeAlterTableAddUniqueWithIndex:
-	case CodeAlterTableAddUniqueWithoutIndex:
-		remediation = "First create a unique index concurrently then add your UNIQUE CONSTRAINT / PRIMARY KEY with 'USING INDEX <idx>'"
-	case CodeAlterTableAddConstraintExclude:
-	default:
+	remediation, known := lockWarningRemediation[code]
+	if !known {
 		return nil
+	}
+
+	var pgVersion float32
+	if prodStats != nil {
+		pgVersion = prodStats.ServerVersion
 	}
 
 	q := helper.QueryWithAffectedTables{
@@ -342,4 +344,48 @@ func NewLockWarnings(query *metrics.QueryEventAnalysis, code Code, pgVersion flo
 	}
 
 	return warnings
+}
+
+// newLockWarningConverter builds the state converter of a single lock warning code.
+// The table statistics and the server version are never persisted, they are read back
+// from the metrics of the current run, exactly like NewLockWarnings does.
+func newLockWarningConverter(code Code) func(state json.RawMessage, prodMetrics *metrics.DatabaseMetrics) Warning {
+	return func(state json.RawMessage, prodMetrics *metrics.DatabaseMetrics) Warning {
+		v := LockWarningState{}
+		err := json.Unmarshal(state, &v)
+		if err != nil {
+			slog.Debug("Failed to unmarshal state", "error", err)
+			return nil
+		}
+
+		var prodTableMetric metrics.TableMetrics
+		var pgVersion float32
+		if prodMetrics != nil {
+			pgVersion = prodMetrics.ServerVersion
+
+			// If the table wasn't found on the prod database, ignore the warning
+			x, ok := prodMetrics.TablesMetrics[v.Table]
+			prodTableMetric = x
+			if !ok {
+				return nil
+			}
+		}
+
+		return &LockWarning{
+			code:          code,
+			operationType: v.OperationType,
+			query:         v.Query,
+			table:         v.Table,
+			tableStats:    prodTableMetric,
+			lock:          v.Lock,
+			pgVersion:     pgVersion,
+			remediation:   lockWarningRemediation[code],
+		}
+	}
+}
+
+func init() {
+	for code := range lockWarningRemediation {
+		warningConverter[code] = newLockWarningConverter(code)
+	}
 }

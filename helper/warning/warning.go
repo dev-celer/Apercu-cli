@@ -26,12 +26,18 @@ const (
 	WarningLevelHigh   = warning_interface.WarningLevelHigh
 )
 
-func PrintWarning(w Warning) {
+// isNilWarning reports whether a warning is nil, either as a nil interface or as a
+// typed-nil pointer wrapped in a non-nil interface
+func isNilWarning(w Warning) bool {
 	if w == nil {
-		return
+		return true
 	}
-	// Guard against a typed-nil pointer wrapped in a non-nil interface
-	if v := reflect.ValueOf(w); v.Kind() == reflect.Ptr && v.IsNil() {
+	v := reflect.ValueOf(w)
+	return v.Kind() == reflect.Ptr && v.IsNil()
+}
+
+func PrintWarning(w Warning) {
+	if isNilWarning(w) {
 		return
 	}
 	_, _ = fmt.Fprintln(log.Writer(), fmt.Sprintf("WARNING: %s", w.GetTextLong()))
@@ -59,7 +65,13 @@ func (s *WarningStore) PopulateRawStateWarnings(prodMetrics *metrics.DatabaseMet
 			continue
 		}
 
-		warnings = append(warnings, f(state, prodMetrics))
+		w := f(state, prodMetrics)
+		if isNilWarning(w) {
+			slog.Debug("warning could not be rebuilt from state", "code", code, "key", key)
+			continue
+		}
+
+		warnings = append(warnings, w)
 	}
 
 	s.rawStateWarnings = make(map[string]json.RawMessage)
@@ -78,11 +90,7 @@ func NewWarningStore() *WarningStore {
 }
 
 func (s *WarningStore) AddWarning(w Warning) {
-	if w == nil {
-		return
-	}
-	// Guard against a typed-nil pointer wrapped in a non-nil interface
-	if v := reflect.ValueOf(w); v.Kind() == reflect.Ptr && v.IsNil() {
+	if isNilWarning(w) {
 		return
 	}
 

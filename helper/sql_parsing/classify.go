@@ -37,7 +37,7 @@ func ClassifyOperation(query *metricshelper.QueryEventAnalysis, serverVersion fl
 			return
 		}
 		query.Type = metricshelper.EventOperationTypeScanUnderLock
-		w := warning.NewLockWarnings(query, warning.CodeCreateIndexWithoutConcurrently, serverVersion, prodStats)
+		w := warning.NewLockWarnings(query, warning.CodeCreateIndexWithoutConcurrently, prodStats)
 		appendWarnings(w, warningStore, query)
 		return
 
@@ -48,13 +48,13 @@ func ClassifyOperation(query *metricshelper.QueryEventAnalysis, serverVersion fl
 		}
 		if contains(" CASCADE") {
 			query.Type = metricshelper.EventOperationTypeMetadataOnly
-			w := warning.NewLockWarnings(query, warning.CodeDropIndexCascadeWithoutConcurrently, serverVersion, prodStats)
+			w := warning.NewLockWarnings(query, warning.CodeDropIndexCascadeWithoutConcurrently, prodStats)
 			appendWarnings(w, warningStore, query)
 			return
 		}
 		// TODO Detect if the index is UNIQUE / PRIMARY KEY before recommending using CONCURRENTLY
 		query.Type = metricshelper.EventOperationTypeMetadataOnly
-		w := warning.NewLockWarnings(query, warning.CodeDropIndexWithoutConcurrently, serverVersion, prodStats)
+		w := warning.NewLockWarnings(query, warning.CodeDropIndexWithoutConcurrently, prodStats)
 		appendWarnings(w, warningStore, query)
 		return
 
@@ -64,7 +64,7 @@ func ClassifyOperation(query *metricshelper.QueryEventAnalysis, serverVersion fl
 			return
 		}
 		query.Type = metricshelper.EventOperationTypeRewriteUnderLock
-		w := warning.NewLockWarnings(query, warning.CodeReindexWithoutConcurrently, serverVersion, prodStats)
+		w := warning.NewLockWarnings(query, warning.CodeReindexWithoutConcurrently, prodStats)
 		appendWarnings(w, warningStore, query)
 		return
 
@@ -74,20 +74,20 @@ func ClassifyOperation(query *metricshelper.QueryEventAnalysis, serverVersion fl
 			return
 		}
 		query.Type = metricshelper.EventOperationTypeRewriteUnderLock
-		w := warning.NewLockWarnings(query, warning.CodeRefreshMaterializedViewWithoutConcurrently, serverVersion, prodStats)
+		w := warning.NewLockWarnings(query, warning.CodeRefreshMaterializedViewWithoutConcurrently, prodStats)
 		appendWarnings(w, warningStore, query)
 		return
 
 	case hasPrefix("CLUSTER"):
 		query.Type = metricshelper.EventOperationTypeRewriteUnderLock
-		w := warning.NewLockWarnings(query, warning.CodeCluster, serverVersion, prodStats)
+		w := warning.NewLockWarnings(query, warning.CodeCluster, prodStats)
 		appendWarnings(w, warningStore, query)
 		return
 
 	case hasPrefix("VACUUM"):
 		if contains(" FULL") {
 			query.Type = metricshelper.EventOperationTypeRewriteUnderLock
-			w := warning.NewLockWarnings(query, warning.CodeVacuumFull, serverVersion, prodStats)
+			w := warning.NewLockWarnings(query, warning.CodeVacuumFull, prodStats)
 			appendWarnings(w, warningStore, query)
 			return
 		}
@@ -100,17 +100,17 @@ func ClassifyOperation(query *metricshelper.QueryEventAnalysis, serverVersion fl
 
 	case hasPrefix("CREATE TRIGGER"):
 		query.Type = metricshelper.EventOperationTypeMetadataOnly
-		w := warning.NewLockWarnings(query, warning.CodeCreateTrigger, serverVersion, prodStats)
+		w := warning.NewLockWarnings(query, warning.CodeCreateTrigger, prodStats)
 		appendWarnings(w, warningStore, query)
 		return
 	case hasPrefix("CREATE RULE"):
 		query.Type = metricshelper.EventOperationTypeMetadataOnly
-		w := warning.NewLockWarnings(query, warning.CodeCreateRule, serverVersion, prodStats)
+		w := warning.NewLockWarnings(query, warning.CodeCreateRule, prodStats)
 		appendWarnings(w, warningStore, query)
 		return
 	case hasPrefix("ALTER RULE"):
 		query.Type = metricshelper.EventOperationTypeMetadataOnly
-		w := warning.NewLockWarnings(query, warning.CodeAlterRule, serverVersion, prodStats)
+		w := warning.NewLockWarnings(query, warning.CodeAlterRule, prodStats)
 		appendWarnings(w, warningStore, query)
 		return
 
@@ -121,7 +121,7 @@ func ClassifyOperation(query *metricshelper.QueryEventAnalysis, serverVersion fl
 		}
 		// TODO Store a list of tables using the type to include in warning
 		query.Type = metricshelper.EventOperationTypeRewriteUnderLock
-		w := warning.NewLockWarnings(query, warning.CodeAlterType, serverVersion, prodStats)
+		w := warning.NewLockWarnings(query, warning.CodeAlterType, prodStats)
 		appendWarnings(w, warningStore, query)
 		return
 	}
@@ -157,7 +157,7 @@ func classifyAlterSubcommand(sub string, query *metricshelper.QueryEventAnalysis
 		if query.Type.Severity() < metricshelper.EventOperationTypeMetadataOnly.Severity() {
 			query.Type = metricshelper.EventOperationTypeMetadataOnly
 		}
-		w := warning.NewLockWarnings(query, warning.CodeAlterTableDropConstraint, serverVersion, prodStats)
+		w := warning.NewLockWarnings(query, warning.CodeAlterTableDropConstraint, prodStats)
 		appendWarnings(w, warningStore, query)
 		return
 
@@ -174,7 +174,7 @@ func classifyAlterSubcommand(sub string, query *metricshelper.QueryEventAnalysis
 			if query.Type.Severity() < metricshelper.EventOperationTypeMetadataOnly.Severity() {
 				query.Type = metricshelper.EventOperationTypeMetadataOnly
 			}
-			w := warning.NewLockWarnings(query, warning.CodeAlterTableDropColumn, serverVersion, prodStats)
+			w := warning.NewLockWarnings(query, warning.CodeAlterTableDropColumn, prodStats)
 			appendWarnings(w, warningStore, query)
 			return
 		case contains("ADD COLUMN"), strings.HasPrefix(sub, "ADD ") || strings.Contains(sub, " ADD "):
@@ -186,14 +186,14 @@ func classifyAlterSubcommand(sub string, query *metricshelper.QueryEventAnalysis
 			if query.Type.Severity() < metricshelper.EventOperationTypeRewriteUnderLock.Severity() {
 				query.Type = metricshelper.EventOperationTypeRewriteUnderLock
 			}
-			w := warning.NewLockWarnings(query, warning.CodeAlterTableLogged, serverVersion, prodStats)
+			w := warning.NewLockWarnings(query, warning.CodeAlterTableLogged, prodStats)
 			appendWarnings(w, warningStore, query)
 			return
 		case contains("SET TABLESPACE"):
 			if query.Type.Severity() < metricshelper.EventOperationTypeRewriteUnderLock.Severity() {
 				query.Type = metricshelper.EventOperationTypeRewriteUnderLock
 			}
-			w := warning.NewLockWarnings(query, warning.CodeAlterTableTablespace, serverVersion, prodStats)
+			w := warning.NewLockWarnings(query, warning.CodeAlterTableTablespace, prodStats)
 			appendWarnings(w, warningStore, query)
 			return
 
@@ -202,14 +202,14 @@ func classifyAlterSubcommand(sub string, query *metricshelper.QueryEventAnalysis
 			if query.Type.Severity() < metricshelper.EventOperationTypeMetadataOnly.Severity() {
 				query.Type = metricshelper.EventOperationTypeMetadataOnly
 			}
-			w := warning.NewLockWarnings(query, warning.CodeAlterTableFillFactor, serverVersion, prodStats)
+			w := warning.NewLockWarnings(query, warning.CodeAlterTableFillFactor, prodStats)
 			appendWarnings(w, warningStore, query)
 			return
 		case contains("RESET ("):
 			if query.Type.Severity() < metricshelper.EventOperationTypeMetadataOnly.Severity() {
 				query.Type = metricshelper.EventOperationTypeMetadataOnly
 			}
-			w := warning.NewLockWarnings(query, warning.CodeAlterTableReset, serverVersion, prodStats)
+			w := warning.NewLockWarnings(query, warning.CodeAlterTableReset, prodStats)
 			appendWarnings(w, warningStore, query)
 			return
 		case contains("ENABLE TRIGGER"), contains("DISABLE TRIGGER"),
@@ -217,14 +217,14 @@ func classifyAlterSubcommand(sub string, query *metricshelper.QueryEventAnalysis
 			if query.Type.Severity() < metricshelper.EventOperationTypeMetadataOnly.Severity() {
 				query.Type = metricshelper.EventOperationTypeMetadataOnly
 			}
-			w := warning.NewLockWarnings(query, warning.CodeAlterTableSwitchTrigger, serverVersion, prodStats)
+			w := warning.NewLockWarnings(query, warning.CodeAlterTableSwitchTrigger, prodStats)
 			appendWarnings(w, warningStore, query)
 			return
 		case contains("RENAME"):
 			if query.Type.Severity() < metricshelper.EventOperationTypeMetadataOnly.Severity() {
 				query.Type = metricshelper.EventOperationTypeMetadataOnly
 			}
-			w := warning.NewLockWarnings(query, warning.CodeAlterTableRename, serverVersion, prodStats)
+			w := warning.NewLockWarnings(query, warning.CodeAlterTableRename, prodStats)
 			appendWarnings(w, warningStore, query)
 			return
 		}
@@ -241,28 +241,28 @@ func classifyAddColumn(sub string, query *metricshelper.QueryEventAnalysis, serv
 		if query.Type.Severity() < metricshelper.EventOperationTypeRewriteUnderLock.Severity() {
 			query.Type = metricshelper.EventOperationTypeRewriteUnderLock
 		}
-		w := warning.NewLockWarnings(query, warning.CodeAddColumnGeneratedAlwaysAsStored, serverVersion, prodStats)
+		w := warning.NewLockWarnings(query, warning.CodeAddColumnGeneratedAlwaysAsStored, prodStats)
 		appendWarnings(w, warningStore, query)
 		return
 	case contains("GENERATED") && contains("AS IDENTITY"):
 		if query.Type.Severity() < metricshelper.EventOperationTypeRewriteUnderLock.Severity() {
 			query.Type = metricshelper.EventOperationTypeRewriteUnderLock
 		}
-		w := warning.NewLockWarnings(query, warning.CodeAddColumnGeneratedAlwaysAsIdentity, serverVersion, prodStats)
+		w := warning.NewLockWarnings(query, warning.CodeAddColumnGeneratedAlwaysAsIdentity, prodStats)
 		appendWarnings(w, warningStore, query)
 		return
 	case contains("DEFAULT") && hasVolatileDefault(sub):
 		if query.Type.Severity() < metricshelper.EventOperationTypeRewriteUnderLock.Severity() {
 			query.Type = metricshelper.EventOperationTypeRewriteUnderLock
 		}
-		w := warning.NewLockWarnings(query, warning.CodeAddColumnVolatileDefault, serverVersion, prodStats)
+		w := warning.NewLockWarnings(query, warning.CodeAddColumnVolatileDefault, prodStats)
 		appendWarnings(w, warningStore, query)
 		return
 	default:
 		if query.Type.Severity() < metricshelper.EventOperationTypeMetadataOnly.Severity() {
 			query.Type = metricshelper.EventOperationTypeMetadataOnly
 		}
-		w := warning.NewLockWarnings(query, warning.CodeAddColumn, serverVersion, prodStats)
+		w := warning.NewLockWarnings(query, warning.CodeAddColumn, prodStats)
 		appendWarnings(w, warningStore, query)
 		return
 	}
@@ -278,14 +278,14 @@ func classifyAlterColumn(sub string, query *metricshelper.QueryEventAnalysis, se
 		if query.Type.Severity() < metricshelper.EventOperationTypeMetadataOnly.Severity() {
 			query.Type = metricshelper.EventOperationTypeMetadataOnly
 		}
-		w := warning.NewLockWarnings(query, warning.CodeAlterColumnDefault, serverVersion, prodStats)
+		w := warning.NewLockWarnings(query, warning.CodeAlterColumnDefault, prodStats)
 		appendWarnings(w, warningStore, query)
 		return true
 	case contains("DROP NOT NULL"):
 		if query.Type.Severity() < metricshelper.EventOperationTypeMetadataOnly.Severity() {
 			query.Type = metricshelper.EventOperationTypeMetadataOnly
 		}
-		w := warning.NewLockWarnings(query, warning.CodeAlterColumnDropNotNull, serverVersion, prodStats)
+		w := warning.NewLockWarnings(query, warning.CodeAlterColumnDropNotNull, prodStats)
 		appendWarnings(w, warningStore, query)
 		return true
 	case contains("SET NOT NULL"):
@@ -293,21 +293,21 @@ func classifyAlterColumn(sub string, query *metricshelper.QueryEventAnalysis, se
 		if query.Type.Severity() < metricshelper.EventOperationTypeScanUnderLock.Severity() {
 			query.Type = metricshelper.EventOperationTypeScanUnderLock
 		}
-		w := warning.NewLockWarnings(query, warning.CodeAlterColumnSetNotNull, serverVersion, prodStats)
+		w := warning.NewLockWarnings(query, warning.CodeAlterColumnSetNotNull, prodStats)
 		appendWarnings(w, warningStore, query)
 		return true
 	case contains("SET STORAGE"):
 		if query.Type.Severity() < metricshelper.EventOperationTypeMetadataOnly.Severity() {
 			query.Type = metricshelper.EventOperationTypeMetadataOnly
 		}
-		w := warning.NewLockWarnings(query, warning.CodeAlterColumnSetStorage, serverVersion, prodStats)
+		w := warning.NewLockWarnings(query, warning.CodeAlterColumnSetStorage, prodStats)
 		appendWarnings(w, warningStore, query)
 		return true
 	case contains("SET STATISTICS"):
 		if query.Type.Severity() < metricshelper.EventOperationTypeMetadataOnly.Severity() {
 			query.Type = metricshelper.EventOperationTypeMetadataOnly
 		}
-		w := warning.NewLockWarnings(query, warning.CodeAlterColumnSetStatistics, serverVersion, prodStats)
+		w := warning.NewLockWarnings(query, warning.CodeAlterColumnSetStatistics, prodStats)
 		appendWarnings(w, warningStore, query)
 		return true
 	case contains(" TYPE "), contains(" SET DATA TYPE "):
@@ -315,14 +315,14 @@ func classifyAlterColumn(sub string, query *metricshelper.QueryEventAnalysis, se
 			if query.Type.Severity() < metricshelper.EventOperationTypeMetadataOnly.Severity() {
 				query.Type = metricshelper.EventOperationTypeMetadataOnly
 			}
-			w := warning.NewLockWarnings(query, warning.CodeAlterColumnSetTypeWidening, serverVersion, prodStats)
+			w := warning.NewLockWarnings(query, warning.CodeAlterColumnSetTypeWidening, prodStats)
 			appendWarnings(w, warningStore, query)
 			return true
 		}
 		if query.Type.Severity() < metricshelper.EventOperationTypeRewriteUnderLock.Severity() {
 			query.Type = metricshelper.EventOperationTypeRewriteUnderLock
 		}
-		w := warning.NewLockWarnings(query, warning.CodeAlterColumnSetTypeNotWidening, serverVersion, prodStats)
+		w := warning.NewLockWarnings(query, warning.CodeAlterColumnSetTypeNotWidening, prodStats)
 		appendWarnings(w, warningStore, query)
 		return true
 	}
@@ -341,14 +341,14 @@ func classifyAddConstraint(sub string, query *metricshelper.QueryEventAnalysis, 
 			if query.Type.Severity() < metricshelper.EventOperationTypeMetadataOnly.Severity() {
 				query.Type = metricshelper.EventOperationTypeMetadataOnly
 			}
-			w := warning.NewLockWarnings(query, warning.CodeAlterTableAddConstraintNotValid, serverVersion, prodStats)
+			w := warning.NewLockWarnings(query, warning.CodeAlterTableAddConstraintNotValid, prodStats)
 			appendWarnings(w, warningStore, query)
 			return
 		}
 		if query.Type.Severity() < metricshelper.EventOperationTypeScanUnderLock.Severity() {
 			query.Type = metricshelper.EventOperationTypeScanUnderLock
 		}
-		w := warning.NewLockWarnings(query, warning.CodeAlterTableAddConstraint, serverVersion, prodStats)
+		w := warning.NewLockWarnings(query, warning.CodeAlterTableAddConstraint, prodStats)
 		appendWarnings(w, warningStore, query)
 		return
 	case contains("PRIMARY KEY"), contains("UNIQUE"):
@@ -357,21 +357,21 @@ func classifyAddConstraint(sub string, query *metricshelper.QueryEventAnalysis, 
 			if query.Type.Severity() < metricshelper.EventOperationTypeMetadataOnly.Severity() {
 				query.Type = metricshelper.EventOperationTypeMetadataOnly
 			}
-			w := warning.NewLockWarnings(query, warning.CodeAlterTableAddUniqueWithIndex, serverVersion, prodStats)
+			w := warning.NewLockWarnings(query, warning.CodeAlterTableAddUniqueWithIndex, prodStats)
 			appendWarnings(w, warningStore, query)
 			return
 		}
 		if query.Type.Severity() < metricshelper.EventOperationTypeScanUnderLock.Severity() {
 			query.Type = metricshelper.EventOperationTypeScanUnderLock
 		}
-		w := warning.NewLockWarnings(query, warning.CodeAlterTableAddUniqueWithoutIndex, serverVersion, prodStats)
+		w := warning.NewLockWarnings(query, warning.CodeAlterTableAddUniqueWithoutIndex, prodStats)
 		appendWarnings(w, warningStore, query)
 		return
 	case contains("EXCLUDE"):
 		if query.Type.Severity() < metricshelper.EventOperationTypeScanUnderLock.Severity() {
 			query.Type = metricshelper.EventOperationTypeScanUnderLock
 		}
-		w := warning.NewLockWarnings(query, warning.CodeAlterTableAddConstraintExclude, serverVersion, prodStats)
+		w := warning.NewLockWarnings(query, warning.CodeAlterTableAddConstraintExclude, prodStats)
 		appendWarnings(w, warningStore, query)
 		return
 	}

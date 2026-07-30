@@ -54,6 +54,14 @@ func TestConverterRoundTrip(t *testing.T) {
 		},
 	}
 
+	lockWarnings := NewLockWarnings(&metricshelper.QueryEventAnalysis{
+		Event:          &metricshelper.QueryEvent{SQL: "CREATE INDEX idx_orders_id ON public.orders (id)"},
+		Type:           metricshelper.EventOperationTypeScanUnderLock,
+		AffectedTables: []helper.FullTableName{{Schema: "public", Table: "orders"}},
+		Lock:           metricshelper.QueryLockShare,
+	}, CodeCreateIndexWithoutConcurrently, &prodMetrics)
+	require.Len(t, lockWarnings, 1, "test setup: expected one lock warning")
+
 	cases := []struct {
 		name string
 		w    Warning
@@ -78,6 +86,7 @@ func TestConverterRoundTrip(t *testing.T) {
 				&metricshelper.TableMetrics{RowCount: 1000, TableSize: 5 * 1024 * 1024 * 1024},
 			),
 		},
+		{"lock_create_index_without_concurrently", lockWarnings[0]},
 	}
 
 	for _, tc := range cases {
@@ -152,6 +161,75 @@ func TestConvertStatesToWarnings_UnknownCodeSkipped(t *testing.T) {
 	got := store.PopulateRawStateWarnings(nil)
 	require.Len(t, got, 1)
 	assert.Equal(t, CodeStateFileFailedToRead, got[0].GetCode())
+}
+
+// newTestLockWarning builds a lock warning on public.orders for the given metrics.
+func newTestLockWarning(t *testing.T, prodMetrics *metricshelper.DatabaseMetrics) *LockWarning {
+	t.Helper()
+
+	w := NewLockWarnings(&metricshelper.QueryEventAnalysis{
+		Event:          &metricshelper.QueryEvent{SQL: "CREATE INDEX idx_orders_id ON public.orders (id)"},
+		Type:           metricshelper.EventOperationTypeScanUnderLock,
+		AffectedTables: []helper.FullTableName{{Schema: "public", Table: "orders"}},
+		Lock:           metricshelper.QueryLockShare,
+	}, CodeCreateIndexWithoutConcurrently, prodMetrics)
+	require.Len(t, w, 1)
+	return w[0]
+}
+
+// A lock warning carries no metrics in its state, they are read back from the run
+// that reconstructs it.
+func TestLockWarningConverter_UsesCurrentProdMetrics(t *testing.T) {
+	t.Parallel()
+
+	table := helper.FullTableName{Schema: "public", Table: "orders"}
+	previousRun := metricshelper.DatabaseMetrics{
+		ServerVersion: 15,
+		TablesMetrics: map[helper.FullTableName]metricshelper.TableMetrics{
+			table: {RowCount: 10, TableSize: 1024},
+		},
+	}
+	currentRun := metricshelper.DatabaseMetrics{
+		ServerVersion: 17,
+		TablesMetrics: map[helper.FullTableName]metricshelper.TableMetrics{
+			table: {RowCount: 5000, TableSize: 5 * 1024 * 1024 * 1024, WriteActivity: metricshelper.TableActivityHot},
+		},
+	}
+
+	got := roundTrip(t, newTestLockWarning(t, &previousRun), &currentRun)
+
+	lock, ok := got.(*LockWarning)
+	require.True(t, ok, "expected a *LockWarning")
+	assert.Equal(t, currentRun.TablesMetrics[table], lock.tableStats, "table stats must come from the current run")
+	assert.Equal(t, currentRun.ServerVersion, lock.pgVersion, "server version must come from the current run")
+	assert.Equal(t, table, lock.table)
+	assert.Equal(t, CodeCreateIndexWithoutConcurrently, lock.GetCode())
+	assert.NotEmpty(t, lock.remediation, "remediation must be restored from the code")
+}
+
+// If the table is gone from the prod database the warning no longer applies, it must
+// be dropped rather than rebuilt with empty metrics.
+func TestLockWarningConverter_TableMissingFromProd(t *testing.T) {
+	t.Parallel()
+
+	prodMetrics := metricshelper.DatabaseMetrics{
+		ServerVersion: 17,
+		TablesMetrics: map[helper.FullTableName]metricshelper.TableMetrics{
+			{Schema: "public", Table: "orders"}: {RowCount: 5000, TableSize: 5 * 1024 * 1024 * 1024},
+		},
+	}
+	w := newTestLockWarning(t, &prodMetrics)
+
+	store := WarningStore{
+		Warnings: make([]Warning, 0),
+		rawStateWarnings: map[string]json.RawMessage{
+			w.GetFullCode(): mustState(t, w),
+		},
+	}
+
+	// The table is not part of the prod database anymore
+	got := store.PopulateRawStateWarnings(&metricshelper.DatabaseMetrics{ServerVersion: 17})
+	assert.Empty(t, got, "a lock warning on a table missing from prod must be dropped")
 }
 
 func TestWarningStore_AddDedup(t *testing.T) {
