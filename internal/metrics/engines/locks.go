@@ -109,7 +109,7 @@ func (e *LocksEngine) CollectPostMigrationMetrics() error {
 		if query.Event == nil {
 			continue
 		}
-		parsinghelper.ClassifyOperation(query, e.ProdStats.ServerVersion, e.WarningStore, &e.ProdStats)
+		parsinghelper.ClassifyOperation(query, e.WarningStore, &e.ProdStats)
 	}
 	return nil
 }

@@ -16,7 +16,7 @@ func appendWarnings(w []*warning.LockWarning, warningStore *warning.WarningStore
 }
 
 // ClassifyOperation inject the operation type and warning if necessary, the warning is also created in the warningStore.
-func ClassifyOperation(query *metricshelper.QueryEventAnalysis, serverVersion float32, warningStore *warning.WarningStore, prodStats *metricshelper.DatabaseMetrics) {
+func ClassifyOperation(query *metricshelper.QueryEventAnalysis, warningStore *warning.WarningStore, prodStats *metricshelper.DatabaseMetrics) {
 	upper := strings.ToUpper(strings.TrimSpace(query.Event.SQL))
 	if upper == "" {
 		query.Type = metricshelper.EventOperationTypeNonBlocking
@@ -28,7 +28,7 @@ func ClassifyOperation(query *metricshelper.QueryEventAnalysis, serverVersion fl
 
 	switch {
 	case hasPrefix("ALTER TABLE"):
-		classifyAlterTable(upper, query, serverVersion, warningStore, prodStats)
+		classifyAlterTable(upper, query, warningStore, prodStats)
 		return
 
 	case hasPrefix("CREATE UNIQUE INDEX"), hasPrefix("CREATE INDEX"):
@@ -131,23 +131,23 @@ func ClassifyOperation(query *metricshelper.QueryEventAnalysis, serverVersion fl
 
 // classifyAlterTable splits an ALTER TABLE statement into its comma-separated
 // subcommands and returns the most severe classification across them.
-func classifyAlterTable(upper string, query *metricshelper.QueryEventAnalysis, serverVersion float32, warningStore *warning.WarningStore, prodStats *metricshelper.DatabaseMetrics) {
+func classifyAlterTable(upper string, query *metricshelper.QueryEventAnalysis, warningStore *warning.WarningStore, prodStats *metricshelper.DatabaseMetrics) {
 	body := strings.TrimSpace(strings.TrimPrefix(upper, "ALTER TABLE"))
 
 	for _, sub := range splitAlterTableTopLevel(body) {
 		sub = strings.TrimSpace(sub)
-		classifyAlterSubcommand(sub, query, serverVersion, warningStore, prodStats)
+		classifyAlterSubcommand(sub, query, warningStore, prodStats)
 	}
 }
 
-func classifyAlterSubcommand(sub string, query *metricshelper.QueryEventAnalysis, serverVersion float32, warningStore *warning.WarningStore, prodStats *metricshelper.DatabaseMetrics) {
+func classifyAlterSubcommand(sub string, query *metricshelper.QueryEventAnalysis, warningStore *warning.WarningStore, prodStats *metricshelper.DatabaseMetrics) {
 	contains := func(s string) bool { return strings.Contains(sub, s) }
 
 	switch {
 	case contains("ADD CONSTRAINT"), contains("ADD PRIMARY KEY"),
 		contains("ADD UNIQUE"), contains("ADD FOREIGN KEY"),
 		contains("ADD CHECK"), contains("ADD EXCLUDE"):
-		classifyAddConstraint(sub, query, serverVersion, warningStore, prodStats)
+		classifyAddConstraint(sub, query, warningStore, prodStats)
 		return
 
 	case contains("VALIDATE CONSTRAINT"):
@@ -163,7 +163,7 @@ func classifyAlterSubcommand(sub string, query *metricshelper.QueryEventAnalysis
 
 	// --- Column type/null/default/storage changes ---
 	case contains("ALTER COLUMN"), contains("ALTER "):
-		if ok := classifyAlterColumn(sub, query, serverVersion, warningStore, prodStats); ok {
+		if ok := classifyAlterColumn(sub, query, warningStore, prodStats); ok {
 			return
 		}
 
@@ -178,7 +178,7 @@ func classifyAlterSubcommand(sub string, query *metricshelper.QueryEventAnalysis
 			appendWarnings(w, warningStore, query)
 			return
 		case contains("ADD COLUMN"), strings.HasPrefix(sub, "ADD ") || strings.Contains(sub, " ADD "):
-			classifyAddColumn(sub, query, serverVersion, warningStore, prodStats)
+			classifyAddColumn(sub, query, warningStore, prodStats)
 			return
 
 		// --- Table-level rewrites ---
@@ -233,7 +233,7 @@ func classifyAlterSubcommand(sub string, query *metricshelper.QueryEventAnalysis
 	return
 }
 
-func classifyAddColumn(sub string, query *metricshelper.QueryEventAnalysis, serverVersion float32, warningStore *warning.WarningStore, prodStats *metricshelper.DatabaseMetrics) {
+func classifyAddColumn(sub string, query *metricshelper.QueryEventAnalysis, warningStore *warning.WarningStore, prodStats *metricshelper.DatabaseMetrics) {
 	contains := func(s string) bool { return strings.Contains(sub, s) }
 
 	switch {
@@ -270,7 +270,7 @@ func classifyAddColumn(sub string, query *metricshelper.QueryEventAnalysis, serv
 
 // classifyAlterColumn returns ok=false when the subcommand is an ALTER COLUMN
 // shape it does not recognize, so the caller can fall through.
-func classifyAlterColumn(sub string, query *metricshelper.QueryEventAnalysis, serverVersion float32, warningStore *warning.WarningStore, prodStats *metricshelper.DatabaseMetrics) bool {
+func classifyAlterColumn(sub string, query *metricshelper.QueryEventAnalysis, warningStore *warning.WarningStore, prodStats *metricshelper.DatabaseMetrics) bool {
 	contains := func(s string) bool { return strings.Contains(sub, s) }
 
 	switch {
@@ -330,7 +330,7 @@ func classifyAlterColumn(sub string, query *metricshelper.QueryEventAnalysis, se
 	return false
 }
 
-func classifyAddConstraint(sub string, query *metricshelper.QueryEventAnalysis, serverVersion float32, warningStore *warning.WarningStore, prodStats *metricshelper.DatabaseMetrics) {
+func classifyAddConstraint(sub string, query *metricshelper.QueryEventAnalysis, warningStore *warning.WarningStore, prodStats *metricshelper.DatabaseMetrics) {
 	contains := func(s string) bool { return strings.Contains(sub, s) }
 
 	notValid := contains("NOT VALID")
