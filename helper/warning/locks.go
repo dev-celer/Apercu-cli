@@ -10,6 +10,7 @@ import (
 
 type LockWarning struct {
 	code          Code
+	description   string
 	query         *helper.QueryWithAffectedTables
 	lock          metrics.QueryLock
 	operationType metrics.EventOperationType
@@ -87,8 +88,14 @@ func (w *LockWarning) recommendMaintenance() bool {
 func (w *LockWarning) GetText() string {
 	// Get top level warning text
 
-	t := fmt.Sprintf("%s event detected for the table %s (%d rows, %s)",
-		w.operationType, w.table.String(), w.tableStats.RowCount, format.BytesSizePretty(w.tableStats.TableSize))
+	var t string
+	if w.description == "" {
+		t = fmt.Sprintf("%s event detected for the table %s (%d rows, %s)",
+			w.operationType, w.table.String(), w.tableStats.RowCount, format.BytesSizePretty(w.tableStats.TableSize))
+	} else {
+		t = fmt.Sprintf("%s, this will cause a %s event on the table %s (%d rows, %s)",
+			w.description, w.operationType, w.table.String(), w.tableStats.RowCount, format.BytesSizePretty(w.tableStats.TableSize))
+	}
 
 	activity := w.getTableActivityText()
 	if activity != "" {
@@ -111,8 +118,15 @@ func (w *LockWarning) GetText() string {
 }
 
 func (w *LockWarning) GetTextLong() string {
-	t := fmt.Sprintf("this query will cause a %s event on table %s (%d rows, %s)",
-		w.operationType, w.table.String(), w.tableStats.RowCount, format.BytesSizePretty(w.tableStats.TableSize))
+	var t string
+	if w.description == "" {
+		t = fmt.Sprintf("this query will cause a %s event on table %s (%d rows, %s)",
+			w.operationType, w.table.String(), w.tableStats.RowCount, format.BytesSizePretty(w.tableStats.TableSize))
+	} else {
+		t = fmt.Sprintf("%s, this will cause a %s event on table %s (%d rows, %s)",
+			w.description, w.operationType, w.table.String(), w.tableStats.RowCount, format.BytesSizePretty(w.tableStats.TableSize))
+	}
+
 	if w.remediation != "" {
 		t += fmt.Sprintf("\nremediation: %s", w.remediation)
 	}
@@ -185,14 +199,18 @@ func (w *LockWarning) GetIsIdempotent() bool {
 }
 
 type LockWarningState struct {
-	Query      *helper.QueryWithAffectedTables `json:"query"`
-	TableStats metrics.TableMetrics            `json:"table_stats"`
+	Query         *helper.QueryWithAffectedTables `json:"query"`
+	TableStats    metrics.TableMetrics            `json:"table_stats"`
+	Lock          metrics.QueryLock               `json:"lock"`
+	OperationType metrics.EventOperationType      `json:"operation_type"`
 }
 
 func (w *LockWarning) GetStateValues() (json.RawMessage, error) {
 	v := LockWarningState{
-		Query:      w.query,
-		TableStats: w.tableStats,
+		Query:         w.query,
+		TableStats:    w.tableStats,
+		Lock:          w.lock,
+		OperationType: w.operationType,
 	}
 	return json.Marshal(v)
 }
