@@ -28,8 +28,7 @@ func roundTrip(t *testing.T, w Warning, prodMetrics *metricshelper.DatabaseMetri
 		},
 	}
 
-	store.PopulateRawStateWarnings(prodMetrics)
-	got := store.GetWarningsRaw()
+	got := store.PopulateRawStateWarnings(prodMetrics)
 	require.Len(t, got, 1, "expected exactly one reconstructed warning")
 	return got[0]
 }
@@ -46,6 +45,14 @@ func assertEquivalent(t *testing.T, want, got Warning) {
 
 func TestConverterRoundTrip(t *testing.T) {
 	t.Parallel()
+
+	prodMetrics := metricshelper.DatabaseMetrics{
+		DatabaseSize:  0,
+		ServerVersion: 0,
+		TablesMetrics: map[helper.FullTableName]metricshelper.TableMetrics{
+			helper.FullTableName{Schema: "public", Table: "orders"}: {RowCount: 1000, TableSize: 5 * 1024 * 1024 * 1024},
+		},
+	}
 
 	cases := []struct {
 		name string
@@ -76,7 +83,7 @@ func TestConverterRoundTrip(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			require.NotNil(t, tc.w, "test setup: warning constructor returned nil")
-			got := roundTrip(t, tc.w, nil)
+			got := roundTrip(t, tc.w, &prodMetrics)
 			assertEquivalent(t, tc.w, got)
 		})
 	}
@@ -123,8 +130,7 @@ func TestStatePersistenceRoundTrip(t *testing.T) {
 				Warnings:         make([]Warning, 0),
 				rawStateWarnings: parsed.Databases["db"].LastWarnings,
 			}
-			store.PopulateRawStateWarnings(nil)
-			got := store.GetWarningsRaw()
+			got := store.PopulateRawStateWarnings(nil)
 			require.Len(t, got, 1)
 			assertEquivalent(t, tc.w, got[0])
 		})
@@ -143,8 +149,7 @@ func TestConvertStatesToWarnings_UnknownCodeSkipped(t *testing.T) {
 		Warnings:         make([]Warning, 0),
 		rawStateWarnings: states,
 	}
-	store.PopulateRawStateWarnings(nil)
-	got := store.GetWarningsRaw()
+	got := store.PopulateRawStateWarnings(nil)
 	require.Len(t, got, 1)
 	assert.Equal(t, CodeStateFileFailedToRead, got[0].GetCode())
 }

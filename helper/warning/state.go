@@ -2,6 +2,7 @@ package warning
 
 import (
 	"apercu-cli/helper"
+	"apercu-cli/helper/metrics"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -59,7 +60,7 @@ func (w *StateFileWarning) GetQuery() *helper.QueryWithAffectedTables {
 }
 
 func init() {
-	warningConverter[CodeStateFileFailedToRead] = func(state json.RawMessage) Warning {
+	warningConverter[CodeStateFileFailedToRead] = func(state json.RawMessage, _ *metrics.DatabaseMetrics) Warning {
 		s := StateFileWarningState{}
 		err := json.Unmarshal(state, &s)
 		if err != nil {

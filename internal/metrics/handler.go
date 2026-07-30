@@ -102,6 +102,14 @@ func (h *MetricsHandler) CollectPostMigrationMetrics(pgProxyLogs string) error {
 	return nil
 }
 
+// GetProdMetrics returns the production metrics collected when the handler was created.
+func (h *MetricsHandler) GetProdMetrics() *metricshelper.DatabaseMetrics {
+	if h == nil || h.output == nil {
+		return nil
+	}
+	return &h.output.Prod
+}
+
 func (h *MetricsHandler) GetOutput() (*output.OutputDatabaseMetrics, error) {
 	for _, engine := range h.engines {
 		err := engine.StoreMetricsToOutput(h.output)

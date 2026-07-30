@@ -2,6 +2,7 @@ package warning
 
 import (
 	databasehelper "apercu-cli/helper"
+	"apercu-cli/helper/metrics"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -91,21 +92,21 @@ func init() {
 		return &v, nil
 	}
 
-	warningConverter[CodeExplainQueryPathNotFound] = func(state json.RawMessage) Warning {
+	warningConverter[CodeExplainQueryPathNotFound] = func(state json.RawMessage, _ *metrics.DatabaseMetrics) Warning {
 		s, err := extractState(state)
 		if err != nil {
 			return nil
 		}
 		return NewExplainQueryFileWarning(CodeExplainQueryPathNotFound, s.Path)
 	}
-	warningConverter[CodeExplainQueryNoQueries] = func(state json.RawMessage) Warning {
+	warningConverter[CodeExplainQueryNoQueries] = func(state json.RawMessage, _ *metrics.DatabaseMetrics) Warning {
 		s, err := extractState(state)
 		if err != nil {
 			return nil
 		}
 		return NewExplainQueryFileWarning(CodeExplainQueryNoQueries, s.Path)
 	}
-	warningConverter[CodeExplainQueryFailedToReadFile] = func(state json.RawMessage) Warning {
+	warningConverter[CodeExplainQueryFailedToReadFile] = func(state json.RawMessage, _ *metrics.DatabaseMetrics) Warning {
 		s, err := extractState(state)
 		if err != nil {
 			return nil
@@ -176,10 +177,10 @@ func (w *ExplainQueryProdFetch) GetQuery() *databasehelper.QueryWithAffectedTabl
 }
 
 func init() {
-	warningConverter[CodeExplainQueryStatStatementsMissing] = func(state json.RawMessage) Warning {
+	warningConverter[CodeExplainQueryStatStatementsMissing] = func(state json.RawMessage, _ *metrics.DatabaseMetrics) Warning {
 		return NewExplainQueryProdFetchWarning(CodeExplainQueryStatStatementsMissing, "")
 	}
-	warningConverter[CodeExplainQueryProdFetchFailed] = func(state json.RawMessage) Warning {
+	warningConverter[CodeExplainQueryProdFetchFailed] = func(state json.RawMessage, _ *metrics.DatabaseMetrics) Warning {
 		return NewExplainQueryProdFetchWarning(CodeExplainQueryProdFetchFailed, "")
 	}
 }
@@ -238,7 +239,7 @@ func (w *ExplainPlanOrderingRegression) GetQuery() *databasehelper.QueryWithAffe
 }
 
 func init() {
-	warningConverter[CodeExplainQueryPlanOrderingRegression] = func(state json.RawMessage) Warning {
+	warningConverter[CodeExplainQueryPlanOrderingRegression] = func(state json.RawMessage, _ *metrics.DatabaseMetrics) Warning {
 		v := ExplainPlanOrderingRegressionState{}
 		err := json.Unmarshal(state, &v)
 		if err != nil {
@@ -312,7 +313,7 @@ func (w *ExplainPlanScanRegression) GetQuery() *databasehelper.QueryWithAffected
 }
 
 func init() {
-	warningConverter[CodeExplainQueryPlanScanRegression] = func(state json.RawMessage) Warning {
+	warningConverter[CodeExplainQueryPlanScanRegression] = func(state json.RawMessage, _ *metrics.DatabaseMetrics) Warning {
 		v := ExplainPlanScanRegressionState{}
 		err := json.Unmarshal(state, &v)
 		if err != nil {

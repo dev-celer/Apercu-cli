@@ -2,6 +2,7 @@ package warning
 
 import (
 	"apercu-cli/helper"
+	"apercu-cli/helper/metrics"
 	"apercu-cli/helper/warning_interface"
 	"encoding/json"
 	"fmt"
@@ -70,7 +71,7 @@ func (w *LockTimeout) GetStateValues() (json.RawMessage, error) {
 }
 
 func init() {
-	warningConverter[CodeLockTimeoutNotSet] = func(state json.RawMessage) Warning {
+	warningConverter[CodeLockTimeoutNotSet] = func(state json.RawMessage, _ *metrics.DatabaseMetrics) Warning {
 		v := LockTimeoutState{}
 		err := json.Unmarshal(state, &v)
 		if err != nil {

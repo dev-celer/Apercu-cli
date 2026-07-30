@@ -128,7 +128,7 @@ func preview(cmd *cobra.Command, args []string) error {
 	}
 
 	// Reconcile warnings with the state
-	previewOutput.Warnings.ReconcileWarningsWithState(&dbState)
+	previewOutput.Warnings.ReconcileWarningsWithState(&dbState, metricHandler.GetProdMetrics())
 
 	// Save the state
 	state.Databases[dbName] = dbState

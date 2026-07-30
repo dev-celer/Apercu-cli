@@ -3,6 +3,7 @@ package warning
 import (
 	"apercu-cli/helper"
 	"apercu-cli/helper/format"
+	"apercu-cli/helper/metrics"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -141,7 +142,7 @@ func (w *WALSizeWarning) GetQuery() *helper.QueryWithAffectedTables {
 }
 
 func init() {
-	warningConverter[CodeHighWALVolume] = func(state json.RawMessage) Warning {
+	warningConverter[CodeHighWALVolume] = func(state json.RawMessage, _ *metrics.DatabaseMetrics) Warning {
 		s := WALSizeWarningState{}
 		err := json.Unmarshal(state, &s)
 		if err != nil {

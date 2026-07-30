@@ -69,14 +69,12 @@ func (w *TableRewriteWarning) GetIsIdempotent() bool {
 }
 
 type TableRewriteWarningState struct {
-	Table       helper.FullTableName        `json:"table"`
-	ProdMetrics *metricshelper.TableMetrics `json:"prod_metrics,omitempty"`
+	Table helper.FullTableName `json:"table"`
 }
 
 func (w *TableRewriteWarning) GetStateValues() (json.RawMessage, error) {
 	v := TableRewriteWarningState{
-		Table:       w.table,
-		ProdMetrics: w.prodMetrics,
+		Table: w.table,
 	}
 	return json.Marshal(v)
 }
@@ -86,7 +84,7 @@ func (w *TableRewriteWarning) GetQuery() *helper.QueryWithAffectedTables {
 }
 
 func init() {
-	warningConverter[CodeTableRewritten] = func(state json.RawMessage) Warning {
+	warningConverter[CodeTableRewritten] = func(state json.RawMessage, prodMetrics *metricshelper.DatabaseMetrics) Warning {
 		v := TableRewriteWarningState{}
 		err := json.Unmarshal(state, &v)
 		if err != nil {
@@ -94,6 +92,14 @@ func init() {
 			return nil
 		}
 
-		return NewRewriteWarning(v.Table, v.ProdMetrics)
+		var m *metricshelper.TableMetrics
+		if prodMetrics != nil {
+			x, ok := prodMetrics.TablesMetrics[v.Table]
+			if ok {
+				m = &x
+			}
+		}
+
+		return NewRewriteWarning(v.Table, m)
 	}
 }

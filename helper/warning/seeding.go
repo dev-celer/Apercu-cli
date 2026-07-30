@@ -2,6 +2,7 @@ package warning
 
 import (
 	"apercu-cli/helper"
+	"apercu-cli/helper/metrics"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -80,14 +81,14 @@ func init() {
 		}
 		return s, nil
 	}
-	warningConverter[CodeFailedToOpenSeedFile] = func(state json.RawMessage) Warning {
+	warningConverter[CodeFailedToOpenSeedFile] = func(state json.RawMessage, _ *metrics.DatabaseMetrics) Warning {
 		s, err := validateState(state)
 		if err != nil {
 			return nil
 		}
 		return NewSeedingError(CodeFailedToOpenSeedFile, s.Path)
 	}
-	warningConverter[CodeSeedFileNotFound] = func(state json.RawMessage) Warning {
+	warningConverter[CodeSeedFileNotFound] = func(state json.RawMessage, _ *metrics.DatabaseMetrics) Warning {
 		s, err := validateState(state)
 		if err != nil {
 			return nil

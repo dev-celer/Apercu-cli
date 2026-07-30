@@ -104,7 +104,7 @@ func reset(cmd *cobra.Command, args []string) error {
 
 	// Reconcile warnings with the state
 	state := config.NewState()
-	previewOutput.Warnings.ReconcileWarningsWithState(&dbState)
+	previewOutput.Warnings.ReconcileWarningsWithState(&dbState, metricHandler.GetProdMetrics())
 
 	// Save a new state
 	state.Databases[dbName] = dbState

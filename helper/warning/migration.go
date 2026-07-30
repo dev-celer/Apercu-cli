@@ -2,6 +2,7 @@ package warning
 
 import (
 	"apercu-cli/helper"
+	"apercu-cli/helper/metrics"
 	"encoding/json"
 )
 
@@ -42,7 +43,7 @@ func (w *MigrationTableNotFound) GetQuery() *helper.QueryWithAffectedTables {
 }
 
 func init() {
-	warningConverter[CodeMigrationTableNotFound] = func(state json.RawMessage) Warning {
+	warningConverter[CodeMigrationTableNotFound] = func(state json.RawMessage, _ *metrics.DatabaseMetrics) Warning {
 		return &MigrationTableNotFound{}
 	}
 }

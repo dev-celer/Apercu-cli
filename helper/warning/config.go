@@ -2,6 +2,7 @@ package warning
 
 import (
 	databasehelper "apercu-cli/helper"
+	"apercu-cli/helper/metrics"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -74,7 +75,7 @@ func NewMissingEnvVarsWarnings(variables ...string) []MissingEnvVarsWarning {
 }
 
 func init() {
-	warningConverter[CodeMissingEnvironmentVariable] = func(state json.RawMessage) Warning {
+	warningConverter[CodeMissingEnvironmentVariable] = func(state json.RawMessage, _ *metrics.DatabaseMetrics) Warning {
 		s := MissingEnvVarsWarningState{}
 		err := json.Unmarshal(state, &s)
 		if err != nil {
