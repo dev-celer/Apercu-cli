@@ -3,6 +3,7 @@ package warning
 import (
 	"apercu-cli/config"
 	"apercu-cli/helper"
+	"apercu-cli/helper/metrics"
 	"apercu-cli/helper/warning_interface"
 	"encoding/json"
 	"fmt"
@@ -43,11 +44,11 @@ func FormatKey(key string) string {
 	return key
 }
 
-func ConvertStatesToWarnings(states map[string]json.RawMessage) []Warning {
+func (s *WarningStore) PopulateRawStateWarnings(prodMetrics *metrics.DatabaseMetrics) []Warning {
 	warnings := make([]Warning, 0)
 	slog.Debug("Converting state to warnings")
 
-	for fullCode, state := range states {
+	for fullCode, state := range s.rawStateWarnings {
 		// Extract code / keys
 		code, key, _ := strings.Cut(fullCode, ".")
 		slog.Debug("handling warning", "code", code, "key", key)
@@ -58,20 +59,22 @@ func ConvertStatesToWarnings(states map[string]json.RawMessage) []Warning {
 			continue
 		}
 
-		warnings = append(warnings, f(state))
+		warnings = append(warnings, f(state, prodMetrics))
 	}
 
+	s.rawStateWarnings = make(map[string]json.RawMessage)
 	return warnings
 }
 
-var warningConverter map[Code]func(state json.RawMessage) Warning = make(map[Code]func(state json.RawMessage) Warning)
+var warningConverter map[Code]func(state json.RawMessage, prodMetrics *metrics.DatabaseMetrics) Warning = make(map[Code]func(state json.RawMessage, prodMetrics *metrics.DatabaseMetrics) Warning)
 
 type WarningStore struct {
-	Warnings []Warning `json:"warnings" yaml:"warnings"`
+	Warnings         []Warning `json:"warnings" yaml:"warnings"`
+	rawStateWarnings map[string]json.RawMessage
 }
 
 func NewWarningStore() *WarningStore {
-	return &WarningStore{Warnings: make([]Warning, 0)}
+	return &WarningStore{Warnings: make([]Warning, 0), rawStateWarnings: make(map[string]json.RawMessage)}
 }
 
 func (s *WarningStore) AddWarning(w Warning) {
@@ -173,7 +176,7 @@ func collapseLockTimeoutWarnings(warnings []Warning) []Warning {
 // ReconcileWarningsWithState will read previous warnings, ignored warnings from state.
 // Filter out the ignored warnings, count the solved / new warnings and add the last warnings that are not idempotent.
 // It will also mutate the state to replace the last warnings by current warnings
-func (s *WarningStore) ReconcileWarningsWithState(state *config.DatabaseState) (solved, added int) {
+func (s *WarningStore) ReconcileWarningsWithState(state *config.DatabaseState, prodMetrics *metrics.DatabaseMetrics) (solved, added int) {
 	solved = 0
 	added = 0
 	if state == nil {
@@ -216,7 +219,8 @@ func (s *WarningStore) ReconcileWarningsWithState(state *config.DatabaseState) (
 	}
 
 	// Handle the remaining warnings from last run
-	for _, w := range ConvertStatesToWarnings(state.LastWarnings) {
+	s.rawStateWarnings = state.LastWarnings
+	for _, w := range s.PopulateRawStateWarnings(prodMetrics) {
 		// If warning is not idempotent, consider as solved
 		if !w.GetIsIdempotent() {
 			solved++
@@ -265,7 +269,7 @@ func (s *WarningStore) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &state); err != nil {
 		return err
 	}
-	s.Warnings = ConvertStatesToWarnings(state)
+	s.rawStateWarnings = state
 	return nil
 }
 
@@ -298,6 +302,6 @@ func (s *WarningStore) UnmarshalYAML(unmarshal func(any) error) error {
 		}
 		state[fullCode] = raw
 	}
-	s.Warnings = ConvertStatesToWarnings(state)
+	s.rawStateWarnings = state
 	return nil
 }

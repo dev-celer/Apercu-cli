@@ -15,17 +15,21 @@ import (
 // converter registry (ConvertStatesToWarnings), and returns the
 // reconstructed warning. It mirrors what happens when a warning is
 // persisted to the state file and read back on the next run.
-func roundTrip(t *testing.T, w Warning) Warning {
+func roundTrip(t *testing.T, w Warning, prodMetrics *metricshelper.DatabaseMetrics) Warning {
 	t.Helper()
 
 	state, err := w.GetStateValues()
 	require.NoError(t, err)
 
-	states := map[string]json.RawMessage{
-		w.GetFullCode(): state,
+	store := WarningStore{
+		Warnings: make([]Warning, 0),
+		rawStateWarnings: map[string]json.RawMessage{
+			w.GetFullCode(): state,
+		},
 	}
 
-	got := ConvertStatesToWarnings(states)
+	store.PopulateRawStateWarnings(prodMetrics)
+	got := store.GetWarningsRaw()
 	require.Len(t, got, 1, "expected exactly one reconstructed warning")
 	return got[0]
 }
@@ -72,7 +76,7 @@ func TestConverterRoundTrip(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			require.NotNil(t, tc.w, "test setup: warning constructor returned nil")
-			got := roundTrip(t, tc.w)
+			got := roundTrip(t, tc.w, nil)
 			assertEquivalent(t, tc.w, got)
 		})
 	}
@@ -115,7 +119,12 @@ func TestStatePersistenceRoundTrip(t *testing.T) {
 			var parsed config.State
 			require.NoError(t, json.Unmarshal(data, &parsed))
 
-			got := ConvertStatesToWarnings(parsed.Databases["db"].LastWarnings)
+			store := WarningStore{
+				Warnings:         make([]Warning, 0),
+				rawStateWarnings: parsed.Databases["db"].LastWarnings,
+			}
+			store.PopulateRawStateWarnings(nil)
+			got := store.GetWarningsRaw()
 			require.Len(t, got, 1)
 			assertEquivalent(t, tc.w, got[0])
 		})
@@ -130,7 +139,12 @@ func TestConvertStatesToWarnings_UnknownCodeSkipped(t *testing.T) {
 		NewStateFileWarning("/tmp/x").GetFullCode(): mustState(t, NewStateFileWarning("/tmp/x")),
 	}
 
-	got := ConvertStatesToWarnings(states)
+	store := WarningStore{
+		Warnings:         make([]Warning, 0),
+		rawStateWarnings: states,
+	}
+	store.PopulateRawStateWarnings(nil)
+	got := store.GetWarningsRaw()
 	require.Len(t, got, 1)
 	assert.Equal(t, CodeStateFileFailedToRead, got[0].GetCode())
 }
@@ -167,7 +181,7 @@ func TestReconcile_NilState(t *testing.T) {
 	store := NewWarningStore()
 	store.AddWarning(NewStateFileWarning("/tmp/x"))
 
-	solved, added := store.ReconcileWarningsWithState(nil)
+	solved, added := store.ReconcileWarningsWithState(nil, nil)
 	assert.Zero(t, solved)
 	assert.Zero(t, added)
 }
@@ -180,7 +194,7 @@ func TestReconcile_NewWarningPersisted(t *testing.T) {
 	store.AddWarning(w)
 
 	dbState := config.NewDatabaseState()
-	solved, added := store.ReconcileWarningsWithState(&dbState)
+	solved, added := store.ReconcileWarningsWithState(&dbState, nil)
 
 	assert.Equal(t, 0, solved)
 	assert.Equal(t, 1, added, "a warning absent from last run is new")
@@ -199,7 +213,7 @@ func TestReconcile_KnownWarningNotCountedNew(t *testing.T) {
 	store := NewWarningStore()
 	store.AddWarning(w)
 
-	solved, added := store.ReconcileWarningsWithState(&dbState)
+	solved, added := store.ReconcileWarningsWithState(&dbState, nil)
 	assert.Equal(t, 0, added, "a warning already in LastWarnings is not new")
 	assert.Equal(t, 0, solved)
 	_, ok := dbState.LastWarnings[w.GetFullCode()]
@@ -218,7 +232,7 @@ func TestReconcile_SolvedNonIdempotent(t *testing.T) {
 	dbState.LastWarnings[prev.GetFullCode()] = mustState(t, prev)
 
 	store := NewWarningStore() // empty: warning no longer reproduced
-	solved, added := store.ReconcileWarningsWithState(&dbState)
+	solved, added := store.ReconcileWarningsWithState(&dbState, nil)
 
 	assert.Equal(t, 1, solved, "a disappeared non-idempotent warning is solved")
 	assert.Equal(t, 0, added)
@@ -238,7 +252,7 @@ func TestReconcile_IdempotentReAddedWhenAbsent(t *testing.T) {
 	dbState.LastWarnings[prev.GetFullCode()] = mustState(t, prev)
 
 	store := NewWarningStore() // empty this run
-	solved, added := store.ReconcileWarningsWithState(&dbState)
+	solved, added := store.ReconcileWarningsWithState(&dbState, nil)
 
 	assert.Equal(t, 0, solved)
 	assert.Equal(t, 0, added)
@@ -259,7 +273,7 @@ func TestReconcile_IgnoredIdempotentFilteredOut(t *testing.T) {
 	store := NewWarningStore()
 	store.AddWarning(w)
 
-	solved, added := store.ReconcileWarningsWithState(&dbState)
+	solved, added := store.ReconcileWarningsWithState(&dbState, nil)
 
 	assert.Equal(t, 0, added)
 	assert.Equal(t, 0, solved)
