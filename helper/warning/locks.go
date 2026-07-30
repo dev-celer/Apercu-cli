@@ -200,7 +200,6 @@ func (w *LockWarning) GetIsIdempotent() bool {
 
 type LockWarningState struct {
 	Query         *helper.QueryWithAffectedTables `json:"query"`
-	TableStats    metrics.TableMetrics            `json:"table_stats"`
 	Lock          metrics.QueryLock               `json:"lock"`
 	OperationType metrics.EventOperationType      `json:"operation_type"`
 }
@@ -208,7 +207,6 @@ type LockWarningState struct {
 func (w *LockWarning) GetStateValues() (json.RawMessage, error) {
 	v := LockWarningState{
 		Query:         w.query,
-		TableStats:    w.tableStats,
 		Lock:          w.lock,
 		OperationType: w.operationType,
 	}
