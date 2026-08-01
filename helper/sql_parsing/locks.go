@@ -98,22 +98,42 @@ func GetLockType(sql string) *metrics.QueryLock {
 	return nil
 }
 
+// alterTableLock returns the strongest lock any of the statement's subcommands takes.
 func alterTableLock(upper string) metrics.QueryLock {
-	contains := func(s string) bool { return strings.Contains(upper, s) }
+	strongest := metrics.QueryLock("")
+	for _, sub := range splitAlterTableQuery(upper) {
+		if l := alterTableSubcommandLock(sub); l.Strength() > strongest.Strength() {
+			strongest = l
+		}
+	}
+	if strongest == "" {
+		return metrics.QueryLockAccessExclusive
+	}
+	return strongest
+}
+
+// alterTableSubcommandLock maps one ALTER TABLE action to the lock it takes on
+// the altered table. Anything unrecognized falls through to ACCESS EXCLUSIVE,
+// which is both the common case and the conservative answer.
+func alterTableSubcommandLock(sub string) metrics.QueryLock {
+	// Padding lets a keyword anchored at either end of the subcommand match the
+	// same space-delimited pattern as one in the middle.
+	padded := " " + normalizeSubcommand(sub) + " "
+	contains := func(s string) bool { return strings.Contains(padded, s) }
 
 	switch {
-	case contains(" VALIDATE CONSTRAINT"),
-		contains(" SET STATISTICS"),
-		contains(" CLUSTER ON"),
-		contains(" SET WITHOUT CLUSTER"),
-		contains(" ATTACH PARTITION"):
+	case contains(" VALIDATE CONSTRAINT "),
+		contains(" SET STATISTICS "),
+		contains(" CLUSTER ON "),
+		contains(" SET WITHOUT CLUSTER "),
+		contains(" ATTACH PARTITION "):
 		return metrics.QueryLockShareUpdateExclusive
-	case contains(" DETACH PARTITION") && contains(" CONCURRENTLY"):
+	case contains(" DETACH PARTITION ") && contains(" CONCURRENTLY "):
 		return metrics.QueryLockShareUpdateExclusive
-	case contains(" ENABLE TRIGGER"),
-		contains(" DISABLE TRIGGER"),
-		contains(" ENABLE REPLICA TRIGGER"),
-		contains(" ENABLE ALWAYS TRIGGER"):
+	case contains(" ENABLE TRIGGER "),
+		contains(" DISABLE TRIGGER "),
+		contains(" ENABLE REPLICA TRIGGER "),
+		contains(" ENABLE ALWAYS TRIGGER "):
 		return metrics.QueryLockShareRowExclusive
 	}
 	return metrics.QueryLockAccessExclusive

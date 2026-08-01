@@ -65,6 +65,37 @@ const (
 	QueryLockAccessShare          QueryLock = "ACCESS_SHARE"
 )
 
+// Strength ranks lock modes from weakest to strongest, following the ordering of
+// the Postgres lock-mode table (ACCESS SHARE = 1 … ACCESS EXCLUSIVE = 8). An
+// unknown or empty mode ranks below every real one.
+//
+// The ranking is a total order over a conflict table that is only a partial
+// order (SHARE and SHARE UPDATE EXCLUSIVE do not dominate one another), so it is
+// meant for "which of these is the worst" comparisons, not for deciding whether
+// two modes conflict.
+func (l QueryLock) Strength() int {
+	switch l {
+	case QueryLockAccessExclusive:
+		return 8
+	case QueryLockExclusive:
+		return 7
+	case QueryLockShareRowExclusive:
+		return 6
+	case QueryLockShare:
+		return 5
+	case QueryLockShareUpdateExclusive:
+		return 4
+	case QueryLockRowExclusive:
+		return 3
+	case QueryLockRowShare:
+		return 2
+	case QueryLockAccessShare:
+		return 1
+	default:
+		return 0
+	}
+}
+
 func (l QueryLock) IsReadBlocking() bool {
 	return l == QueryLockAccessExclusive
 }

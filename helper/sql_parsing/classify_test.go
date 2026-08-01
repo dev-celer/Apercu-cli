@@ -87,9 +87,13 @@ func TestClassifyOperation(t *testing.T) {
 		{"alter type add value", "ALTER TYPE color ADD VALUE 'blue'", metricshelper.EventOperationTypeMetadataOnly},
 		{"rename column", "ALTER TABLE t RENAME COLUMN a TO b", metricshelper.EventOperationTypeMetadataOnly},
 
-		// --- Multi-subcommand: most severe wins ---
+		// --- Multi-subcommand ---
 		{"add col + set not null", "ALTER TABLE t ADD COLUMN a int, ALTER COLUMN b SET NOT NULL", metricshelper.EventOperationTypeScanUnderLock},
 		{"set default + type change", "ALTER TABLE t ALTER COLUMN a SET DEFAULT 1, ALTER COLUMN b TYPE bigint", metricshelper.EventOperationTypeRewriteUnderLock},
+		{"with trailing semicolon", "ALTER TABLE t ADD COLUMN a int, ALTER COLUMN b SET NOT NULL;", metricshelper.EventOperationTypeScanUnderLock},
+
+		// --- Formatting ---
+		{"trailing semicolon", "ALTER TABLE t SET LOGGED;", metricshelper.EventOperationTypeRewriteUnderLock},
 	}
 
 	for _, tc := range cases {

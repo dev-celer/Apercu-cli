@@ -28,7 +28,9 @@ func ClassifyOperation(query *metricshelper.QueryEventAnalysis, warningStore *wa
 
 	switch {
 	case hasPrefix("ALTER TABLE"):
-		classifyAlterTable(upper, query, warningStore, prodStats)
+		for _, sub := range splitAlterTableQuery(upper) {
+			classifyAlterSubcommand(sub, query, warningStore, prodStats)
+		}
 		return
 
 	case hasPrefix("CREATE UNIQUE INDEX"), hasPrefix("CREATE INDEX"):
@@ -127,17 +129,6 @@ func ClassifyOperation(query *metricshelper.QueryEventAnalysis, warningStore *wa
 	}
 
 	query.Type = metricshelper.EventOperationTypeNonBlocking
-}
-
-// classifyAlterTable splits an ALTER TABLE statement into its comma-separated
-// subcommands and returns the most severe classification across them.
-func classifyAlterTable(upper string, query *metricshelper.QueryEventAnalysis, warningStore *warning.WarningStore, prodStats *metricshelper.DatabaseMetrics) {
-	body := strings.TrimSpace(strings.TrimPrefix(upper, "ALTER TABLE"))
-
-	for _, sub := range splitAlterTableTopLevel(body) {
-		sub = strings.TrimSpace(sub)
-		classifyAlterSubcommand(sub, query, warningStore, prodStats)
-	}
 }
 
 func classifyAlterSubcommand(sub string, query *metricshelper.QueryEventAnalysis, warningStore *warning.WarningStore, prodStats *metricshelper.DatabaseMetrics) {
@@ -467,42 +458,4 @@ func typeLength(typ string) (int, bool) {
 		n = n*10 + int(c-'0')
 	}
 	return n, true
-}
-
-// splitAlterTableTopLevel splits on commas that are not nested inside parentheses or
-// single/double-quoted strings.
-func splitAlterTableTopLevel(s string) []string {
-	var parts []string
-	depth := 0
-	inSingle, inDouble := false, false
-	start := 0
-
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case inSingle:
-			if c == '\'' {
-				inSingle = false
-			}
-		case inDouble:
-			if c == '"' {
-				inDouble = false
-			}
-		case c == '\'':
-			inSingle = true
-		case c == '"':
-			inDouble = true
-		case c == '(':
-			depth++
-		case c == ')':
-			if depth > 0 {
-				depth--
-			}
-		case c == ',' && depth == 0:
-			parts = append(parts, s[start:i])
-			start = i + 1
-		}
-	}
-	parts = append(parts, s[start:])
-	return parts
 }
