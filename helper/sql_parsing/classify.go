@@ -144,12 +144,6 @@ func classifyAlterSubcommand(sub string, query *metricshelper.QueryEventAnalysis
 	contains := func(s string) bool { return strings.Contains(sub, s) }
 
 	switch {
-	case contains("ADD CONSTRAINT"), contains("ADD PRIMARY KEY"),
-		contains("ADD UNIQUE"), contains("ADD FOREIGN KEY"),
-		contains("ADD CHECK"), contains("ADD EXCLUDE"):
-		classifyAddConstraint(sub, query, warningStore, prodStats)
-		return
-
 	case contains("VALIDATE CONSTRAINT"):
 		return
 
@@ -166,6 +160,13 @@ func classifyAlterSubcommand(sub string, query *metricshelper.QueryEventAnalysis
 		if ok := classifyAlterColumn(sub, query, warningStore, prodStats); ok {
 			return
 		}
+
+	case contains("ADD CONSTRAINT"), contains("ADD PRIMARY KEY"),
+		contains("ADD UNIQUE"), contains("ADD FOREIGN KEY"),
+		contains("ADD CHECK"), contains("ADD EXCLUDE"),
+		contains("ADD NOT NULL"):
+		classifyAddConstraint(sub, query, warningStore, prodStats)
+		return
 
 	// --- Add / drop column ---
 	default:
@@ -367,7 +368,7 @@ func classifyAddConstraint(sub string, query *metricshelper.QueryEventAnalysis, 
 		w := warning.NewLockWarnings(query, warning.CodeAlterTableAddUniqueWithoutIndex, prodStats)
 		appendWarnings(w, warningStore, query)
 		return
-	case contains("EXCLUDE"):
+	case contains("EXCLUDE"), contains("ADD NOT NULL"):
 		if query.Type.Severity() < metricshelper.EventOperationTypeScanUnderLock.Severity() {
 			query.Type = metricshelper.EventOperationTypeScanUnderLock
 		}
