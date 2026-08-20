@@ -7,15 +7,15 @@ import (
 	"apercu-cli/helper"
 )
 
-func tbl(schema, table string) helper.FullTableName {
-	return helper.FullTableName{Schema: schema, Table: table}
+func tbl(schema, table string) helper.FullRelationName {
+	return helper.FullRelationName{Schema: schema, Table: table}
 }
 
 func TestParseFullTableName(t *testing.T) {
 	cases := []struct {
 		name string
 		in   string
-		want helper.FullTableName
+		want helper.FullRelationName
 	}{
 		{"bare table defaults to public", "users", tbl("public", "users")},
 		{"schema qualified", "app.users", tbl("app", "users")},
@@ -38,36 +38,36 @@ func TestParseTables(t *testing.T) {
 	cases := []struct {
 		name string
 		sql  string
-		want []helper.FullTableName
+		want []helper.FullRelationName
 	}{
 		// --- CREATE INDEX ---
-		{"create index", "CREATE INDEX idx ON t (a)", []helper.FullTableName{tbl("public", "t")}},
-		{"create index schema qualified", "CREATE INDEX idx ON app.t (a)", []helper.FullTableName{tbl("app", "t")}},
-		{"create unique index", "CREATE UNIQUE INDEX idx ON t (a)", []helper.FullTableName{tbl("public", "t")}},
-		{"create index concurrently", "CREATE INDEX CONCURRENTLY idx ON t (a)", []helper.FullTableName{tbl("public", "t")}},
-		{"create index if not exists", "CREATE INDEX IF NOT EXISTS idx ON t (a)", []helper.FullTableName{tbl("public", "t")}},
-		{"create index on only", "CREATE INDEX idx ON ONLY t (a)", []helper.FullTableName{tbl("public", "t")}},
-		{"create index lowercase", "create index idx on t (a)", []helper.FullTableName{tbl("public", "t")}},
-		{"leading whitespace trimmed", "  CREATE INDEX idx ON t (a)", []helper.FullTableName{tbl("public", "t")}},
+		{"create index", "CREATE INDEX idx ON t (a)", []helper.FullRelationName{tbl("public", "t")}},
+		{"create index schema qualified", "CREATE INDEX idx ON app.t (a)", []helper.FullRelationName{tbl("app", "t")}},
+		{"create unique index", "CREATE UNIQUE INDEX idx ON t (a)", []helper.FullRelationName{tbl("public", "t")}},
+		{"create index concurrently", "CREATE INDEX CONCURRENTLY idx ON t (a)", []helper.FullRelationName{tbl("public", "t")}},
+		{"create index if not exists", "CREATE INDEX IF NOT EXISTS idx ON t (a)", []helper.FullRelationName{tbl("public", "t")}},
+		{"create index on only", "CREATE INDEX idx ON ONLY t (a)", []helper.FullRelationName{tbl("public", "t")}},
+		{"create index lowercase", "create index idx on t (a)", []helper.FullRelationName{tbl("public", "t")}},
+		{"leading whitespace trimmed", "  CREATE INDEX idx ON t (a)", []helper.FullRelationName{tbl("public", "t")}},
 
 		// --- CREATE TRIGGER ---
-		{"create trigger", "CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW EXECUTE FUNCTION f()", []helper.FullTableName{tbl("public", "t")}},
-		{"create trigger with 'ON' keywork inside the function", "CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW EXECUTE FUNCTION f( ON xxx )", []helper.FullTableName{tbl("public", "t")}},
+		{"create trigger", "CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW EXECUTE FUNCTION f()", []helper.FullRelationName{tbl("public", "t")}},
+		{"create trigger with 'ON' keywork inside the function", "CREATE TRIGGER trg BEFORE INSERT ON t FOR EACH ROW EXECUTE FUNCTION f( ON xxx )", []helper.FullRelationName{tbl("public", "t")}},
 
 		// --- REFRESH MATERIALIZED VIEW ---
-		{"refresh matview", "REFRESH MATERIALIZED VIEW mv", []helper.FullTableName{tbl("public", "mv")}},
-		{"refresh matview concurrently", "REFRESH MATERIALIZED VIEW CONCURRENTLY app.mv", []helper.FullTableName{tbl("app", "mv")}},
+		{"refresh matview", "REFRESH MATERIALIZED VIEW mv", []helper.FullRelationName{tbl("public", "mv")}},
+		{"refresh matview concurrently", "REFRESH MATERIALIZED VIEW CONCURRENTLY app.mv", []helper.FullRelationName{tbl("app", "mv")}},
 
 		// --- CLUSTER ---
-		{"cluster using index", "CLUSTER t USING idx", []helper.FullTableName{tbl("public", "t")}},
-		{"cluster schema qualified", "CLUSTER app.t USING idx", []helper.FullTableName{tbl("app", "t")}},
-		{"cluster verbose", "CLUSTER VERBOSE t USING idx", []helper.FullTableName{tbl("public", "t")}},
+		{"cluster using index", "CLUSTER t USING idx", []helper.FullRelationName{tbl("public", "t")}},
+		{"cluster schema qualified", "CLUSTER app.t USING idx", []helper.FullRelationName{tbl("app", "t")}},
+		{"cluster verbose", "CLUSTER VERBOSE t USING idx", []helper.FullRelationName{tbl("public", "t")}},
 
 		// --- ALTER TABLE ---
-		{"alter table add column", "ALTER TABLE t ADD COLUMN a int", []helper.FullTableName{tbl("public", "t")}},
-		{"alter table if exists", "ALTER TABLE IF EXISTS t ADD COLUMN a int", []helper.FullTableName{tbl("public", "t")}},
-		{"alter table only", "ALTER TABLE ONLY app.t ADD COLUMN a int", []helper.FullTableName{tbl("app", "t")}},
-		{"alter table if exists only", "ALTER TABLE IF EXISTS ONLY app.t DROP COLUMN a", []helper.FullTableName{tbl("app", "t")}},
+		{"alter table add column", "ALTER TABLE t ADD COLUMN a int", []helper.FullRelationName{tbl("public", "t")}},
+		{"alter table if exists", "ALTER TABLE IF EXISTS t ADD COLUMN a int", []helper.FullRelationName{tbl("public", "t")}},
+		{"alter table only", "ALTER TABLE ONLY app.t ADD COLUMN a int", []helper.FullRelationName{tbl("app", "t")}},
+		{"alter table if exists only", "ALTER TABLE IF EXISTS ONLY app.t DROP COLUMN a", []helper.FullRelationName{tbl("app", "t")}},
 
 		// --- Non-matching / unknown ---
 		{"select returns nil", "SELECT * FROM t", nil},
@@ -89,17 +89,17 @@ func TestParseVacuum(t *testing.T) {
 	cases := []struct {
 		name string
 		sql  string
-		want []helper.FullTableName
+		want []helper.FullRelationName
 	}{
-		{"single table", "VACUUM t", []helper.FullTableName{tbl("public", "t")}},
-		{"schema qualified", "VACUUM app.t", []helper.FullTableName{tbl("app", "t")}},
-		{"multiple tables", "VACUUM a, b", []helper.FullTableName{tbl("public", "a"), tbl("public", "b")}},
-		{"with parenthesized options", "VACUUM (VERBOSE, ANALYZE) t", []helper.FullTableName{tbl("public", "t")}},
-		{"only keyword stripped", "VACUUM ONLY t", []helper.FullTableName{tbl("public", "t")}},
-		{"table with column list", "VACUUM t (a, b)", []helper.FullTableName{tbl("public", "t")}},
-		{"vacuum full legacy", "VACUUM FULL t", []helper.FullTableName{tbl("public", "t")}},
-		{"vacuum full all tables", "VACUUM (FULL)", []helper.FullTableName{}},
-		{"vacuum full legacy all tables", "VACUUM FULL", []helper.FullTableName{}},
+		{"single table", "VACUUM t", []helper.FullRelationName{tbl("public", "t")}},
+		{"schema qualified", "VACUUM app.t", []helper.FullRelationName{tbl("app", "t")}},
+		{"multiple tables", "VACUUM a, b", []helper.FullRelationName{tbl("public", "a"), tbl("public", "b")}},
+		{"with parenthesized options", "VACUUM (VERBOSE, ANALYZE) t", []helper.FullRelationName{tbl("public", "t")}},
+		{"only keyword stripped", "VACUUM ONLY t", []helper.FullRelationName{tbl("public", "t")}},
+		{"table with column list", "VACUUM t (a, b)", []helper.FullRelationName{tbl("public", "t")}},
+		{"vacuum full legacy", "VACUUM FULL t", []helper.FullRelationName{tbl("public", "t")}},
+		{"vacuum full all tables", "VACUUM (FULL)", []helper.FullRelationName{}},
+		{"vacuum full legacy all tables", "VACUUM FULL", []helper.FullRelationName{}},
 	}
 
 	for _, tc := range cases {

@@ -17,17 +17,17 @@ type ConnectionFields struct {
 	Url      string `json:"url" yaml:"url"`
 }
 
-type FullTableName struct {
+type FullRelationName struct {
 	Schema string `json:"schema" yaml:"schema"`
 	Table  string `json:"table" yaml:"table"`
 }
 
 type QueryWithAffectedTables struct {
-	Query          string          `json:"query" yaml:"query"`
-	AffectedTables []FullTableName `json:"affected_tables" yaml:"affected_tables"`
+	Query          string             `json:"query" yaml:"query"`
+	AffectedTables []FullRelationName `json:"affected_tables" yaml:"affected_tables"`
 }
 
-func (t FullTableName) String() string {
+func (t FullRelationName) String() string {
 	if strings.Contains(t.Schema, ".") {
 		t.Schema = fmt.Sprintf("\"%s\"", t.Schema)
 	}
@@ -37,11 +37,11 @@ func (t FullTableName) String() string {
 	return fmt.Sprintf("%s.%s", t.Schema, t.Table)
 }
 
-func (t FullTableName) MarshalText() ([]byte, error) {
+func (t FullRelationName) MarshalText() ([]byte, error) {
 	return []byte(t.String()), nil
 }
 
-func (t *FullTableName) UnmarshalText(data []byte) error {
+func (t *FullRelationName) UnmarshalText(data []byte) error {
 	s := string(data)
 	if before, after, ok := strings.Cut(s, "."); ok {
 		t.Schema, t.Table = before, after
@@ -51,11 +51,11 @@ func (t *FullTableName) UnmarshalText(data []byte) error {
 	return nil
 }
 
-func (t FullTableName) MarshalYAML() (any, error) {
+func (t FullRelationName) MarshalYAML() (any, error) {
 	return t.String(), nil
 }
 
-func (t *FullTableName) UnmarshalYAML(unmarshal func(any) error) error {
+func (t *FullRelationName) UnmarshalYAML(unmarshal func(any) error) error {
 	var s string
 	if err := unmarshal(&s); err != nil {
 		return err

@@ -14,11 +14,11 @@ const (
 )
 
 type TableRewriteWarning struct {
-	table       helper.FullTableName
+	table       helper.FullRelationName
 	prodMetrics *metricshelper.TableMetrics
 }
 
-func NewRewriteWarning(table helper.FullTableName, metrics *metricshelper.TableMetrics) *TableRewriteWarning {
+func NewRewriteWarning(table helper.FullRelationName, metrics *metricshelper.TableMetrics) *TableRewriteWarning {
 	return &TableRewriteWarning{
 		table:       table,
 		prodMetrics: metrics,
@@ -69,7 +69,7 @@ func (w *TableRewriteWarning) GetIsIdempotent() bool {
 }
 
 type TableRewriteWarningState struct {
-	Table helper.FullTableName `json:"table"`
+	Table helper.FullRelationName `json:"table"`
 }
 
 func (w *TableRewriteWarning) GetStateValues() (json.RawMessage, error) {

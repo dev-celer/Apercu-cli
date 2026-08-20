@@ -57,7 +57,7 @@ func scanMethodFromNodeType(nodeType string) scanMethod {
 
 type planDetails struct {
 	// scans holds the best (highest-ranked) access method seen per relation.
-	scans map[helper.FullTableName]scanMethod
+	scans map[helper.FullRelationName]scanMethod
 	// sortKeys is the set of normalized sort-key signatures present in the plan.
 	sortKeys  map[string]bool
 	sortCount int
@@ -73,14 +73,14 @@ func walkPlan(p *metricshelper.Plan, visit func(*metricshelper.Plan)) {
 
 func collectPlanDetails(res *metricshelper.ExplainResult) planDetails {
 	details := planDetails{
-		scans:    make(map[helper.FullTableName]scanMethod),
+		scans:    make(map[helper.FullRelationName]scanMethod),
 		sortKeys: make(map[string]bool),
 	}
 
 	walkPlan(&res.Plan, func(p *metricshelper.Plan) {
 		if p.RelationName != "" {
 			if m := scanMethodFromNodeType(p.NodeType); m != scanNone {
-				key := helper.FullTableName{Schema: p.Schema, Table: p.RelationName}
+				key := helper.FullRelationName{Schema: p.Schema, Table: p.RelationName}
 				// Keep the best access method observed for the relation.
 				if m > details.scans[key] {
 					details.scans[key] = m

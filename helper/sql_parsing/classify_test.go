@@ -13,7 +13,7 @@ import (
 func classify(sql string) metricshelper.EventOperationType {
 	query := &metricshelper.QueryEventAnalysis{
 		Event:          &metricshelper.QueryEvent{SQL: sql},
-		AffectedTables: []helper.FullTableName{{Schema: "public", Table: "t"}},
+		AffectedTables: []helper.FullRelationName{{Schema: "public", Table: "t"}},
 	}
 	store := warning.NewWarningStore()
 	prodStats := &metricshelper.DatabaseMetrics{}

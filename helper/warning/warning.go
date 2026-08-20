@@ -120,7 +120,7 @@ func (s *WarningStore) AddWarningsAndPrint(w []Warning) {
 
 type WarningPerQuery struct {
 	Query          string
-	AffectedTables []helper.FullTableName
+	AffectedTables []helper.FullRelationName
 	Warnings       []Warning
 }
 

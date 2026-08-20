@@ -61,7 +61,7 @@ func getExactRowCount(db *sql.DB, schemaName string, tableName string) (int64, e
 }
 
 func GetDatabaseStats(db *sql.DB) (metricshelper.DatabaseMetrics, error) {
-	tablesStats := make(map[helper.FullTableName]metricshelper.TableMetrics)
+	tablesStats := make(map[helper.FullRelationName]metricshelper.TableMetrics)
 
 	// Get stats age in seconds
 	var statsAge sql.NullFloat64
@@ -122,7 +122,7 @@ func GetDatabaseStats(db *sql.DB) (metricshelper.DatabaseMetrics, error) {
 			sps = new(float64(s.Scans) / statsAge.Float64)
 		}
 
-		tablesStats[helper.FullTableName{
+		tablesStats[helper.FullRelationName{
 			Schema: s.SchemaName,
 			Table:  s.TableName,
 		}] = metricshelper.TableMetrics{

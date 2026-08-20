@@ -11,8 +11,8 @@ import (
 
 type RewriteEngine struct {
 	db                *sql.DB
-	preMigrationNode  map[databasehelper.FullTableName]uint32
-	postMigrationNode map[databasehelper.FullTableName]uint32
+	preMigrationNode  map[databasehelper.FullRelationName]uint32
+	postMigrationNode map[databasehelper.FullRelationName]uint32
 	warningStore      *warning.WarningStore
 	prodMetrics       metricshelper.DatabaseMetrics
 }
@@ -20,8 +20,8 @@ type RewriteEngine struct {
 func NewRewriteEngine(db *sql.DB, prodMetrics metricshelper.DatabaseMetrics, warningStore *warning.WarningStore) *RewriteEngine {
 	return &RewriteEngine{
 		db:                db,
-		preMigrationNode:  make(map[databasehelper.FullTableName]uint32),
-		postMigrationNode: make(map[databasehelper.FullTableName]uint32),
+		preMigrationNode:  make(map[databasehelper.FullRelationName]uint32),
+		postMigrationNode: make(map[databasehelper.FullRelationName]uint32),
 		warningStore:      warningStore,
 		prodMetrics:       prodMetrics,
 	}
@@ -70,14 +70,14 @@ func (e *RewriteEngine) StoreMetricsToOutput(metrics *output.OutputDatabaseMetri
 	return nil
 }
 
-func (e *RewriteEngine) getRelNode() (map[databasehelper.FullTableName]uint32, error) {
+func (e *RewriteEngine) getRelNode() (map[databasehelper.FullRelationName]uint32, error) {
 	rows, err := e.db.Query("select s.schemaname, s.relname, c.relfilenode from pg_class c inner join pg_stat_user_tables s on s.relid = c.oid")
 	if err != nil {
 		return nil, fmt.Errorf("failed to query preview database for node id: %w", err)
 	}
 	defer rows.Close()
 
-	nodes := make(map[databasehelper.FullTableName]uint32)
+	nodes := make(map[databasehelper.FullRelationName]uint32)
 	for rows.Next() {
 		var schema, table string
 		var relfilenode uint32
@@ -85,7 +85,7 @@ func (e *RewriteEngine) getRelNode() (map[databasehelper.FullTableName]uint32, e
 			return nil, fmt.Errorf("failed to scan row for node id: %w", err)
 		}
 
-		nodes[databasehelper.FullTableName{
+		nodes[databasehelper.FullRelationName{
 			Schema: schema,
 			Table:  table,
 		}] = relfilenode

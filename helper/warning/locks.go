@@ -16,7 +16,7 @@ type LockWarning struct {
 	lock          metrics.QueryLock
 	operationType metrics.EventOperationType
 	pgVersion     float32
-	table         helper.FullTableName
+	table         helper.FullRelationName
 	tableStats    metrics.TableMetrics
 	remediation   string
 }
@@ -203,7 +203,7 @@ type LockWarningState struct {
 	Query         *helper.QueryWithAffectedTables `json:"query"`
 	Lock          metrics.QueryLock               `json:"lock"`
 	OperationType metrics.EventOperationType      `json:"operation_type"`
-	Table         helper.FullTableName            `json:"table"`
+	Table         helper.FullRelationName         `json:"table"`
 }
 
 func (w *LockWarning) GetStateValues() (json.RawMessage, error) {

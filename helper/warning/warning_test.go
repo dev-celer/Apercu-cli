@@ -49,15 +49,15 @@ func TestConverterRoundTrip(t *testing.T) {
 	prodMetrics := metricshelper.DatabaseMetrics{
 		DatabaseSize:  0,
 		ServerVersion: 0,
-		TablesMetrics: map[helper.FullTableName]metricshelper.TableMetrics{
-			helper.FullTableName{Schema: "public", Table: "orders"}: {RowCount: 1000, TableSize: 5 * 1024 * 1024 * 1024},
+		TablesMetrics: map[helper.FullRelationName]metricshelper.TableMetrics{
+			helper.FullRelationName{Schema: "public", Table: "orders"}: {RowCount: 1000, TableSize: 5 * 1024 * 1024 * 1024},
 		},
 	}
 
 	lockWarnings := NewLockWarnings(&metricshelper.QueryEventAnalysis{
 		Event:          &metricshelper.QueryEvent{SQL: "CREATE INDEX idx_orders_id ON public.orders (id)"},
 		Type:           metricshelper.EventOperationTypeScanUnderLock,
-		AffectedTables: []helper.FullTableName{{Schema: "public", Table: "orders"}},
+		AffectedTables: []helper.FullRelationName{{Schema: "public", Table: "orders"}},
 		Lock:           metricshelper.QueryLockShare,
 	}, CodeCreateIndexWithoutConcurrently, &prodMetrics)
 	require.Len(t, lockWarnings, 1, "test setup: expected one lock warning")
@@ -82,7 +82,7 @@ func TestConverterRoundTrip(t *testing.T) {
 		{
 			"table_rewritten",
 			NewRewriteWarning(
-				helper.FullTableName{Schema: "public", Table: "orders"},
+				helper.FullRelationName{Schema: "public", Table: "orders"},
 				&metricshelper.TableMetrics{RowCount: 1000, TableSize: 5 * 1024 * 1024 * 1024},
 			),
 		},
@@ -170,7 +170,7 @@ func newTestLockWarning(t *testing.T, prodMetrics *metricshelper.DatabaseMetrics
 	w := NewLockWarnings(&metricshelper.QueryEventAnalysis{
 		Event:          &metricshelper.QueryEvent{SQL: "CREATE INDEX idx_orders_id ON public.orders (id)"},
 		Type:           metricshelper.EventOperationTypeScanUnderLock,
-		AffectedTables: []helper.FullTableName{{Schema: "public", Table: "orders"}},
+		AffectedTables: []helper.FullRelationName{{Schema: "public", Table: "orders"}},
 		Lock:           metricshelper.QueryLockShare,
 	}, CodeCreateIndexWithoutConcurrently, prodMetrics)
 	require.Len(t, w, 1)
@@ -182,16 +182,16 @@ func newTestLockWarning(t *testing.T, prodMetrics *metricshelper.DatabaseMetrics
 func TestLockWarningConverter_UsesCurrentProdMetrics(t *testing.T) {
 	t.Parallel()
 
-	table := helper.FullTableName{Schema: "public", Table: "orders"}
+	table := helper.FullRelationName{Schema: "public", Table: "orders"}
 	previousRun := metricshelper.DatabaseMetrics{
 		ServerVersion: 15,
-		TablesMetrics: map[helper.FullTableName]metricshelper.TableMetrics{
+		TablesMetrics: map[helper.FullRelationName]metricshelper.TableMetrics{
 			table: {RowCount: 10, TableSize: 1024},
 		},
 	}
 	currentRun := metricshelper.DatabaseMetrics{
 		ServerVersion: 17,
-		TablesMetrics: map[helper.FullTableName]metricshelper.TableMetrics{
+		TablesMetrics: map[helper.FullRelationName]metricshelper.TableMetrics{
 			table: {RowCount: 5000, TableSize: 5 * 1024 * 1024 * 1024, WriteActivity: metricshelper.TableActivityHot},
 		},
 	}
@@ -214,7 +214,7 @@ func TestLockWarningConverter_TableMissingFromProd(t *testing.T) {
 
 	prodMetrics := metricshelper.DatabaseMetrics{
 		ServerVersion: 17,
-		TablesMetrics: map[helper.FullTableName]metricshelper.TableMetrics{
+		TablesMetrics: map[helper.FullRelationName]metricshelper.TableMetrics{
 			{Schema: "public", Table: "orders"}: {RowCount: 5000, TableSize: 5 * 1024 * 1024 * 1024},
 		},
 	}
@@ -370,10 +370,10 @@ func TestCollapseLockTimeoutWarnings(t *testing.T) {
 
 	q := &helper.QueryWithAffectedTables{
 		Query:          "SQL",
-		AffectedTables: make([]helper.FullTableName, 0),
+		AffectedTables: make([]helper.FullRelationName, 0),
 	}
-	lockOrders := NewLockTimeoutWarning(helper.FullTableName{Schema: "public", Table: "orders"}, q)
-	lockUsers := NewLockTimeoutWarning(helper.FullTableName{Schema: "public", Table: "users"}, q)
+	lockOrders := NewLockTimeoutWarning(helper.FullRelationName{Schema: "public", Table: "orders"}, q)
+	lockUsers := NewLockTimeoutWarning(helper.FullRelationName{Schema: "public", Table: "users"}, q)
 	stateFile := NewStateFileWarning("/tmp/x")
 	wal := NewWALSizeWarning(2*1024*1024*1024, 1024*1024*1024)
 
@@ -451,12 +451,12 @@ func TestGetWarnings_CollapsesLockTimeouts(t *testing.T) {
 
 	q := &helper.QueryWithAffectedTables{
 		Query:          "SQL",
-		AffectedTables: make([]helper.FullTableName, 0),
+		AffectedTables: make([]helper.FullRelationName, 0),
 	}
 	store := NewWarningStore()
 	store.AddWarning(NewStateFileWarning("/tmp/x"))
-	store.AddWarning(NewLockTimeoutWarning(helper.FullTableName{Schema: "public", Table: "orders"}, q))
-	store.AddWarning(NewLockTimeoutWarning(helper.FullTableName{Schema: "public", Table: "users"}, q))
+	store.AddWarning(NewLockTimeoutWarning(helper.FullRelationName{Schema: "public", Table: "orders"}, q))
+	store.AddWarning(NewLockTimeoutWarning(helper.FullRelationName{Schema: "public", Table: "users"}, q))
 
 	assert.Len(t, store.GetWarningsRaw(), 3, "raw warnings must not be collapsed")
 

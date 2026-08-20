@@ -226,7 +226,7 @@ func TestInjectTableActivity_SmallSchemaUsesGuards(t *testing.T) {
 	t.Parallel()
 
 	metrics := metricshelper.DatabaseMetrics{
-		TablesMetrics: map[helper.FullTableName]metricshelper.TableMetrics{
+		TablesMetrics: map[helper.FullRelationName]metricshelper.TableMetrics{
 			{Schema: "public", Table: "hot"}:  {WritesPerSecond: new(150.), ScanPerSecond: new(150.)},
 			{Schema: "public", Table: "warm"}: {WritesPerSecond: new(50.), ScanPerSecond: new(50.)},
 			{Schema: "public", Table: "cold"}: {WritesPerSecond: new(0.5), ScanPerSecond: nil},
@@ -235,19 +235,19 @@ func TestInjectTableActivity_SmallSchemaUsesGuards(t *testing.T) {
 
 	injectTableActivity(&metrics)
 
-	hot := metrics.TablesMetrics[helper.FullTableName{Schema: "public", Table: "hot"}]
+	hot := metrics.TablesMetrics[helper.FullRelationName{Schema: "public", Table: "hot"}]
 	assert.Equal(t, metricshelper.TableActivityHot, hot.WriteActivity)
 	assert.Equal(t, metricshelper.TableActivityHot, hot.ReadActivity)
 	assert.Equal(t, metricshelper.ActivityDecisionLowCount, hot.WriteDecision)
 	assert.Equal(t, metricshelper.ActivityDecisionLowCount, hot.ReadDecision)
 
-	warm := metrics.TablesMetrics[helper.FullTableName{Schema: "public", Table: "warm"}]
+	warm := metrics.TablesMetrics[helper.FullRelationName{Schema: "public", Table: "warm"}]
 	assert.Equal(t, metricshelper.TableActivityWarm, warm.WriteActivity)
 	assert.Equal(t, metricshelper.TableActivityWarm, warm.ReadActivity)
 	assert.Equal(t, metricshelper.ActivityDecisionLowCount, warm.WriteDecision)
 	assert.Equal(t, metricshelper.ActivityDecisionLowCount, warm.ReadDecision)
 
-	cold := metrics.TablesMetrics[helper.FullTableName{Schema: "public", Table: "cold"}]
+	cold := metrics.TablesMetrics[helper.FullRelationName{Schema: "public", Table: "cold"}]
 	assert.Equal(t, metricshelper.TableActivityCold, cold.WriteActivity)
 	// nil scan defaults to none
 	assert.Equal(t, metricshelper.TableActivityNone, cold.ReadActivity)
@@ -258,11 +258,11 @@ func TestInjectTableActivity_SmallSchemaUsesGuards(t *testing.T) {
 func TestInjectTableActivity_LargeSchemaUsesPercentiles(t *testing.T) {
 	t.Parallel()
 
-	tables := map[helper.FullTableName]metricshelper.TableMetrics{}
+	tables := map[helper.FullRelationName]metricshelper.TableMetrics{}
 	// 12 tables with read/write per second ramping from 1 to 12 so that
 	// percentile analysis (>= MinTableCountForPercentile) kicks in.
 	for i := 1; i <= 12; i++ {
-		name := helper.FullTableName{Schema: "public", Table: string(rune('a' + i - 1))}
+		name := helper.FullRelationName{Schema: "public", Table: string(rune('a' + i - 1))}
 		v := float64(i)
 		tables[name] = metricshelper.TableMetrics{WritesPerSecond: &v, ScanPerSecond: &v}
 	}
@@ -271,13 +271,13 @@ func TestInjectTableActivity_LargeSchemaUsesPercentiles(t *testing.T) {
 	injectTableActivity(&metrics)
 
 	// Highest table should land on the hot side, lowest on the cold/warm side.
-	top := metrics.TablesMetrics[helper.FullTableName{Schema: "public", Table: "l"}]
+	top := metrics.TablesMetrics[helper.FullRelationName{Schema: "public", Table: "l"}]
 	assert.Equal(t, metricshelper.TableActivityHot, top.WriteActivity)
 	assert.Equal(t, metricshelper.TableActivityHot, top.ReadActivity)
 	assert.Equal(t, metricshelper.ActivityDecisionPercentile, top.WriteDecision)
 	assert.Equal(t, metricshelper.ActivityDecisionPercentile, top.WriteDecision)
 
-	bottom := metrics.TablesMetrics[helper.FullTableName{Schema: "public", Table: "a"}]
+	bottom := metrics.TablesMetrics[helper.FullRelationName{Schema: "public", Table: "a"}]
 	assert.Equal(t, metricshelper.TableActivityCold, bottom.WriteActivity)
 	assert.Equal(t, metricshelper.TableActivityCold, bottom.ReadActivity)
 	assert.Equal(t, metricshelper.ActivityDecisionPercentile, bottom.WriteDecision)
@@ -287,12 +287,12 @@ func TestInjectTableActivity_LargeSchemaUsesPercentiles(t *testing.T) {
 func TestInjectTableActivity_LargeSchemaAllBelowFloorIsCold(t *testing.T) {
 	t.Parallel()
 
-	tables := map[helper.FullTableName]metricshelper.TableMetrics{}
+	tables := map[helper.FullRelationName]metricshelper.TableMetrics{}
 	// 10 tables (>= MinTableCountForPercentile so the percentile path is taken)
 	// but all below the hot floor, so the filtered population is empty and the
 	// classification must fall back to the guards and land on COLD.
 	for i := 0; i < 10; i++ {
-		name := helper.FullTableName{Schema: "public", Table: string(rune('a' + i))}
+		name := helper.FullRelationName{Schema: "public", Table: string(rune('a' + i))}
 		v := metricshelper.DefaultHotFloorWriteActivity - 0.5
 		tables[name] = metricshelper.TableMetrics{WritesPerSecond: &v, ScanPerSecond: &v}
 	}

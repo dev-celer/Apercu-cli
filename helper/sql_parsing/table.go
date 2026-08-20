@@ -6,10 +6,10 @@ import (
 	"strings"
 )
 
-func parseFullTableName(table string) helper.FullTableName {
+func parseFullTableName(table string) helper.FullRelationName {
 	before, after, found := strings.Cut(table, ".")
 	if !found || after == "" {
-		return helper.FullTableName{
+		return helper.FullRelationName{
 			Schema: "public",
 			Table:  table,
 		}
@@ -17,7 +17,7 @@ func parseFullTableName(table string) helper.FullTableName {
 	if before == "" {
 		before = "public"
 	}
-	return helper.FullTableName{
+	return helper.FullRelationName{
 		Schema: before,
 		Table:  after,
 	}
@@ -29,7 +29,7 @@ var refreshViewRegex = regexp.MustCompile(`(?i)REFRESH MATERIALIZED VIEW\s+(?:CO
 var clusterRegex = regexp.MustCompile(`(?i)CLUSTER\s+(?:VERBOSE\s+(?:TRUE\s+|YES\s+|ON\s+|1\s+|FALSE\s+|NO\s+|OFF\s+|0\s+)?)?(\S+)`)
 var alterTableRegex = regexp.MustCompile(`(?i)ALTER TABLE\s+(?:IF EXISTS\s+)?(?:ONLY\s+)?(\S+)`)
 
-func ParseTables(sql string) []helper.FullTableName {
+func ParseTables(sql string) []helper.FullRelationName {
 	sql = strings.TrimSpace(sql)
 
 	upper := strings.ToUpper(sql)
@@ -43,7 +43,7 @@ func ParseTables(sql string) []helper.FullTableName {
 		if len(m) != 3 {
 			return nil
 		}
-		return []helper.FullTableName{
+		return []helper.FullRelationName{
 			parseFullTableName(m[2]),
 		}
 	case prefix("CREATE TRIGGER"):
@@ -51,7 +51,7 @@ func ParseTables(sql string) []helper.FullTableName {
 		if len(m) != 3 {
 			return nil
 		}
-		return []helper.FullTableName{
+		return []helper.FullRelationName{
 			parseFullTableName(m[2]),
 		}
 	case prefix("REFRESH MATERIALIZED VIEW"):
@@ -59,7 +59,7 @@ func ParseTables(sql string) []helper.FullTableName {
 		if len(m) != 2 {
 			return nil
 		}
-		return []helper.FullTableName{
+		return []helper.FullRelationName{
 			parseFullTableName(m[1]),
 		}
 	case prefix("CLUSTER"):
@@ -67,7 +67,7 @@ func ParseTables(sql string) []helper.FullTableName {
 		if len(m) != 2 {
 			return nil
 		}
-		return []helper.FullTableName{
+		return []helper.FullRelationName{
 			parseFullTableName(m[1]),
 		}
 	case prefix("VACUUM"):
@@ -77,7 +77,7 @@ func ParseTables(sql string) []helper.FullTableName {
 		if len(m) != 2 {
 			return nil
 		}
-		return []helper.FullTableName{
+		return []helper.FullRelationName{
 			parseFullTableName(m[1]),
 		}
 	}
@@ -89,7 +89,7 @@ var vacuumFirstPartRegex = regexp.MustCompile(`(?i)VACUUM\s*(?:\([^)]*\)\s*)?(.*
 var legacyVacuumRegex = regexp.MustCompile(`(?i)VACUUM\s+(?:FULL\s*)?(?:FREEZE\s*)?(?:VERBOSE\s*)?(?:ANALYZE\s*)?(.*)`)
 var vacuumTableRegex = regexp.MustCompile(`(?i)(?:ONLY\s+)?([^\s,]+)\s*(?:\*\s*)?(?:\([^)]*\)\s*)?(?:,\s*)?`)
 
-func parseVacuum(sql string) []helper.FullTableName {
+func parseVacuum(sql string) []helper.FullRelationName {
 	// Remove the first part of the command to leave only the tables, support legacy formatting
 	m := vacuumFirstPartRegex.FindStringSubmatch(sql)
 	if len(m) != 2 {
@@ -109,7 +109,7 @@ func parseVacuum(sql string) []helper.FullTableName {
 
 	// Extract all table names
 	m3 := vacuumTableRegex.FindAllStringSubmatch(sql, -1)
-	tables := make([]helper.FullTableName, 0, len(m))
+	tables := make([]helper.FullRelationName, 0, len(m))
 	for _, i := range m3 {
 		if len(i) != 2 {
 			continue

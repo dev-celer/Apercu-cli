@@ -34,7 +34,7 @@ func sortOver(keys []string, child metricshelper.Plan) *metricshelper.ExplainRes
 
 func statsWith(schema, table string, rows int64) metricshelper.DatabaseMetrics {
 	return metricshelper.DatabaseMetrics{
-		TablesMetrics: map[helper.FullTableName]metricshelper.TableMetrics{
+		TablesMetrics: map[helper.FullRelationName]metricshelper.TableMetrics{
 			{Schema: schema, Table: table}: {RowCount: rows},
 		},
 	}

@@ -54,7 +54,7 @@ func NewMigrationOutput() *OutputDatabaseMigration {
 type OutputDatabaseMetrics struct {
 	Prod           metricshelper.DatabaseMetrics           `yaml:"prod" json:"prod"`
 	SchemaDiff     map[string]*metricshelper.SchemaDiff    `yaml:"schema_diff,omitempty" json:"schema_diff,omitempty"`
-	RewrittenTable []helper.FullTableName                  `yaml:"rewritten_table,omitempty" json:"rewritten_table,omitempty"`
+	RewrittenTable []helper.FullRelationName               `yaml:"rewritten_table,omitempty" json:"rewritten_table,omitempty"`
 	Explains       map[string][]OutputDatabaseExplainQuery `yaml:"explains,omitempty" json:"explains,omitempty"`
 	Storage        OutputDatabaseStorageMetrics            `yaml:"storage" json:"storage"`
 }
@@ -62,7 +62,7 @@ type OutputDatabaseMetrics struct {
 func NewOutputDatabaseMetrics() *OutputDatabaseMetrics {
 	return &OutputDatabaseMetrics{
 		SchemaDiff:     make(map[string]*metricshelper.SchemaDiff),
-		RewrittenTable: make([]helper.FullTableName, 0),
+		RewrittenTable: make([]helper.FullRelationName, 0),
 		Explains:       make(map[string][]OutputDatabaseExplainQuery),
 	}
 }
@@ -161,14 +161,14 @@ var templateFuncs = template.FuncMap{
 		}
 		return warnings.GetWarningsPerQuery()
 	},
-	"get_prod_table_row_count": func(table helper.FullTableName, prodMetrics metricshelper.DatabaseMetrics) string {
+	"get_prod_table_row_count": func(table helper.FullRelationName, prodMetrics metricshelper.DatabaseMetrics) string {
 		m, ok := prodMetrics.TablesMetrics[table]
 		if !ok {
 			return "N/A"
 		}
 		return strconv.Itoa(int(m.RowCount))
 	},
-	"get_prod_table_size": func(table helper.FullTableName, prodMetrics metricshelper.DatabaseMetrics) string {
+	"get_prod_table_size": func(table helper.FullRelationName, prodMetrics metricshelper.DatabaseMetrics) string {
 		m, ok := prodMetrics.TablesMetrics[table]
 		if !ok {
 			return "N/A"

@@ -15,10 +15,10 @@ const (
 
 type LockTimeout struct {
 	query *helper.QueryWithAffectedTables
-	table helper.FullTableName
+	table helper.FullRelationName
 }
 
-func NewLockTimeoutWarning(table helper.FullTableName, query *helper.QueryWithAffectedTables) *LockTimeout {
+func NewLockTimeoutWarning(table helper.FullRelationName, query *helper.QueryWithAffectedTables) *LockTimeout {
 	return &LockTimeout{
 		query: query,
 		table: table,
@@ -49,7 +49,7 @@ func (w *LockTimeout) GetIsIdempotent() bool {
 	return false
 }
 
-func (w *LockTimeout) GetTable() helper.FullTableName {
+func (w *LockTimeout) GetTable() helper.FullRelationName {
 	return w.table
 }
 
@@ -58,7 +58,7 @@ func (w *LockTimeout) GetQuery() *helper.QueryWithAffectedTables {
 }
 
 type LockTimeoutState struct {
-	Table helper.FullTableName            `json:"table"`
+	Table helper.FullRelationName         `json:"table"`
 	Query *helper.QueryWithAffectedTables `json:"query"`
 }
 
@@ -84,7 +84,7 @@ func init() {
 }
 
 type LockTimeoutCollapsed struct {
-	tables []helper.FullTableName
+	tables []helper.FullRelationName
 }
 
 func (w *LockTimeoutCollapsed) GetText() string {
@@ -120,7 +120,7 @@ func (w *LockTimeoutCollapsed) GetQuery() *helper.QueryWithAffectedTables {
 }
 
 func NewLockTimeoutCollapsed(warnings ...*LockTimeout) *LockTimeoutCollapsed {
-	var tables []helper.FullTableName
+	var tables []helper.FullRelationName
 	for _, w := range warnings {
 		tables = append(tables, w.table)
 	}
