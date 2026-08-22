@@ -118,7 +118,6 @@ func Collect(ctx context.Context, db *sql.DB, opts CollectOptions) (*Snapshot, e
 		snapshot.Collected = append(snapshot.Collected, it.id)
 	}
 
-	_ = tx.Rollback()
 	return snapshot, nil
 }
 
