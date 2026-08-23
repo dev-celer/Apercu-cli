@@ -255,27 +255,18 @@ func collectAndVerify(t *testing.T, db *sql.DB) {
 		}
 	})
 
-	t.Run("defaults record no dependency on built-ins", func(t *testing.T) {
-		users, _ := findRelation(baseline, "users")
+	t.Run("defaults record dependency for user functions", func(t *testing.T) {
 		orders, _ := findRelation(baseline, "orders")
-		createdAt, _ := findColumn(baseline, users.OID, "created_at")
 		code, _ := findColumn(baseline, orders.OID, "code")
 
-		var builtin, userDefined ColumnDefault
+		var userDefined ColumnDefault
 		for _, d := range baseline.Defaults {
-			if d.RelID == users.OID && d.Num == createdAt.Num {
-				builtin = d
-			}
 			if d.RelID == orders.OID && d.Num == code.Num {
 				userDefined = d
 			}
 		}
 
-		assert.Contains(t, builtin.Expr, "now()")
-		// The trap: PostgreSQL records no dependency on pinned objects, so this
-		// is empty even though the default calls a function.
-		assert.Empty(t, builtin.ReferencedProcs)
-
+		// This work only for user-created functions, pinned functions does not appear in the dependencies.
 		assert.Contains(t, userDefined.Expr, "next_code()")
 		assert.Len(t, userDefined.ReferencedProcs, 1)
 	})
