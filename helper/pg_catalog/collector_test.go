@@ -170,24 +170,3 @@ func TestFixtureRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, original, fromGzip)
 }
-
-func TestGatingVersion(t *testing.T) {
-	t.Parallel()
-
-	baseline := &Snapshot{Source: SourceBaseline, Header: Header{Version: 16}}
-	prod := &Snapshot{Source: SourceProd, Header: Header{Version: 17}}
-
-	// Production decides, whatever the baseline runs.
-	assert.Equal(t, pg_contract.Exactly(17), GatingVersion(baseline, prod))
-
-	// Without production the baseline's version proves nothing about it, so the
-	// range stays open and §8 has nothing to fire on yet.
-	open := pg_contract.Between(pg_contract.MinSupportedVersion, pg_contract.MaxSupportedVersion)
-	assert.Equal(t, open, GatingVersion(baseline))
-	assert.Equal(t, open, GatingVersion())
-	assert.False(t, open.Contains(pg_contract.VersionUnknown))
-
-	// An unreadable or unsupported production version is no better than none.
-	unsupported := &Snapshot{Source: SourceProd, Header: Header{Version: 14}}
-	assert.Equal(t, open, GatingVersion(unsupported))
-}

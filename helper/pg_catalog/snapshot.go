@@ -390,24 +390,3 @@ type RelACL struct {
 	RelID OID      `json:"relid"`
 	ACL   []string `json:"acl,omitempty"`
 }
-
-// GatingVersion is the version range §8 evaluates against.
-//
-// With a production snapshot the version is known exactly. Without one, the
-// baseline's version says nothing about production — the two databases can
-// legitimately differ, which is the whole reason the parser reports version
-// errors at all — so the range starts fully open across the supported versions
-// and is narrowed later by the syntax the migration actually uses. A range
-// wider than one version is what inhibits version-sensitive errors and makes
-// version-ambiguous findings carry the range they apply to.
-func GatingVersion(snapshots ...*Snapshot) pg_contract.VersionRange {
-	for _, snapshot := range snapshots {
-		if snapshot == nil || snapshot.Source != SourceProd {
-			continue
-		}
-		if version := snapshot.Header.Version; version.IsSupported() {
-			return pg_contract.Exactly(version)
-		}
-	}
-	return pg_contract.Between(pg_contract.MinSupportedVersion, pg_contract.MaxSupportedVersion)
-}
