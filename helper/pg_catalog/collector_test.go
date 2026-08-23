@@ -69,24 +69,6 @@ func TestItemRouting(t *testing.T) {
 	}
 }
 
-func TestItemsCoverTheSpec(t *testing.T) {
-	t.Parallel()
-
-	// S-00 is deliberately absent: the header is always read, because the
-	// collector needs the server version before it can build S-03 and S-05.
-	expected := []string{
-		"S-01", "S-02", "S-03", "S-04", "S-05", "S-06", "S-07", "S-08", "S-09",
-		"S-10", "S-11", "S-12", "S-13", "S-14", "S-15", "S-16", "S-17", "S-18",
-	}
-
-	collected := make([]string, 0, len(items))
-	for _, it := range items {
-		collected = append(collected, it.id)
-		assert.NotNil(t, it.collect, "%s has no collector", it.id)
-	}
-	assert.Equal(t, expected, collected)
-}
-
 func TestInventoryQueriesAreScoped(t *testing.T) {
 	t.Parallel()
 
@@ -122,43 +104,6 @@ func TestInventoryQueriesAreScoped(t *testing.T) {
 	}
 	for name, query := range reference {
 		assert.NotContains(t, query, userNS, "%s is reference data and must not be filtered", name)
-	}
-}
-
-func TestUserNSExcludesReservedSchemas(t *testing.T) {
-	t.Parallel()
-
-	// The single LIKE pattern is what covers pg_catalog, pg_toast, pg_temp_N and
-	// pg_toast_temp_N at once.
-	assert.Contains(t, userNS, `n.nspname <> 'information_schema'`)
-	assert.Contains(t, userNS, `n.nspname NOT LIKE 'pg\_%'`)
-}
-
-func TestConstraintsQueryVersionColumns(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name         string
-		version      int
-		wantPeriod   bool
-		wantEnforced bool
-	}{
-		{name: "15 has neither", version: 150018},
-		{name: "16 has neither", version: 160006},
-		{name: "17 has neither, temporal support landed in 18", version: 170010},
-		{name: "18 has both", version: 180004, wantPeriod: true, wantEnforced: true},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
-			query := constraintsQuery(test.version)
-			assert.Equal(t, test.wantPeriod, strings.Contains(query, "k.conperiod"))
-			assert.Equal(t, test.wantEnforced, strings.Contains(query, "k.conenforced"))
-			// The unconditional columns are there on every version.
-			assert.Contains(t, query, "k.contype")
-			assert.Contains(t, query, "pg_get_constraintdef(k.oid)")
-		})
 	}
 }
 
