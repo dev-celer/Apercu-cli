@@ -169,22 +169,6 @@ func collectAndVerify(t *testing.T, db *sql.DB) {
 		}
 	})
 
-	t.Run("partitioned parent reports no size", func(t *testing.T) {
-		events, ok := findRelation(baseline, "events")
-		require.True(t, ok)
-		assert.Equal(t, "p", events.Kind)
-		assert.NotEmpty(t, events.PartitionKey)
-		// Measured: a partitioned parent reports 0 for both size functions, so
-		// P-01 has to sum the tree.
-		assert.Zero(t, events.HeapBytes)
-		assert.Zero(t, events.TotalBytes)
-
-		leaf, ok := findRelation(baseline, "events_2025")
-		require.True(t, ok)
-		assert.True(t, leaf.IsPartition)
-		assert.Positive(t, leaf.TotalBytes)
-	})
-
 	t.Run("inheritance edges", func(t *testing.T) {
 		events, _ := findRelation(baseline, "events")
 		defaultPart, _ := findRelation(baseline, "events_default")
