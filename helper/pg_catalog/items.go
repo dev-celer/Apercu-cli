@@ -506,10 +506,13 @@ func collectSettings(ctx context.Context, tx *sql.Tx, snapshot *Snapshot) error 
 	return err
 }
 
+// tableStatsQuery is S-17.
 const tableStatsQuery = `
 SELECT relid, schemaname, relname, seq_scan, idx_scan,
        n_tup_ins, n_tup_upd, n_tup_del, n_live_tup, n_dead_tup,
-       last_autovacuum, last_analyze
+       last_autovacuum, last_analyze,
+       COALESCE(pg_relation_size(relid), 0) AS heap_bytes,
+       COALESCE(pg_total_relation_size(relid), 0) AS total_bytes
 FROM pg_stat_user_tables`
 
 // collectTableStats is S-17.
@@ -523,7 +526,7 @@ func collectTableStats(ctx context.Context, tx *sql.Tx, snapshot *Snapshot) erro
 		err := r.Scan(
 			&s.RelID, &s.Namespace, &s.Name, &seqScan, &idxScan,
 			&s.TupIns, &s.TupUpd, &s.TupDel, &s.LiveTup, &s.DeadTup,
-			&lastAutovacuum, &lastAnalyze,
+			&lastAutovacuum, &lastAnalyze, &s.HeapBytes, &s.TotalBytes,
 		)
 		s.SeqScan = seqScan.Int64
 		s.IdxScan = idxScan.Int64

@@ -354,6 +354,8 @@ type TableStat struct {
 	DeadTup        int64      `json:"dead_tup"`
 	LastAutovacuum *time.Time `json:"last_autovacuum,omitempty"`
 	LastAnalyze    *time.Time `json:"last_analyze,omitempty"`
+	HeapBytes      int64      `json:"heap_bytes"`
+	TotalBytes     int64      `json:"total_bytes"`
 }
 
 // Role is S-18.
