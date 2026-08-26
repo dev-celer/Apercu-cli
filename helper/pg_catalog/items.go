@@ -113,8 +113,7 @@ JOIN pg_class c ON c.oid = a.attrelid
 JOIN pg_namespace n ON n.oid = c.relnamespace AND ` + userNS + `
 WHERE a.attnum > 0 AND NOT a.attisdropped`
 
-// collectColumns is S-03. Dropped columns are excluded but keep their attnum
-// slots, so column ordinals must never be derived from row position.
+// collectColumns is S-03.
 func collectColumns(ctx context.Context, tx *sql.Tx, snapshot *Snapshot) error {
 	rows, err := queryRows(ctx, tx, columnsQuery, func(r *sql.Rows) (Column, error) {
 		c := Column{}
@@ -166,10 +165,6 @@ func collectDefaults(ctx context.Context, tx *sql.Tx, snapshot *Snapshot) error 
 
 // constraintsQuery is S-05. conperiod and conenforced do not exist before PG 18,
 // so they are appended conditionally and defaulted on load.
-//
-// 🔬 Measured on 15.18 / 16.14 / 17.10 / 18.4: pg_constraint gains both columns
-// at 18. Temporal constraint support was reverted from 17, so conperiod is not
-// a 17 column despite the release history suggesting otherwise.
 func constraintsQuery(serverVersionNum int) string {
 	query := `
 SELECT k.oid, k.conname, k.conrelid, k.confrelid, k.contype, k.convalidated,
@@ -190,8 +185,7 @@ func collectConstraints(ctx context.Context, tx *sql.Tx, snapshot *Snapshot) err
 	query := constraintsQuery(version)
 
 	rows, err := queryRows(ctx, tx, query, func(r *sql.Rows) (Constraint, error) {
-		// A constraint has no period and is enforced on every version that does
-		// not know about the columns.
+		// A constraint has no period and is enforced on every version that does not know about the columns.
 		c := Constraint{Period: false, Enforced: true}
 		var key, foreignKey pq.Int64Array
 		var def sql.NullString
@@ -227,8 +221,7 @@ FROM pg_index i
 JOIN pg_class c ON c.oid = i.indexrelid
 JOIN pg_namespace n ON n.oid = c.relnamespace AND ` + userNS
 
-// collectIndexes is S-06. indkey is an int2vector, whose text form is space
-// separated rather than an array literal, so it is split rather than cast.
+// collectIndexes is S-06.
 func collectIndexes(ctx context.Context, tx *sql.Tx, snapshot *Snapshot) error {
 	rows, err := queryRows(ctx, tx, indexesQuery, func(r *sql.Rows) (Index, error) {
 		i := Index{}
@@ -257,13 +250,11 @@ JOIN pg_class c ON c.oid = h.inhrelid
 JOIN pg_class p ON p.oid = h.inhparent
 JOIN pg_namespace n ON n.oid = p.relnamespace AND ` + userNS
 
-// collectInherits is S-07. Declarative partitioning and classic INHERITS share
-// pg_inherits; ParentIsPartitioned separates them.
+// collectInherits is S-07.
 func collectInherits(ctx context.Context, tx *sql.Tx, snapshot *Snapshot) error {
 	rows, err := queryRows(ctx, tx, inheritsQuery, func(r *sql.Rows) (InheritEdge, error) {
 		e := InheritEdge{}
-		// A classic INHERITS child has no partition bound, so the comparison is
-		// NULL rather than false.
+		// A classic INHERITS child has no partition bound, so the comparison is NULL rather than false.
 		var isDefault sql.NullBool
 		err := r.Scan(&e.Parent, &e.Child, &e.SeqNo, &e.DetachPending, &isDefault, &e.ParentIsPartitioned)
 		e.IsDefaultPartition = isDefault.Valid && isDefault.Bool
@@ -283,7 +274,7 @@ LEFT JOIN pg_depend d ON d.objid = s.oid AND d.classid = 'pg_class'::regclass
                      AND d.refclassid = 'pg_class'::regclass AND d.deptype IN ('a','i')
 WHERE s.relkind = 'S'`
 
-// collectSequences is S-08. A standalone sequence has no owner row.
+// collectSequences is S-08.
 func collectSequences(ctx context.Context, tx *sql.Tx, snapshot *Snapshot) error {
 	rows, err := queryRows(ctx, tx, sequencesQuery, func(r *sql.Rows) (Sequence, error) {
 		s := Sequence{}
@@ -312,8 +303,7 @@ FROM pg_type t
 JOIN pg_namespace n ON n.oid = t.typnamespace
 WHERE t.typtype IN ('b','d','e','c','r','m')`
 
-// collectTypes is S-09. Reference data: types are captured whole, with no
-// namespace filter, because user objects use built-in types.
+// collectTypes is S-09.
 func collectTypes(ctx context.Context, tx *sql.Tx, snapshot *Snapshot) error {
 	rows, err := queryRows(ctx, tx, typesQuery, func(r *sql.Rows) (Type, error) {
 		t := Type{}
@@ -344,8 +334,7 @@ FROM pg_policy p
 JOIN pg_class c ON c.oid = p.polrelid
 JOIN pg_namespace n ON n.oid = c.relnamespace AND ` + userNS
 
-// collectTriggersAndPolicies is S-10. Internal triggers are filtered out: FK
-// enforcement triggers are already visible through S-05.
+// collectTriggersAndPolicies is S-10.
 func collectTriggersAndPolicies(ctx context.Context, tx *sql.Tx, snapshot *Snapshot) error {
 	triggers, err := queryRows(ctx, tx, triggersQuery, func(r *sql.Rows) (Trigger, error) {
 		t := Trigger{}
@@ -377,8 +366,7 @@ JOIN pg_class rc ON rc.oid = d.refobjid
 JOIN pg_namespace n ON n.oid = rc.relnamespace AND ` + userNS + `
 WHERE r.ev_class <> d.refobjid`
 
-// collectViewDeps is S-11. The attnum is kept: a relation-level edge cannot tell
-// a DROP COLUMN that cascades from one that does not.
+// collectViewDeps is S-11.
 func collectViewDeps(ctx context.Context, tx *sql.Tx, snapshot *Snapshot) error {
 	rows, err := queryRows(ctx, tx, viewDepsQuery, func(r *sql.Rows) (ViewDep, error) {
 		d := ViewDep{}
@@ -396,8 +384,7 @@ JOIN pg_class c ON c.oid = d.refobjid AND d.refclassid = 'pg_class'::regclass
 JOIN pg_namespace n ON n.oid = c.relnamespace AND ` + userNS + `
 WHERE d.deptype IN ('a','n','i','P')`
 
-// collectDepends is S-12. deptype 'p' is excluded deliberately: pinned objects
-// record no dependency rows at all.
+// collectDepends is S-12.
 func collectDepends(ctx context.Context, tx *sql.Tx, snapshot *Snapshot) error {
 	rows, err := queryRows(ctx, tx, dependsQuery, func(r *sql.Rows) (DependEdge, error) {
 		e := DependEdge{}
@@ -414,8 +401,7 @@ SELECT p.oid, n.nspname, p.proname, p.provolatile, p.proisstrict, p.prokind,
        pg_get_function_identity_arguments(p.oid) AS identity_args
 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace`
 
-// collectProcs is S-13. Reference data, captured whole: this table and not
-// pg_depend is the authority on volatility.
+// collectProcs is S-13.
 func collectProcs(ctx context.Context, tx *sql.Tx, snapshot *Snapshot) error {
 	rows, err := queryRows(ctx, tx, procsQuery, func(r *sql.Rows) (Proc, error) {
 		p := Proc{}
@@ -437,8 +423,7 @@ const operatorsQuery = `
 SELECT o.oid, o.oprname, o.oprnamespace, o.oprleft, o.oprright, o.oprcode::oid
 FROM pg_operator o`
 
-// collectCastsAndOperators is S-14: the implicit function calls behind a cast or
-// an operator, whose volatility decides whether a default is stable.
+// collectCastsAndOperators is S-14.
 func collectCastsAndOperators(ctx context.Context, tx *sql.Tx, snapshot *Snapshot) error {
 	casts, err := queryRows(ctx, tx, castsQuery, func(r *sql.Rows) (Cast, error) {
 		c := Cast{}
@@ -467,8 +452,7 @@ const publicationRelsQuery = `SELECT prpubid, prrelid FROM pg_publication_rel`
 
 const extensionsQuery = `SELECT e.oid, e.extname, e.extversion, e.extnamespace FROM pg_extension e`
 
-// collectPublications is S-15. A published table changes the risk profile of a
-// rewrite, because logical replication has to resynchronise it.
+// collectPublications is S-15.
 func collectPublications(ctx context.Context, tx *sql.Tx, snapshot *Snapshot) error {
 	publications, err := queryRows(ctx, tx, publicationsQuery, func(r *sql.Rows) (Publication, error) {
 		p := Publication{}
@@ -509,8 +493,7 @@ WHERE name IN ('search_path','TimeZone','lock_timeout','statement_timeout',
                'default_statistics_target','maintenance_work_mem',
                'max_parallel_maintenance_workers')`
 
-// collectSettings is S-16. These are the collector's own session values, which
-// the migration's SET statements override (C-01, C-04).
+// collectSettings is S-16.
 func collectSettings(ctx context.Context, tx *sql.Tx, snapshot *Snapshot) error {
 	rows, err := queryRows(ctx, tx, settingsQuery, func(r *sql.Rows) (Setting, error) {
 		s := Setting{}
@@ -527,8 +510,7 @@ SELECT relid, schemaname, relname, seq_scan, idx_scan,
        last_autovacuum, last_analyze
 FROM pg_stat_user_tables`
 
-// collectTableStats is S-17. pg_stat_user_tables is already scoped to user
-// schemas. Severity input only — no classification may depend on it.
+// collectTableStats is S-17.
 func collectTableStats(ctx context.Context, tx *sql.Tx, snapshot *Snapshot) error {
 	rows, err := queryRows(ctx, tx, tableStatsQuery, func(r *sql.Rows) (TableStat, error) {
 		s := TableStat{}

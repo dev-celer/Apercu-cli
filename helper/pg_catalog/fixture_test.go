@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// testSchema is the schema the integration fixture is built in.
 const testSchema = "apercu_snapshot_test"
 
 func findRelation(snapshot *Snapshot, name string) (Relation, bool) {

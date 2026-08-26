@@ -1,12 +1,10 @@
 package pg_catalog
 
 import (
-	"apercu-cli/helper/pg_contract"
 	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -28,8 +26,7 @@ func TestItemRouting(t *testing.T) {
 		opts     CollectOptions
 		expected bool
 	}{
-		// Schema items live on the baseline and are captured on both sides so
-		// the diff has something to compare.
+		// Schema items live on the baseline and are captured on both sides so the diff has something to compare.
 		{name: "relations from baseline pre", itemID: "S-02",
 			opts: CollectOptions{Source: SourceBaseline, PIT: PITPre}, expected: true},
 		{name: "relations from baseline post", itemID: "S-02",
@@ -43,8 +40,7 @@ func TestItemRouting(t *testing.T) {
 		{name: "stats never from baseline", itemID: "S-17",
 			opts: CollectOptions{Source: SourceBaseline, PIT: PITPre, ProdAvailable: false}, expected: false},
 
-		// Publications prefer production but fall back to the baseline when
-		// there is no production snapshot coming.
+		// Publications prefer production but fall back to the baseline when there is no production snapshot coming.
 		{name: "publications from prod", itemID: "S-15",
 			opts: CollectOptions{Source: SourceProd, PIT: PITPre}, expected: true},
 		{name: "publications skipped on baseline when prod will provide them", itemID: "S-15",
@@ -69,11 +65,10 @@ func TestItemRouting(t *testing.T) {
 	}
 }
 
+// Assert that the user_ns filter is applied to the required queries
 func TestInventoryQueriesAreScoped(t *testing.T) {
 	t.Parallel()
 
-	// Inventory queries must carry the S-SCOPE filter; reference queries are
-	// captured whole, because user objects use built-in types and functions.
 	inventory := map[string]string{
 		"S-01 schemas":     schemasQuery,
 		"S-02 relations":   relationsQuery,
@@ -113,15 +108,12 @@ func TestSnapshotHas(t *testing.T) {
 	snapshot := &Snapshot{Collected: []string{"S-00", "S-02", "S-17"}}
 	assert.True(t, snapshot.Has("S-00"))
 	assert.True(t, snapshot.Has("S-17"))
-	// Not captured is not the same as captured and empty.
 	assert.False(t, snapshot.Has("S-05"))
 }
 
 func TestFixtureRoundTrip(t *testing.T) {
 	t.Parallel()
 
-	statsTarget := int32(500)
-	analyzed := time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)
 	original := &Snapshot{
 		Source:     SourceBaseline,
 		PIT:        PITPre,
@@ -139,10 +131,10 @@ func TestFixtureRoundTrip(t *testing.T) {
 			Options: []string{"fillfactor=90"}, PartitionKey: "RANGE (at)",
 		}},
 		Columns: []Column{
-			{RelID: 16384, Num: 1, Name: "id", StatsTarget: &statsTarget},
+			{RelID: 16384, Num: 1, Name: "id", StatsTarget: new(int32(500))},
 			{RelID: 16384, Num: 2, Name: "at"},
 		},
-		TableStats: []TableStat{{RelID: 16384, Name: "events", LastAnalyze: &analyzed}},
+		TableStats: []TableStat{{RelID: 16384, Name: "events", LastAnalyze: new(time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC))}},
 	}
 
 	path := filepath.Join(t.TempDir(), "snapshot.json")
@@ -157,8 +149,7 @@ func TestFixtureRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotContains(t, string(encoded), "stats_target")
 
-	// Committed fixtures are compressed; the reader sniffs the content so a
-	// rename cannot break them.
+	// Committed fixtures are compressed; the reader sniffs the content so a rename cannot break them.
 	compressed := filepath.Join(t.TempDir(), "snapshot.json.gz")
 	require.NoError(t, original.WriteJSON(compressed))
 

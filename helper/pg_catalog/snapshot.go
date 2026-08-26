@@ -1,7 +1,4 @@
-// Package pg_catalog captures the PostgreSQL catalog snapshots the classifier
-// reasons over (§2). A snapshot is a flat, consistent copy of the catalog rows
-// a migration can be graded against; the derived lookups (P-01…P-20) are built
-// on top of it.
+// Package pg_catalog captures the PostgreSQL catalog snapshots. The derived lookup are built on top of this.
 package pg_catalog
 
 import (
@@ -9,23 +6,20 @@ import (
 	"time"
 )
 
-// OID is a PostgreSQL object identifier. Zero means "none" — pg_class.reloftype,
-// pg_constraint.confrelid and friends all use 0 rather than NULL for absence.
+// OID is a PostgreSQL object identifier. Zero means "none".
 type OID uint32
 
-// Source is the database a snapshot was taken from. The two are not
-// interchangeable: the baseline carries the schema, production carries the
-// sizes and the activity (§2.1 S-SOURCE).
+// Source is the database a snapshot was taken from.
 type Source string
 
 const (
 	// SourceBaseline is the pre-migration subsetted or anonymized database.
 	SourceBaseline Source = "baseline"
-	// SourceProd is the real production database, when it is reachable.
+	// SourceProd is the real production database.
 	SourceProd Source = "prod"
 )
 
-// PIT is when the snapshot was taken relative to the migration (§2.1 S-PIT).
+// PIT (for Point In Time) is when the snapshot was taken relative to the migration.
 type PIT string
 
 const (
@@ -45,9 +39,7 @@ type Snapshot struct {
 	Collected []string `json:"collected"`
 
 	// Header describes the database this snapshot came from. It is always
-	// captured, because the collector needs the version to decide which columns
-	// exist; which header is *authoritative* for version gating is decided when
-	// the snapshots are combined.
+	// captured, because the collector needs the version to decide which columns exist
 	Header Header `json:"header"` // S-00
 
 	Schemas         []Schema         `json:"schemas"`          // S-01
@@ -75,9 +67,8 @@ type Snapshot struct {
 	RelACLs         []RelACL         `json:"rel_acls"`         // S-18
 }
 
-// Header is S-00. Version-sensitive classification depends on it, so a run that
-// cannot read it from production falls back to bounding the version by the
-// syntax observed.
+// Header is S-00. General information about the server / the database.
+// Version-sensitive snapshotting depend on this
 type Header struct {
 	ServerVersionNum int                 `json:"server_version_num"`
 	Version          pg_contract.Version `json:"version"`
@@ -85,8 +76,7 @@ type Header struct {
 	User             string              `json:"user"`
 	SearchPath       string              `json:"search_path"`
 	TimeZone         string              `json:"timezone"`
-	// FromReplica is pg_is_in_recovery(). Activity statistics (S-17) are
-	// meaningless when it is true.
+	// FromReplica is pg_is_in_recovery(). Activity statistics (S-17) are meaningless when it is true.
 	FromReplica bool `json:"from_replica"`
 }
 
@@ -102,7 +92,7 @@ type Relation struct {
 	OID          OID      `json:"oid"`
 	Namespace    string   `json:"namespace"`
 	Name         string   `json:"name"`
-	Kind         string   `json:"kind"`        // pg_class.relkind, one char
+	Kind         string   `json:"kind"`        // pg_class.relkind, accepted kind: ('r','p','i','I','m','v','S','f','c')
 	Persistence  string   `json:"persistence"` // 'p' permanent, 'u' unlogged, 't' temp
 	IsPartition  bool     `json:"is_partition"`
 	RowSecurity  bool     `json:"row_security"`
@@ -111,11 +101,10 @@ type Relation struct {
 	Pages        int64    `json:"pages"`
 	Options      []string `json:"options,omitempty"`
 	Tablespace   OID      `json:"tablespace"`
-	OfType       OID      `json:"of_type"`
+	OfType       OID      `json:"of_type"` // For typed table only, link to the composite Type
 	AccessMethod string   `json:"access_method,omitempty"`
 	Owner        string   `json:"owner"`
-	// HeapBytes and TotalBytes are both 0 for a partitioned parent, which has no
-	// storage of its own; P-01 sums the tree instead.
+	// HeapBytes and TotalBytes are both 0 for a partitioned parent, which has no storage of its own.
 	HeapBytes      int64  `json:"heap_bytes"`
 	TotalBytes     int64  `json:"total_bytes"`
 	PartitionBound string `json:"partition_bound,omitempty"`
@@ -124,14 +113,13 @@ type Relation struct {
 
 // Column is S-03.
 type Column struct {
-	RelID         OID    `json:"relid"`
+	RelID         OID    `json:"relid"` // Link to the table (Relation) the column appear in
 	Num           int16  `json:"num"`
 	Name          string `json:"name"`
-	TypeID        OID    `json:"type_id"`
+	TypeID        OID    `json:"type_id"` // Link to the Type of the column
 	FormattedType string `json:"formatted_type"`
 	TypeMod       int32  `json:"type_mod"`
-	// NotNull is authoritative up to PG 17. On 18 a NOT NULL can exist as an
-	// unenforced constraint while attnotnull is still true, so P-14 reads S-05.
+	// NotNull is authoritative up to PG 17. On 18 a NOT NULL can exist as an unenforced constraint while attnotnull is still true.
 	NotNull     bool   `json:"not_null"`
 	Generated   string `json:"generated"` // '' none, 's' stored, 'v' virtual (18+)
 	Identity    string `json:"identity"`
@@ -139,21 +127,22 @@ type Column struct {
 	Compression string `json:"compression"`
 	IsLocal     bool   `json:"is_local"`
 	InhCount    int32  `json:"inh_count"`
-	Collation   OID    `json:"collation"`
-	// StatsTarget is nil when the column uses the database default. The catalog
-	// spells that -1 on PG 15/16 and NULL on 17/18; both normalize to nil here.
+	Collation   OID    `json:"collation"` // TODO Collation table not collected, need implementation
+	// StatsTarget is nil when the column uses the database default.
+	// The catalog spells that -1 on PG 15/16 and NULL on 17/18; both normalize to nil here.
 	StatsTarget *int32 `json:"stats_target,omitempty"`
 }
 
 // ColumnDefault is S-04.
 type ColumnDefault struct {
-	RelID OID    `json:"relid"`
-	Num   int16  `json:"num"`
+	RelID OID    `json:"relid"` // Link to the table (Relation) the column appear in
+	Num   int16  `json:"num"`   // Link to the Column Num
 	Expr  string `json:"expr"`
-	// ReferencedProcs is empty for built-in functions: PostgreSQL records no
-	// dependency on pinned objects. It pins the exact overload of a user
-	// function, and never proves the absence of a function call.
-	ReferencedProcs     []OID `json:"referenced_procs,omitempty"`
+	// ReferencedProcs record only the referenced user functions, it is empty for pinned functions.
+	// For user functions, the OID link to Proc
+	ReferencedProcs []OID `json:"referenced_procs,omitempty"`
+	// ReferencedOperators record only the referenced user operators, it is empty for pinned operator.
+	// for user operators, the OID link to Operator
 	ReferencedOperators []OID `json:"referenced_operators,omitempty"`
 }
 
@@ -161,8 +150,8 @@ type ColumnDefault struct {
 type Constraint struct {
 	OID          OID     `json:"oid"`
 	Name         string  `json:"name"`
-	RelID        OID     `json:"relid"`         // conrelid
-	ForeignRelID OID     `json:"foreign_relid"` // confrelid
+	RelID        OID     `json:"relid"`         // For table constraint, the OID link to Relation
+	ForeignRelID OID     `json:"foreign_relid"` // For foreign key, the OID link to Relation and represent the referenced table
 	Type         string  `json:"type"`          // contype: c p u f t x n
 	Validated    bool    `json:"validated"`
 	Deferrable   bool    `json:"deferrable"`
@@ -170,119 +159,108 @@ type Constraint struct {
 	IsLocal      bool    `json:"is_local"`
 	InhCount     int32   `json:"inh_count"`
 	NoInherit    bool    `json:"no_inherit"`
-	Key          []int16 `json:"key,omitempty"`         // conkey
-	ForeignKey   []int16 `json:"foreign_key,omitempty"` // confkey
-	IndexID      OID     `json:"index_id"`
+	Key          []int16 `json:"key,omitempty"`         // For table constraint, array of the constraint columns num, link to Column.Num
+	ForeignKey   []int16 `json:"foreign_key,omitempty"` // For foreign key, array of the referenced columns num, link to Column.Num
+	IndexID      OID     `json:"index_id"`              // If backed by an index, the OID link to Index & Relation
 	FKUpdateType string  `json:"fk_update_type"`
 	FKDeleteType string  `json:"fk_delete_type"`
-	// TypeID is non-zero for a domain constraint rather than a table one.
-	TypeID OID    `json:"type_id"`
-	Def    string `json:"def"`
+	TypeID       OID     `json:"type_id"` // For domain constraint, the OID link to Type
+	Def          string  `json:"def"`
 	// Period is PG 18+; false on older versions, where the column does not exist.
 	Period bool `json:"period"`
-	// Enforced is PG 18+; true on older versions, where every constraint is
-	// enforced by definition.
+	// Enforced is PG 18+; true on older versions, where every constraint is enforced by definition.
 	Enforced bool `json:"enforced"`
 }
 
 // Index is S-06.
 type Index struct {
-	IndexRelID  OID  `json:"index_relid"`
-	RelID       OID  `json:"relid"`
-	IsUnique    bool `json:"is_unique"`
-	IsPrimary   bool `json:"is_primary"`
-	IsExclusion bool `json:"is_exclusion"`
-	// IsValid false means a CREATE INDEX CONCURRENTLY failed and left debris.
-	IsValid     bool    `json:"is_valid"`
-	IsReady     bool    `json:"is_ready"`
-	IsLive      bool    `json:"is_live"`
-	IsClustered bool    `json:"is_clustered"`
-	NAtts       int16   `json:"n_atts"`
-	NKeyAtts    int16   `json:"n_key_atts"`
-	Columns     []int16 `json:"columns,omitempty"`
-	Def         string  `json:"def"`
-	Predicate   string  `json:"predicate,omitempty"`
+	IndexRelID  OID   `json:"index_relid"` // Indexes are also present in the relation table, so OID link to Relation
+	RelID       OID   `json:"relid"`       // This represents the table the index is on, the OID link to Relation
+	IsUnique    bool  `json:"is_unique"`
+	IsPrimary   bool  `json:"is_primary"`
+	IsExclusion bool  `json:"is_exclusion"`
+	IsValid     bool  `json:"is_valid"` // IsValid false means a CREATE INDEX CONCURRENTLY failed and left debris.
+	IsReady     bool  `json:"is_ready"`
+	IsLive      bool  `json:"is_live"`
+	IsClustered bool  `json:"is_clustered"`
+	NAtts       int16 `json:"n_atts"`     // Number of included column in the index
+	NKeyAtts    int16 `json:"n_key_atts"` // Number of included column used as key for the index
+	// Array of column num for the index, key column come first
+	// This link to Column.Num
+	Columns   []int16 `json:"columns,omitempty"`
+	Def       string  `json:"def"`
+	Predicate string  `json:"predicate,omitempty"`
 }
 
-// InheritEdge is S-07: one edge of the inheritance or partition graph. The
-// transitive closure is computed at load time (P-06).
+// InheritEdge is S-07.
 type InheritEdge struct {
-	Parent OID   `json:"parent"`
-	Child  OID   `json:"child"`
-	SeqNo  int32 `json:"seq_no"`
-	// DetachPending marks an interrupted DETACH CONCURRENTLY.
-	DetachPending bool `json:"detach_pending"`
-	// IsDefaultPartition marks the implicit AEL target of ATTACH and DETACH.
-	IsDefaultPartition bool `json:"is_default_partition"`
-	// ParentIsPartitioned separates declarative partitioning from classic
-	// INHERITS, which differ for VACUUM and ANALYZE scope.
+	Parent             OID   `json:"parent"` // This OID link to Relation
+	Child              OID   `json:"child"`  // This OID link to Relation
+	SeqNo              int32 `json:"seq_no"`
+	DetachPending      bool  `json:"detach_pending"` // DetachPending marks an interrupted DETACH CONCURRENTLY.
+	IsDefaultPartition bool  `json:"is_default_partition"`
+	// ParentIsPartitioned separates declarative partitioning from classic INHERITS.
 	ParentIsPartitioned bool `json:"parent_is_partitioned"`
 }
 
 // Sequence is S-08.
 type Sequence struct {
-	SeqRelID OID   `json:"seq_relid"`
-	TypeID   OID   `json:"type_id"`
-	Max      int64 `json:"max"`
-	Cycle    bool  `json:"cycle"`
-	// OwnerTable is 0 for a standalone sequence.
-	OwnerTable  OID    `json:"owner_table"`
+	SeqRelID    OID    `json:"seq_relid"`
+	TypeID      OID    `json:"type_id"` // The OID link to Type
+	Max         int64  `json:"max"`
+	Cycle       bool   `json:"cycle"`
+	OwnerTable  OID    `json:"owner_table"` // OwnerTable is 0 for a standalone sequence, else this OID link to Relation.
 	OwnerAttNum int16  `json:"owner_attnum"`
 	DepType     string `json:"dep_type"` // 'a' OWNED BY / serial, 'i' identity
 }
 
-// Type is S-09: types, domains and enums.
+// Type is S-09.
 type Type struct {
-	OID        OID      `json:"oid"`
-	Namespace  string   `json:"namespace"`
-	Name       string   `json:"name"`
-	Type       string   `json:"type"` // typtype: b d e c r m
-	BaseTypeID OID      `json:"base_type_id"`
-	TypeMod    int32    `json:"type_mod"`
-	NotNull    bool     `json:"not_null"`
-	ElemID     OID      `json:"elem_id"`
-	RelID      OID      `json:"relid"`
-	Category   string   `json:"category"`
-	Len        int16    `json:"len"`
-	Input      OID      `json:"input"`
-	Output     OID      `json:"output"`
-	EnumLabels []string `json:"enum_labels,omitempty"`
-	// DomainConstraints > 0 is the whole of P-11: a constrained domain forces
-	// ADD COLUMN to rewrite.
-	DomainConstraints int `json:"domain_constraints"`
+	OID               OID      `json:"oid"`
+	Namespace         string   `json:"namespace"`
+	Name              string   `json:"name"`
+	Type              string   `json:"type"`         // typtype: b d e c r m
+	BaseTypeID        OID      `json:"base_type_id"` // For domain type, the OID link to Type
+	TypeMod           int32    `json:"type_mod"`
+	NotNull           bool     `json:"not_null"`
+	ElemID            OID      `json:"elem_id"` // For array-like type, the OID link to Type
+	RelID             OID      `json:"relid"`   // For composite type, the OID link to Relation
+	Category          string   `json:"category"`
+	Len               int16    `json:"len"`
+	Input             OID      `json:"input"`  // This represents the text to type conversion function, the OID link to Proc
+	Output            OID      `json:"output"` // This represents the type to text conversion function, the OID link to Proc
+	EnumLabels        []string `json:"enum_labels,omitempty"`
+	DomainConstraints int      `json:"domain_constraints"`
 }
 
-// Trigger is S-10. Internal triggers are excluded: FK enforcement triggers are
-// already visible through S-05.
+// Trigger is S-10.
 type Trigger struct {
 	OID           OID    `json:"oid"`
-	RelID         OID    `json:"relid"`
+	RelID         OID    `json:"relid"` // The OID link to Relation
 	Name          string `json:"name"`
-	Enabled       string `json:"enabled"` // tgenabled: O D R A
-	Type          int16  `json:"type"`    // tgtype bitmask
-	ConstraintOID OID    `json:"constraint_oid"`
+	Enabled       string `json:"enabled"`        // tgenabled: O D R A
+	Type          int16  `json:"type"`           // tgtype bitmask
+	ConstraintOID OID    `json:"constraint_oid"` // If the trigger is for a constraint, the OID link to Constraint
 	Def           string `json:"def"`
 }
 
 // Policy is S-10.
 type Policy struct {
 	OID        OID    `json:"oid"`
-	RelID      OID    `json:"relid"`
+	RelID      OID    `json:"relid"` // The table this policy apply to, the OID link to Relation
 	Name       string `json:"name"`
 	Cmd        string `json:"cmd"`
 	Permissive bool   `json:"permissive"`
 }
 
-// ViewDep is S-11: a view or matview depending on a relation, and on which
-// column of it. The attnum is what separates a DROP COLUMN that cascades from
-// one that does not.
+// ViewDep is S-11.
 type ViewDep struct {
-	DependentRelID   OID   `json:"dependent_relid"`
-	ReferencedRelID  OID   `json:"referenced_relid"`
-	ReferencedAttNum int16 `json:"referenced_attnum"`
+	DependentRelID   OID   `json:"dependent_relid"`   // The OID link to Relation
+	ReferencedRelID  OID   `json:"referenced_relid"`  // The OID link to Relation
+	ReferencedAttNum int16 `json:"referenced_attnum"` // This link to the Column.Num of the referenced Relation
 }
 
-// DependEdge is S-12: the catch-all CASCADE blast radius that S-11 misses.
+// DependEdge is S-12.
 type DependEdge struct {
 	ClassID     OID    `json:"classid"`
 	ObjID       OID    `json:"objid"`
@@ -293,7 +271,7 @@ type DependEdge struct {
 	DepType     string `json:"deptype"`
 }
 
-// Proc is S-13. This table, not pg_depend, is the authority on volatility.
+// Proc is S-13.
 type Proc struct {
 	OID          OID    `json:"oid"`
 	Namespace    string `json:"namespace"`
@@ -307,27 +285,26 @@ type Proc struct {
 	IdentityArgs string `json:"identity_args"`
 }
 
-// Cast is S-14. Method 'b' is binary coercible, which is what lets ALTER COLUMN
-// TYPE skip the rewrite (P-12).
+// Cast is S-14.
 type Cast struct {
-	Source  OID    `json:"source"`
-	Target  OID    `json:"target"`
-	Method  string `json:"method"`
+	Source  OID    `json:"source"` // The OID link to Type
+	Target  OID    `json:"target"` // The OID link to Type
+	Method  string `json:"method"` // 'f': Function cast, 'b': binary coercible, 'i': use input/output type function
 	Context string `json:"context"`
-	Func    OID    `json:"func"`
+	Func    OID    `json:"func"` // For function cast, The OID link to Proc
 }
 
-// Operator is S-14. Its volatility is the volatility of oprcode (P-08).
+// Operator is S-14.
 type Operator struct {
 	OID       OID    `json:"oid"`
 	Name      string `json:"name"`
 	Namespace OID    `json:"namespace"`
-	Left      OID    `json:"left"`
-	Right     OID    `json:"right"`
-	Code      OID    `json:"code"` // oprcode
+	Left      OID    `json:"left"`  // This OID link to Type
+	Right     OID    `json:"right"` // This OID link to Type
+	Code      OID    `json:"code"`  // This represents the function used, the OID link to Proc
 }
 
-// Publication is S-15. A published table changes the risk profile of a rewrite.
+// Publication is S-15.
 type Publication struct {
 	OID       OID    `json:"oid"`
 	Name      string `json:"name"`
@@ -339,8 +316,8 @@ type Publication struct {
 
 // PublicationRel is S-15.
 type PublicationRel struct {
-	PubID OID `json:"pub_id"`
-	RelID OID `json:"rel_id"`
+	PubID OID `json:"pub_id"` // The OID link to Publication
+	RelID OID `json:"rel_id"` // The OID link to Relation
 }
 
 // Extension is S-15.
@@ -351,19 +328,16 @@ type Extension struct {
 	Namespace OID    `json:"namespace"`
 }
 
-// Setting is S-16. These are the *collector's* session values: the migration
-// runner may use different ones, so they are defaults that the migration's own
-// SET statements override.
+// Setting is S-16.
 type Setting struct {
 	Name   string `json:"name"`
 	Value  string `json:"value"`
 	Source string `json:"source"`
 }
 
-// TableStat is S-17. Severity input only — no classification may depend on it,
-// and it is meaningless on a replica or a restored dump.
+// TableStat is S-17.
 type TableStat struct {
-	RelID          OID        `json:"relid"`
+	RelID          OID        `json:"relid"` // The OID link to Relation
 	Namespace      string     `json:"namespace"`
 	Name           string     `json:"name"`
 	SeqScan        int64      `json:"seq_scan"`
@@ -385,8 +359,8 @@ type Role struct {
 	CanLogin bool   `json:"can_login"`
 }
 
-// RelACL is S-18: the access control list of one relation.
+// RelACL is S-18.
 type RelACL struct {
-	RelID OID      `json:"relid"`
+	RelID OID      `json:"relid"` // The OID link to Relation
 	ACL   []string `json:"acl,omitempty"`
 }

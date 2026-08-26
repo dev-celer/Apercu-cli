@@ -17,9 +17,7 @@ var gzipMagic = []byte{0x1f, 0x8b}
 // catalog tests against these files, so the derived lookups and the rules need
 // no database of their own.
 //
-// A path ending in .gz is compressed. A snapshot carries the whole of pg_proc,
-// pg_cast and pg_operator as reference data, which is around 1.4 MB of JSON and
-// under 70 KB compressed, so committed fixtures should use it.
+// If the path end with .gz the fixture will be compressed using gzip.
 func (s *Snapshot) WriteJSON(path string) error {
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
@@ -52,8 +50,7 @@ func LoadJSON(path string) (*Snapshot, error) {
 		return nil, fmt.Errorf("Failed to read snapshot from %s: %v", path, err)
 	}
 
-	// Sniff the content rather than trusting the extension, so a fixture stays
-	// readable after a rename.
+	// Sniff the content rather than trusting the extension, so a fixture stays readable after a rename.
 	if bytes.HasPrefix(data, gzipMagic) {
 		reader, err := gzip.NewReader(bytes.NewReader(data))
 		if err != nil {

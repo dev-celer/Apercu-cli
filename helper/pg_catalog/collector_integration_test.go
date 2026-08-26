@@ -1,10 +1,7 @@
 //go:build integration
 
-// The collector's integration tests start a real PostgreSQL of each supported
-// version through testcontainers, so they need a working Docker daemon and are
-// kept out of the default `go test ./...` run:
-//
-//	go test -tags integration ./helper/pg_catalog/
+// The collector's integration tests start a PostgreSQL container of each supported
+// version through testcontainers, a working Docker daemon is required
 package pg_catalog
 
 import (
@@ -22,14 +19,9 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 )
 
-// integrationVersions are the PostgreSQL majors the rules are written against.
-// Every one of them is exercised, because the snapshot shape differs across them.
 var integrationVersions = []int{15, 16, 17, 18}
 
-// seedDDL exercises the constructs the snapshot has to describe: partitions
-// including a default one, classic inheritance, a foreign key, a partial index,
-// an unvalidated constraint, an enum, a constrained domain, a view, a
-// materialized view, a trigger and both flavours of column default.
+// seedDDL contain the PostgreSQL queries to initialize the test databases against which the snapshot run.
 const seedDDL = `
 DROP SCHEMA IF EXISTS ` + testSchema + ` CASCADE;
 CREATE SCHEMA ` + testSchema + `;
@@ -80,8 +72,8 @@ INSERT INTO events (id, at) SELECT i, '2025-06-01'::timestamptz FROM generate_se
 ANALYZE;
 `
 
-// startPostgres brings up one PostgreSQL of the given major version and returns
-// a connection to it. The container is torn down when the test ends.
+// startPostgres brings up one PostgreSQL of the given major version and returns a connection to it.
+// The container is torn down when the test ends.
 func startPostgres(t *testing.T, version int) *sql.DB {
 	t.Helper()
 	ctx := context.Background()
@@ -116,9 +108,7 @@ func TestCollectAgainstServer(t *testing.T) {
 	}
 }
 
-// collectAndVerify seeds a database, snapshots it, and checks the facts the
-// rules are allowed to rely on. It runs against every supported version, so
-// anything version-dependent is asserted both ways.
+// collectAndVerify seeds the passed database, snapshots it, and checks the validity of the snapshot.
 func collectAndVerify(t *testing.T, db *sql.DB) {
 	ctx := context.Background()
 
@@ -128,8 +118,7 @@ func collectAndVerify(t *testing.T, db *sql.DB) {
 	var serverVersionNum int
 	require.NoError(t, db.QueryRowContext(ctx, "SELECT current_setting('server_version_num')::int").Scan(&serverVersionNum))
 	if serverVersionNum >= 180000 {
-		// NOT ENFORCED exists only on 18, and is the only way to see conenforced
-		// carry anything but true.
+		// NOT ENFORCED exists only on 18, and is the only way to see conenforced carry anything but true.
 		_, err = db.ExecContext(ctx, `SET search_path TO `+testSchema+`;
 			ALTER TABLE orders ADD CONSTRAINT orders_code_check CHECK (code <> '') NOT ENFORCED;`)
 		require.NoError(t, err)
@@ -235,8 +224,7 @@ func collectAndVerify(t *testing.T, db *sql.DB) {
 		assert.NotEmpty(t, foreignKey.Key)
 		assert.NotEmpty(t, foreignKey.ForeignKey)
 
-		// NOT NULL became a real constraint row in 18. Before that, nullability
-		// lives only in S-03.attnotnull, which is what P-14 has to reconcile.
+		// NOT NULL became a real constraint row in 18. Before that, nullability lives only in S-03.attnotnull.
 		var notNullConstraints, unenforced int
 		for _, c := range baseline.Constraints {
 			if c.RelID == users.OID && c.Type == "n" {
@@ -306,7 +294,6 @@ func collectAndVerify(t *testing.T, db *sql.DB) {
 
 		require.NotZero(t, domain.OID)
 		assert.Equal(t, "d", domain.Type)
-		// P-11 in one column: a constrained domain forces ADD COLUMN to rewrite.
 		assert.Equal(t, 1, domain.DomainConstraints)
 
 		// Reference data is captured whole, built-in types included.
@@ -342,7 +329,7 @@ func collectAndVerify(t *testing.T, db *sql.DB) {
 				sawColumnEdge = true
 			}
 		}
-		assert.True(t, sawColumnEdge, "a column-level view edge is what makes DROP COLUMN decidable")
+		assert.True(t, sawColumnEdge, "The view dependencies edge should be in the snapshot")
 	})
 
 	t.Run("relkinds", func(t *testing.T) {
