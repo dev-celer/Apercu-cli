@@ -183,10 +183,10 @@ type Index struct {
 	IsReady     bool  `json:"is_ready"`
 	IsLive      bool  `json:"is_live"`
 	IsClustered bool  `json:"is_clustered"`
-	NAtts       int16 `json:"n_atts"`     // Number of included column in the index
-	NKeyAtts    int16 `json:"n_key_atts"` // Number of included column used as key for the index
+	NAtts       int16 `json:"n_atts"`     // Total number of columns in the index
+	NKeyAtts    int16 `json:"n_key_atts"` // Number of key columns in the index
 	// Array of column num for the index, key column come first
-	// This link to Column.Num
+	// This link to Column.Num, except 0 which indicate an expression column
 	Columns   []int16 `json:"columns,omitempty"`
 	Def       string  `json:"def"`
 	Predicate string  `json:"predicate,omitempty"`
