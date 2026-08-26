@@ -65,6 +65,7 @@ type Snapshot struct {
 	TableStats      []TableStat      `json:"table_stats"`      // S-17
 	Roles           []Role           `json:"roles"`            // S-18
 	RelACLs         []RelACL         `json:"rel_acls"`         // S-18
+	Collations      []Collation      `json:"collations"`       // S-19
 }
 
 // Header is S-00. General information about the server / the database.
@@ -127,7 +128,8 @@ type Column struct {
 	Compression string `json:"compression"`
 	IsLocal     bool   `json:"is_local"`
 	InhCount    int32  `json:"inh_count"`
-	Collation   OID    `json:"collation"` // TODO Collation table not collected, need implementation
+	// Collation is 0 when the column type is not collatable, else the OID link to Collation.
+	Collation OID `json:"collation"`
 	// StatsTarget is nil when the column uses the database default.
 	// The catalog spells that -1 on PG 15/16 and NULL on 17/18; both normalize to nil here.
 	StatsTarget *int32 `json:"stats_target,omitempty"`
@@ -187,9 +189,12 @@ type Index struct {
 	NKeyAtts    int16 `json:"n_key_atts"` // Number of key columns in the index
 	// Array of column num for the index, key column come first
 	// This link to Column.Num, except 0 which indicate an expression column
-	Columns   []int16 `json:"columns,omitempty"`
-	Def       string  `json:"def"`
-	Predicate string  `json:"predicate,omitempty"`
+	Columns []int16 `json:"columns,omitempty"`
+	// Array of collation OID, one entry per Columns entry and in the same order.
+	// 0 indicate a column that is not collatable, else the OID link to Collation.
+	Collations []OID  `json:"collations,omitempty"`
+	Def        string `json:"def"`
+	Predicate  string `json:"predicate,omitempty"`
 }
 
 // InheritEdge is S-07.
@@ -363,4 +368,13 @@ type Role struct {
 type RelACL struct {
 	RelID OID      `json:"relid"` // The OID link to Relation
 	ACL   []string `json:"acl,omitempty"`
+}
+
+// Collation is S-19.
+type Collation struct {
+	OID       OID    `json:"oid"`
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	// Encoding is -1 when the collation applies to every encoding, else a pg_encoding number.
+	Encoding int32 `json:"encoding"`
 }

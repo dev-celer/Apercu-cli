@@ -215,6 +215,7 @@ SELECT i.indexrelid, i.indrelid, i.indisunique, i.indisprimary, i.indisexclusion
        i.indisvalid, i.indisready, i.indislive, i.indisclustered,
        i.indnatts, i.indnkeyatts,
        string_to_array(i.indkey::text, ' ')::int2[] AS columns,
+       string_to_array(i.indcollation::text, ' ')::oid[] AS collations,
        pg_get_indexdef(i.indexrelid) AS def,
        pg_get_expr(i.indpred, i.indrelid) AS predicate
 FROM pg_index i
@@ -225,14 +226,15 @@ JOIN pg_namespace n ON n.oid = c.relnamespace AND ` + userNS
 func collectIndexes(ctx context.Context, tx *sql.Tx, snapshot *Snapshot) error {
 	rows, err := queryRows(ctx, tx, indexesQuery, func(r *sql.Rows) (Index, error) {
 		i := Index{}
-		var columns pq.Int64Array
+		var columns, collations pq.Int64Array
 		var def, predicate sql.NullString
 		err := r.Scan(
 			&i.IndexRelID, &i.RelID, &i.IsUnique, &i.IsPrimary, &i.IsExclusion,
 			&i.IsValid, &i.IsReady, &i.IsLive, &i.IsClustered,
-			&i.NAtts, &i.NKeyAtts, &columns, &def, &predicate,
+			&i.NAtts, &i.NKeyAtts, &columns, &collations, &def, &predicate,
 		)
 		i.Columns = attnums(columns)
+		i.Collations = oids(collations)
 		i.Def = def.String
 		i.Predicate = predicate.String
 		return i, err
@@ -567,5 +569,20 @@ func collectRoles(ctx context.Context, tx *sql.Tx, snapshot *Snapshot) error {
 		return acl, err
 	})
 	snapshot.RelACLs = acls
+	return err
+}
+
+const collationsQuery = `
+SELECT l.oid, n.nspname, l.collname, l.collencoding
+FROM pg_collation l JOIN pg_namespace n ON n.oid = l.collnamespace`
+
+// collectCollations is S-19.
+func collectCollations(ctx context.Context, tx *sql.Tx, snapshot *Snapshot) error {
+	rows, err := queryRows(ctx, tx, collationsQuery, func(r *sql.Rows) (Collation, error) {
+		c := Collation{}
+		err := r.Scan(&c.OID, &c.Namespace, &c.Name, &c.Encoding)
+		return c, err
+	})
+	snapshot.Collations = rows
 	return err
 }

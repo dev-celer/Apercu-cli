@@ -66,6 +66,7 @@ var items = []item{
 	{id: "S-16", source: fromBaseline, pit: preOnly, collect: collectSettings},
 	{id: "S-17", source: fromProd, pit: preOnly, collect: collectTableStats},
 	{id: "S-18", source: fromBaseline, pit: prePost, collect: collectRoles},
+	{id: "S-19", source: fromBaseline, pit: prePost, collect: collectCollations},
 }
 
 // wanted reports whether the item should be captured under these options.

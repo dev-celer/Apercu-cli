@@ -65,6 +65,10 @@ CREATE TRIGGER orders_bump BEFORE UPDATE ON orders FOR EACH ROW EXECUTE FUNCTION
 
 CREATE SEQUENCE standalone_seq;
 
+CREATE COLLATION case_sensitive (LC_COLLATE = 'C', LC_CTYPE = 'C');
+CREATE TABLE labels (id bigint, name text COLLATE case_sensitive, weight int);
+CREATE INDEX labels_name_idx ON labels (name, weight);
+
 INSERT INTO users (email) SELECT 'user' || i || '@example.com' FROM generate_series(1, 500) i;
 INSERT INTO orders (id, user_id, total, status)
     SELECT i, (i % 500) + 1, i, 'open' FROM generate_series(1, 500) i;
@@ -330,6 +334,49 @@ func collectAndVerify(t *testing.T, db *sql.DB) {
 			}
 		}
 		assert.True(t, sawColumnEdge, "The view dependencies edge should be in the snapshot")
+	})
+
+	t.Run("collations", func(t *testing.T) {
+		labels, ok := findRelation(baseline, "labels")
+		require.True(t, ok)
+		name, _ := findColumn(baseline, labels.OID, "name")
+		weight, _ := findColumn(baseline, labels.OID, "weight")
+
+		byOID := map[OID]Collation{}
+		for _, c := range baseline.Collations {
+			byOID[c.OID] = c
+		}
+		// Reference data, captured whole: the built-ins a user column can point at are there.
+		assert.NotEmpty(t, baseline.Collations)
+		var sawBuiltin bool
+		for _, c := range baseline.Collations {
+			if c.Namespace == "pg_catalog" && c.Name == "C" {
+				sawBuiltin = true
+			}
+		}
+		assert.True(t, sawBuiltin)
+
+		// A user collation resolves through the same table as a built-in one.
+		userCollation, ok := byOID[name.Collation]
+		require.True(t, ok, "the column's collation must resolve")
+		assert.Equal(t, testSchema, userCollation.Namespace)
+		assert.Equal(t, "case_sensitive", userCollation.Name)
+
+		// A non-collatable column carries no collation at all.
+		assert.Zero(t, weight.Collation)
+
+		var index Index
+		for _, i := range baseline.Indexes {
+			if i.RelID == labels.OID {
+				index = i
+			}
+		}
+		require.NotZero(t, index.IndexRelID)
+		// indcollation is an oidvector like indkey: one entry per column, in the same order,
+		// and 0 wherever the column is not collatable.
+		require.Len(t, index.Collations, len(index.Columns))
+		assert.Equal(t, name.Collation, index.Collations[0])
+		assert.Zero(t, index.Collations[1])
 	})
 
 	t.Run("relkinds", func(t *testing.T) {

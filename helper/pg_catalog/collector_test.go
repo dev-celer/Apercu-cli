@@ -85,13 +85,14 @@ func TestInventoryQueriesAreScoped(t *testing.T) {
 		"S-18 relacls":     relACLsQuery,
 	}
 	reference := map[string]string{
-		"S-09 types":     typesQuery,
-		"S-13 procs":     procsQuery,
-		"S-14 casts":     castsQuery,
-		"S-14 operators": operatorsQuery,
-		"S-16 settings":  settingsQuery,
-		"S-17 stats":     tableStatsQuery,
-		"S-18 roles":     rolesQuery,
+		"S-09 types":      typesQuery,
+		"S-13 procs":      procsQuery,
+		"S-14 casts":      castsQuery,
+		"S-14 operators":  operatorsQuery,
+		"S-16 settings":   settingsQuery,
+		"S-17 stats":      tableStatsQuery,
+		"S-18 roles":      rolesQuery,
+		"S-19 collations": collationsQuery,
 	}
 
 	for name, query := range inventory {

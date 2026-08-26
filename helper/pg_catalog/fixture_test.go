@@ -64,6 +64,12 @@ func TestFixturesAreUsable(t *testing.T) {
 			assert.NotEmpty(t, baseline.Procs, "volatility lookups need the whole of pg_proc")
 			assert.NotEmpty(t, baseline.Casts, "binary coercibility needs the whole of pg_cast")
 			assert.NotEmpty(t, baseline.Operators)
+			assert.NotEmpty(t, baseline.Collations, "collation resolution needs the whole of pg_collation")
+
+			for _, index := range baseline.Indexes {
+				assert.Len(t, index.Collations, len(index.Columns),
+					"index %d must carry one collation per column", index.IndexRelID)
+			}
 
 			events, ok := findRelation(baseline, "events")
 			require.True(t, ok)
