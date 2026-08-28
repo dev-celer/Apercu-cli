@@ -24,7 +24,7 @@ type CollectOptions struct {
 type sourcePolicy uint8
 
 const (
-	fromBaseline sourcePolicy = iota
+	fromPreview sourcePolicy = iota
 	fromProd
 	fromProdPreferred
 )
@@ -48,25 +48,25 @@ type item struct {
 // items contain the list of all snapshot items captured with their S-XX id and their capture policies.
 // S-00 is absent because it is a prerequisite for other items.
 var items = []item{
-	{id: "S-01", source: fromBaseline, pit: prePost, collect: collectSchemas},
-	{id: "S-02", source: fromBaseline, pit: prePost, collect: collectRelations},
-	{id: "S-03", source: fromBaseline, pit: prePost, collect: collectColumns},
-	{id: "S-04", source: fromBaseline, pit: prePost, collect: collectDefaults},
-	{id: "S-05", source: fromBaseline, pit: prePost, collect: collectConstraints},
-	{id: "S-06", source: fromBaseline, pit: prePost, collect: collectIndexes},
-	{id: "S-07", source: fromBaseline, pit: prePost, collect: collectInherits},
-	{id: "S-08", source: fromBaseline, pit: prePost, collect: collectSequences},
-	{id: "S-09", source: fromBaseline, pit: prePost, collect: collectTypes},
-	{id: "S-10", source: fromBaseline, pit: prePost, collect: collectTriggersAndPolicies},
-	{id: "S-11", source: fromBaseline, pit: prePost, collect: collectViewDeps},
-	{id: "S-12", source: fromBaseline, pit: prePost, collect: collectDepends},
-	{id: "S-13", source: fromBaseline, pit: prePost, collect: collectProcs},
-	{id: "S-14", source: fromBaseline, pit: prePost, collect: collectCastsAndOperators},
+	{id: "S-01", source: fromPreview, pit: prePost, collect: collectSchemas},
+	{id: "S-02", source: fromPreview, pit: prePost, collect: collectRelations},
+	{id: "S-03", source: fromPreview, pit: prePost, collect: collectColumns},
+	{id: "S-04", source: fromPreview, pit: prePost, collect: collectDefaults},
+	{id: "S-05", source: fromPreview, pit: prePost, collect: collectConstraints},
+	{id: "S-06", source: fromPreview, pit: prePost, collect: collectIndexes},
+	{id: "S-07", source: fromPreview, pit: prePost, collect: collectInherits},
+	{id: "S-08", source: fromPreview, pit: prePost, collect: collectSequences},
+	{id: "S-09", source: fromPreview, pit: prePost, collect: collectTypes},
+	{id: "S-10", source: fromPreview, pit: prePost, collect: collectTriggersAndPolicies},
+	{id: "S-11", source: fromPreview, pit: prePost, collect: collectViewDeps},
+	{id: "S-12", source: fromPreview, pit: prePost, collect: collectDepends},
+	{id: "S-13", source: fromPreview, pit: prePost, collect: collectProcs},
+	{id: "S-14", source: fromPreview, pit: prePost, collect: collectCastsAndOperators},
 	{id: "S-15", source: fromProdPreferred, pit: preOnly, collect: collectPublications},
-	{id: "S-16", source: fromBaseline, pit: preOnly, collect: collectSettings},
+	{id: "S-16", source: fromPreview, pit: preOnly, collect: collectSettings},
 	{id: "S-17", source: fromProd, pit: preOnly, collect: collectTableStats},
-	{id: "S-18", source: fromBaseline, pit: prePost, collect: collectRoles},
-	{id: "S-19", source: fromBaseline, pit: prePost, collect: collectCollations},
+	{id: "S-18", source: fromPreview, pit: prePost, collect: collectRoles},
+	{id: "S-19", source: fromPreview, pit: prePost, collect: collectCollations},
 }
 
 // wanted reports whether the item should be captured under these options.
@@ -80,7 +80,7 @@ func (i item) wanted(opts CollectOptions) bool {
 	case fromProdPreferred:
 		return opts.Source == SourceProd || !opts.ProdAvailable
 	default:
-		return opts.Source == SourceBaseline
+		return opts.Source == SourcePreview
 	}
 }
 

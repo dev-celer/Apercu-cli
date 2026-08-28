@@ -2,6 +2,7 @@
 package pg_catalog
 
 import (
+	"apercu-cli/helper"
 	"apercu-cli/helper/pg_contract"
 	"time"
 )
@@ -13,8 +14,8 @@ type OID uint32
 type Source string
 
 const (
-	// SourceBaseline is the pre-migration subsetted or anonymized database.
-	SourceBaseline Source = "baseline"
+	// SourcePreview is the subsetted or anonymized database.
+	SourcePreview Source = "preview"
 	// SourceProd is the real production database.
 	SourceProd Source = "prod"
 )
@@ -29,7 +30,7 @@ const (
 
 // Snapshot is one capture. Which tables are populated depends on the source and
 // point in time it was taken at — a production snapshot carries the header,
-// replication state and activity statistics, a baseline snapshot carries the
+// replication state and activity statistics, a preview snapshot carries the
 // schema. Use Collected to tell "not captured" from "captured and empty".
 type Snapshot struct {
 	Source     Source    `json:"source"`
@@ -110,6 +111,10 @@ type Relation struct {
 	TotalBytes     int64  `json:"total_bytes"`
 	PartitionBound string `json:"partition_bound,omitempty"`
 	PartitionKey   string `json:"partition_key,omitempty"`
+}
+
+func (r Relation) RelationName() helper.FullRelationName {
+	return helper.FullRelationName{Schema: r.Namespace, Table: r.Name}
 }
 
 // Column is S-03.

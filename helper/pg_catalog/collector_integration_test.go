@@ -45,6 +45,8 @@ CREATE TABLE orders (
 ALTER TABLE orders ADD CONSTRAINT orders_total_check CHECK (total >= 0) NOT VALID;
 CREATE INDEX orders_open_idx ON orders (status) WHERE status <> 'done';
 ALTER TABLE orders ALTER COLUMN status SET STATISTICS 500;
+-- A validated CHECK that already rules out NULL, which is what lets P-14 skip a scan.
+ALTER TABLE orders ADD CONSTRAINT orders_status_not_null CHECK (status IS NOT NULL);
 
 CREATE TABLE events (id bigint, at timestamptz NOT NULL) PARTITION BY RANGE (at);
 CREATE TABLE events_2025 PARTITION OF events FOR VALUES FROM ('2025-01-01') TO ('2026-01-01');
@@ -55,7 +57,11 @@ CREATE TABLE legacy_child () INHERITS (legacy_parent);
 
 CREATE TYPE mood AS ENUM ('sad', 'ok', 'happy');
 CREATE DOMAIN positive_int AS integer CHECK (VALUE > 0);
-CREATE TABLE profiles (user_id bigint PRIMARY KEY REFERENCES users(id), feeling mood, score positive_int);
+CREATE DOMAIN loose_text AS text;
+CREATE TABLE profiles (user_id bigint PRIMARY KEY REFERENCES users(id), feeling mood, score positive_int, note loose_text);
+
+CREATE TYPE address AS (street text, city text);
+CREATE TABLE places OF address;
 
 CREATE VIEW active_users AS SELECT id, email FROM users;
 CREATE MATERIALIZED VIEW order_totals AS SELECT user_id, sum(total) AS total FROM orders GROUP BY user_id;
@@ -74,6 +80,9 @@ INSERT INTO orders (id, user_id, total, status)
     SELECT i, (i % 500) + 1, i, 'open' FROM generate_series(1, 500) i;
 INSERT INTO events (id, at) SELECT i, '2025-06-01'::timestamptz FROM generate_series(1, 200) i;
 ANALYZE;
+-- Cumulative activity is flushed by the stats collector on its own schedule, so a fixture
+-- taken straight after the load would report a table nothing has ever touched (P-20).
+SELECT pg_stat_force_next_flush();
 `
 
 // startPostgres brings up one PostgreSQL of the given major version and returns a connection to it.
@@ -128,27 +137,27 @@ func collectAndVerify(t *testing.T, db *sql.DB) {
 		require.NoError(t, err)
 	}
 
-	baseline, err := Collect(ctx, db, CollectOptions{Source: SourceBaseline, PIT: PITPre})
+	preview, err := Collect(ctx, db, CollectOptions{Source: SourcePreview, PIT: PITPre})
 	require.NoError(t, err)
 
 	prod, err := Collect(ctx, db, CollectOptions{Source: SourceProd, PIT: PITPre})
 	require.NoError(t, err)
 
-	version := baseline.Header.Version
-	t.Logf("collected against PostgreSQL %s (%d)", version, baseline.Header.ServerVersionNum)
+	version := preview.Header.Version
+	t.Logf("collected against PostgreSQL %s (%d)", version, preview.Header.ServerVersionNum)
 	require.True(t, version.IsSupported(), "unsupported server version %s", version)
 
 	t.Run("header", func(t *testing.T) {
-		assert.NotEmpty(t, baseline.Header.Database)
-		assert.NotEmpty(t, baseline.Header.SearchPath)
-		assert.NotEmpty(t, baseline.Header.TimeZone)
-		assert.False(t, baseline.Header.FromReplica)
+		assert.NotEmpty(t, preview.Header.Database)
+		assert.NotEmpty(t, preview.Header.SearchPath)
+		assert.NotEmpty(t, preview.Header.TimeZone)
+		assert.False(t, preview.Header.FromReplica)
 	})
 
 	t.Run("routing", func(t *testing.T) {
-		// The baseline carries the schema, production carries the activity.
-		assert.True(t, baseline.Has("S-02"))
-		assert.False(t, baseline.Has("S-17"))
+		// The preview carries the schema, production carries the activity.
+		assert.True(t, preview.Has("S-02"))
+		assert.False(t, preview.Has("S-17"))
 		assert.True(t, prod.Has("S-17"))
 		assert.False(t, prod.Has("S-02"))
 		assert.NotEmpty(t, prod.TableStats)
@@ -156,19 +165,19 @@ func collectAndVerify(t *testing.T, db *sql.DB) {
 	})
 
 	t.Run("scope excludes system schemas", func(t *testing.T) {
-		for _, rel := range baseline.Relations {
+		for _, rel := range preview.Relations {
 			assert.NotEqual(t, "information_schema", rel.Namespace)
 			assert.NotContains(t, rel.Namespace, "pg_")
 		}
 	})
 
 	t.Run("inheritance edges", func(t *testing.T) {
-		events, _ := findRelation(baseline, "events")
-		defaultPart, _ := findRelation(baseline, "events_default")
-		legacyParent, _ := findRelation(baseline, "legacy_parent")
+		events, _ := findRelation(preview, "events")
+		defaultPart, _ := findRelation(preview, "events_default")
+		legacyParent, _ := findRelation(preview, "legacy_parent")
 
 		var sawDefault, sawLegacy bool
-		for _, edge := range baseline.Inherits {
+		for _, edge := range preview.Inherits {
 			if edge.Parent == events.OID && edge.Child == defaultPart.OID {
 				sawDefault = true
 				assert.True(t, edge.IsDefaultPartition)
@@ -186,26 +195,26 @@ func collectAndVerify(t *testing.T, db *sql.DB) {
 	})
 
 	t.Run("statistics target normalizes across versions", func(t *testing.T) {
-		orders, ok := findRelation(baseline, "orders")
+		orders, ok := findRelation(preview, "orders")
 		require.True(t, ok)
 
 		// -1 on PG 15/16 and NULL on 17/18 both mean "database default".
-		id, ok := findColumn(baseline, orders.OID, "id")
+		id, ok := findColumn(preview, orders.OID, "id")
 		require.True(t, ok)
 		assert.Nil(t, id.StatsTarget)
 
-		status, ok := findColumn(baseline, orders.OID, "status")
+		status, ok := findColumn(preview, orders.OID, "status")
 		require.True(t, ok)
 		require.NotNil(t, status.StatsTarget)
 		assert.Equal(t, int32(500), *status.StatsTarget)
 	})
 
 	t.Run("constraints", func(t *testing.T) {
-		orders, _ := findRelation(baseline, "orders")
-		users, _ := findRelation(baseline, "users")
+		orders, _ := findRelation(preview, "orders")
+		users, _ := findRelation(preview, "users")
 
 		var check, foreignKey Constraint
-		for _, c := range baseline.Constraints {
+		for _, c := range preview.Constraints {
 			if c.RelID == orders.OID && c.Name == "orders_total_check" {
 				check = c
 			}
@@ -230,7 +239,7 @@ func collectAndVerify(t *testing.T, db *sql.DB) {
 
 		// NOT NULL became a real constraint row in 18. Before that, nullability lives only in S-03.attnotnull.
 		var notNullConstraints, unenforced int
-		for _, c := range baseline.Constraints {
+		for _, c := range preview.Constraints {
 			if c.RelID == users.OID && c.Type == "n" {
 				notNullConstraints++
 			}
@@ -248,11 +257,11 @@ func collectAndVerify(t *testing.T, db *sql.DB) {
 	})
 
 	t.Run("defaults record dependency for user functions", func(t *testing.T) {
-		orders, _ := findRelation(baseline, "orders")
-		code, _ := findColumn(baseline, orders.OID, "code")
+		orders, _ := findRelation(preview, "orders")
+		code, _ := findColumn(preview, orders.OID, "code")
 
 		var userDefined ColumnDefault
-		for _, d := range baseline.Defaults {
+		for _, d := range preview.Defaults {
 			if d.RelID == orders.OID && d.Num == code.Num {
 				userDefined = d
 			}
@@ -264,10 +273,10 @@ func collectAndVerify(t *testing.T, db *sql.DB) {
 	})
 
 	t.Run("indexes", func(t *testing.T) {
-		orders, _ := findRelation(baseline, "orders")
+		orders, _ := findRelation(preview, "orders")
 
 		var partial Index
-		for _, idx := range baseline.Indexes {
+		for _, idx := range preview.Indexes {
 			if idx.RelID != orders.OID {
 				continue
 			}
@@ -283,7 +292,7 @@ func collectAndVerify(t *testing.T, db *sql.DB) {
 
 	t.Run("types and domains", func(t *testing.T) {
 		var mood, domain Type
-		for _, typ := range baseline.Types {
+		for _, typ := range preview.Types {
 			if typ.Namespace == testSchema && typ.Name == "mood" {
 				mood = typ
 			}
@@ -302,7 +311,7 @@ func collectAndVerify(t *testing.T, db *sql.DB) {
 
 		// Reference data is captured whole, built-in types included.
 		var sawBuiltin bool
-		for _, typ := range baseline.Types {
+		for _, typ := range preview.Types {
 			if typ.Namespace == "pg_catalog" && typ.Name == "int8" {
 				sawBuiltin = true
 			}
@@ -311,10 +320,10 @@ func collectAndVerify(t *testing.T, db *sql.DB) {
 	})
 
 	t.Run("triggers exclude internal ones", func(t *testing.T) {
-		orders, _ := findRelation(baseline, "orders")
+		orders, _ := findRelation(preview, "orders")
 
 		names := []string{}
-		for _, trigger := range baseline.Triggers {
+		for _, trigger := range preview.Triggers {
 			if trigger.RelID == orders.OID {
 				names = append(names, trigger.Name)
 			}
@@ -324,11 +333,11 @@ func collectAndVerify(t *testing.T, db *sql.DB) {
 	})
 
 	t.Run("view dependencies keep the column", func(t *testing.T) {
-		users, _ := findRelation(baseline, "users")
-		view, _ := findRelation(baseline, "active_users")
+		users, _ := findRelation(preview, "users")
+		view, _ := findRelation(preview, "active_users")
 
 		var sawColumnEdge bool
-		for _, dep := range baseline.ViewDeps {
+		for _, dep := range preview.ViewDeps {
 			if dep.DependentRelID == view.OID && dep.ReferencedRelID == users.OID && dep.ReferencedAttNum > 0 {
 				sawColumnEdge = true
 			}
@@ -336,20 +345,40 @@ func collectAndVerify(t *testing.T, db *sql.DB) {
 		assert.True(t, sawColumnEdge, "The view dependencies edge should be in the snapshot")
 	})
 
+	t.Run("production measures its own sizes", func(t *testing.T) {
+		var users, events TableStat
+		for _, stat := range prod.TableStats {
+			switch {
+			case stat.Namespace == testSchema && stat.Name == "users":
+				users = stat
+			case stat.Namespace == testSchema && stat.Name == "events":
+				events = stat
+			}
+		}
+
+		require.NotZero(t, users.RelID)
+		assert.Positive(t, users.HeapBytes)
+		assert.Greater(t, users.TotalBytes, users.HeapBytes, "the total folds in the index and the toast")
+
+		// pg_stat_user_tables carries partitioned parents, and they report 0 here too.
+		require.NotZero(t, events.RelID)
+		assert.Zero(t, events.TotalBytes)
+	})
+
 	t.Run("collations", func(t *testing.T) {
-		labels, ok := findRelation(baseline, "labels")
+		labels, ok := findRelation(preview, "labels")
 		require.True(t, ok)
-		name, _ := findColumn(baseline, labels.OID, "name")
-		weight, _ := findColumn(baseline, labels.OID, "weight")
+		name, _ := findColumn(preview, labels.OID, "name")
+		weight, _ := findColumn(preview, labels.OID, "weight")
 
 		byOID := map[OID]Collation{}
-		for _, c := range baseline.Collations {
+		for _, c := range preview.Collations {
 			byOID[c.OID] = c
 		}
 		// Reference data, captured whole: the built-ins a user column can point at are there.
-		assert.NotEmpty(t, baseline.Collations)
+		assert.NotEmpty(t, preview.Collations)
 		var sawBuiltin bool
-		for _, c := range baseline.Collations {
+		for _, c := range preview.Collations {
 			if c.Namespace == "pg_catalog" && c.Name == "C" {
 				sawBuiltin = true
 			}
@@ -366,7 +395,7 @@ func collectAndVerify(t *testing.T, db *sql.DB) {
 		assert.Zero(t, weight.Collation)
 
 		var index Index
-		for _, i := range baseline.Indexes {
+		for _, i := range preview.Indexes {
 			if i.RelID == labels.OID {
 				index = i
 			}
@@ -381,7 +410,7 @@ func collectAndVerify(t *testing.T, db *sql.DB) {
 
 	t.Run("relkinds", func(t *testing.T) {
 		kinds := map[string]bool{}
-		for _, rel := range baseline.Relations {
+		for _, rel := range preview.Relations {
 			if rel.Namespace == testSchema {
 				kinds[rel.Kind] = true
 			}
@@ -392,18 +421,18 @@ func collectAndVerify(t *testing.T, db *sql.DB) {
 	})
 
 	t.Run("reference data", func(t *testing.T) {
-		assert.NotEmpty(t, baseline.Procs)
-		assert.NotEmpty(t, baseline.Casts)
-		assert.NotEmpty(t, baseline.Operators)
-		assert.NotEmpty(t, baseline.Settings)
-		assert.NotEmpty(t, baseline.Roles)
+		assert.NotEmpty(t, preview.Procs)
+		assert.NotEmpty(t, preview.Casts)
+		assert.NotEmpty(t, preview.Operators)
+		assert.NotEmpty(t, preview.Settings)
+		assert.NotEmpty(t, preview.Roles)
 	})
 
 	if os.Getenv("APERCU_UPDATE_FIXTURES") == "" {
 		return
 	}
 	require.NoError(t, os.MkdirAll("testdata", 0o755))
-	for _, snapshot := range []*Snapshot{baseline, prod} {
+	for _, snapshot := range []*Snapshot{preview, prod} {
 		path := filepath.Join("testdata", fmt.Sprintf("snapshot_pg%s_%s.json.gz", version, snapshot.Source))
 		require.NoError(t, snapshot.WriteJSON(path))
 		t.Logf("wrote fixture %s", path)

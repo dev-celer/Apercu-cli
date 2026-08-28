@@ -53,32 +53,32 @@ func TestFixturesAreUsable(t *testing.T) {
 		t.Run(fmt.Sprintf("pg%d", version), func(t *testing.T) {
 			t.Parallel()
 
-			baseline := loadFixture(t, version, SourceBaseline)
-			assert.Equal(t, version, int(baseline.Header.Version))
-			assert.Equal(t, SourceBaseline, baseline.Source)
-			assert.Equal(t, PITPre, baseline.PIT)
+			preview := loadFixture(t, version, SourcePreview)
+			assert.Equal(t, version, int(preview.Header.Version))
+			assert.Equal(t, SourcePreview, preview.Source)
+			assert.Equal(t, PITPre, preview.PIT)
 
-			assert.NotEmpty(t, baseline.Relations)
-			assert.NotEmpty(t, baseline.Columns)
-			assert.NotEmpty(t, baseline.Constraints)
-			assert.NotEmpty(t, baseline.Procs, "volatility lookups need the whole of pg_proc")
-			assert.NotEmpty(t, baseline.Casts, "binary coercibility needs the whole of pg_cast")
-			assert.NotEmpty(t, baseline.Operators)
-			assert.NotEmpty(t, baseline.Collations, "collation resolution needs the whole of pg_collation")
+			assert.NotEmpty(t, preview.Relations)
+			assert.NotEmpty(t, preview.Columns)
+			assert.NotEmpty(t, preview.Constraints)
+			assert.NotEmpty(t, preview.Procs, "volatility lookups need the whole of pg_proc")
+			assert.NotEmpty(t, preview.Casts, "binary coercibility needs the whole of pg_cast")
+			assert.NotEmpty(t, preview.Operators)
+			assert.NotEmpty(t, preview.Collations, "collation resolution needs the whole of pg_collation")
 
-			for _, index := range baseline.Indexes {
+			for _, index := range preview.Indexes {
 				assert.Len(t, index.Collations, len(index.Columns),
 					"index %d must carry one collation per column", index.IndexRelID)
 			}
 
-			events, ok := findRelation(baseline, "events")
+			events, ok := findRelation(preview, "events")
 			require.True(t, ok)
 			assert.Equal(t, "p", events.Kind)
 			assert.Zero(t, events.TotalBytes, "a partitioned parent has no size of its own")
 
 			// The version-dependent shape of a NOT NULL, which P-14 reconciles.
 			notNull := 0
-			for _, c := range baseline.Constraints {
+			for _, c := range preview.Constraints {
 				if c.Type == "n" {
 					notNull++
 				}
@@ -92,7 +92,7 @@ func TestFixturesAreUsable(t *testing.T) {
 			prod := loadFixture(t, version, SourceProd)
 			assert.Equal(t, SourceProd, prod.Source)
 			assert.NotEmpty(t, prod.TableStats)
-			assert.Empty(t, prod.Relations, "the schema comes from the baseline")
+			assert.Empty(t, prod.Relations, "the schema comes from the preview")
 		})
 	}
 }

@@ -26,33 +26,33 @@ func TestItemRouting(t *testing.T) {
 		opts     CollectOptions
 		expected bool
 	}{
-		// Schema items live on the baseline and are captured on both sides so the diff has something to compare.
-		{name: "relations from baseline pre", itemID: "S-02",
-			opts: CollectOptions{Source: SourceBaseline, PIT: PITPre}, expected: true},
-		{name: "relations from baseline post", itemID: "S-02",
-			opts: CollectOptions{Source: SourceBaseline, PIT: PITPost}, expected: true},
+		// Schema items live on the preview and are captured on both sides so the diff has something to compare.
+		{name: "relations from preview pre", itemID: "S-02",
+			opts: CollectOptions{Source: SourcePreview, PIT: PITPre}, expected: true},
+		{name: "relations from preview post", itemID: "S-02",
+			opts: CollectOptions{Source: SourcePreview, PIT: PITPost}, expected: true},
 		{name: "relations not from prod", itemID: "S-02",
 			opts: CollectOptions{Source: SourceProd, PIT: PITPre}, expected: false},
 
 		// Activity statistics only mean something on production.
 		{name: "stats from prod", itemID: "S-17",
 			opts: CollectOptions{Source: SourceProd, PIT: PITPre}, expected: true},
-		{name: "stats never from baseline", itemID: "S-17",
-			opts: CollectOptions{Source: SourceBaseline, PIT: PITPre, ProdAvailable: false}, expected: false},
+		{name: "stats never from preview", itemID: "S-17",
+			opts: CollectOptions{Source: SourcePreview, PIT: PITPre, ProdAvailable: false}, expected: false},
 
-		// Publications prefer production but fall back to the baseline when there is no production snapshot coming.
+		// Publications prefer production but fall back to the preview when there is no production snapshot coming.
 		{name: "publications from prod", itemID: "S-15",
 			opts: CollectOptions{Source: SourceProd, PIT: PITPre}, expected: true},
-		{name: "publications skipped on baseline when prod will provide them", itemID: "S-15",
-			opts: CollectOptions{Source: SourceBaseline, PIT: PITPre, ProdAvailable: true}, expected: false},
-		{name: "publications fall back to baseline without prod", itemID: "S-15",
-			opts: CollectOptions{Source: SourceBaseline, PIT: PITPre, ProdAvailable: false}, expected: true},
+		{name: "publications skipped on preview when prod will provide them", itemID: "S-15",
+			opts: CollectOptions{Source: SourcePreview, PIT: PITPre, ProdAvailable: true}, expected: false},
+		{name: "publications fall back to preview without prod", itemID: "S-15",
+			opts: CollectOptions{Source: SourcePreview, PIT: PITPre, ProdAvailable: false}, expected: true},
 
 		// Pre-only items are not repeated after the migration.
 		{name: "settings not captured post", itemID: "S-16",
-			opts: CollectOptions{Source: SourceBaseline, PIT: PITPost}, expected: false},
+			opts: CollectOptions{Source: SourcePreview, PIT: PITPost}, expected: false},
 		{name: "roles captured post", itemID: "S-18",
-			opts: CollectOptions{Source: SourceBaseline, PIT: PITPost}, expected: true},
+			opts: CollectOptions{Source: SourcePreview, PIT: PITPost}, expected: true},
 	}
 
 	for _, test := range tests {
@@ -116,7 +116,7 @@ func TestFixtureRoundTrip(t *testing.T) {
 	t.Parallel()
 
 	original := &Snapshot{
-		Source:     SourceBaseline,
+		Source:     SourcePreview,
 		PIT:        PITPre,
 		CapturedAt: time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC),
 		Collected:  []string{"S-00", "S-02", "S-03"},
