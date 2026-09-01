@@ -19,6 +19,7 @@ LDFLAGS        ?= -s -w
 # Package selection.
 PKGS           ?= ./...
 CATALOG_PKG    := ./helper/pg_catalog/
+PARSE_PKG      := ./helper/pg_parse/
 
 INTEGRATION_TIMEOUT ?= 30m
 
@@ -72,6 +73,11 @@ fixtures:
 	APERCU_UPDATE_FIXTURES=1 $(GO) test $(GOFLAGS) -tags integration \
 		-timeout $(INTEGRATION_TIMEOUT) -count=1 -v \
 		-run TestCollectAgainstServer $(CATALOG_PKG)
+
+## golden: regenerate helper/pg_parse/testdata/corpus.golden.yaml, the expected parser IR (no docker)
+golden:
+	APERCU_UPDATE_FIXTURES=1 $(GO) test $(GOFLAGS) -count=1 \
+		-run TestCorpusMatchesGolden $(PARSE_PKG)
 
 ## fmt: gofmt the tree in place
 fmt:

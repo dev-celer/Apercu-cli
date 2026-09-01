@@ -8,12 +8,14 @@ require (
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/kislerdm/neon-sdk-go v0.16.0
 	github.com/lib/pq v1.12.0
+	github.com/pganalyze/pg_query_go/v6 v6.2.2
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.44.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.44.0
 	go.yaml.in/yaml/v3 v3.0.4
 	golang.org/x/oauth2 v0.36.0
+	google.golang.org/protobuf v1.36.12
 )
 
 require (
