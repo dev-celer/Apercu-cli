@@ -1233,6 +1233,10 @@
 - rule: R-TX-COMMIT
   sql: COMMIT
   command: COMMIT
+- rule: R-TX-COMMIT-CHAIN
+  sql: COMMIT AND CHAIN
+  command: COMMIT
+  flags: [chain]
 - rule: R-TX-ROLLBACK
   sql: ROLLBACK TO SAVEPOINT sp
   command: ROLLBACK TO SAVEPOINT

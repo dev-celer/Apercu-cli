@@ -325,6 +325,7 @@ func flagNames(flags Flags) []string {
 		{"nowait", flags.Nowait},
 		{"with_data", flags.WithData},
 		{"restart_identity", flags.RestartIdentity},
+		{"chain", flags.Chain},
 	} {
 		if flag.on {
 			set = append(set, flag.name)

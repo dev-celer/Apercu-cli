@@ -91,6 +91,8 @@ type Flags struct {
 	WithData bool
 	// RestartIdentity is TRUNCATE … RESTART IDENTITY.
 	RestartIdentity bool
+	// Chain is the AND CHAIN of COMMIT and ROLLBACK, which ends the transaction and starts another one
+	Chain bool
 }
 
 // Option is one entry of a parenthesised option list: a storage parameter, an attribute option, a VACUUM option.

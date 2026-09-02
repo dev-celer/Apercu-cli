@@ -126,6 +126,7 @@ func normalizeTransaction(stmt *pg_query.TransactionStmt, s Statement) Statement
 	}
 
 	s.Options = options(stmt.Options)
+	s.Flags.Chain = stmt.Chain
 	if stmt.SavepointName != "" {
 		s.Subcommands = []Subcommand{{Kind: SubUnknown, Name: stmt.SavepointName}}
 	}
