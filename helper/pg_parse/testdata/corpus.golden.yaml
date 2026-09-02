@@ -1249,14 +1249,14 @@
   sql: SET LOCAL lock_timeout = '5s'
   command: SET LOCAL
   subcommands:
-    - kind: UNKNOWN
+    - kind: SET VARIABLE
       name: lock_timeout
       value: 5s
 - rule: R-TX-RESET
   sql: RESET ALL
   command: RESET ALL
   subcommands:
-    - kind: UNKNOWN
+    - kind: RESET VARIABLE
 - rule: G-01-SETEXPR
   sql: ALTER TABLE t ALTER COLUMN c SET EXPRESSION AS (a + 1)
   command: ALTER TABLE

@@ -75,6 +75,12 @@ const (
 	// Foreign-table clauses.
 	SubGenericOptions
 	SubAlterColumnGenericOptions
+
+	// SET / RESET statement forms.
+	SubSetVariable
+	SubResetVariable
+	SubSetVariableCurrent
+	SubSetTransaction
 )
 
 var subKindNames = map[SubKind]string{
@@ -135,6 +141,10 @@ var subKindNames = map[SubKind]string{
 	SubRenameEnumValue:           "RENAME VALUE",
 	SubGenericOptions:            "OPTIONS",
 	SubAlterColumnGenericOptions: "ALTER COLUMN OPTIONS",
+	SubSetVariable:               "SET VARIABLE",
+	SubResetVariable:             "RESET VARIABLE",
+	SubSetVariableCurrent:        "SET VARIABLE FROM CURRENT",
+	SubSetTransaction:            "SET TRANSACTION",
 }
 
 func (k SubKind) String() string {

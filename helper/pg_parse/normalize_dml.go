@@ -132,21 +132,36 @@ func normalizeTransaction(stmt *pg_query.TransactionStmt, s Statement) Statement
 	return s
 }
 
-// normalizeVariableSet is R-TX-SET and R-TX-RESET, which feed C-01, C-02, C-04 and C-05. The
-// value is kept as written; interpreting it is the session context's job, not the parser's.
+// normalizeVariableSet handle the SET / RESET variables statement.
 func normalizeVariableSet(stmt *pg_query.VariableSetStmt, s Statement) Statement {
-	sub := Subcommand{Kind: SubUnknown, Name: stmt.Name}
+	sub := Subcommand{Kind: SubSetVariable, Name: stmt.Name}
 	sub.Value = strings.Join(variableValues(stmt.Args), ", ")
 
 	switch stmt.Kind {
 	case pg_query.VariableSetKind_VAR_RESET:
 		s.Command = "RESET"
+		sub.Kind = SubResetVariable
 	case pg_query.VariableSetKind_VAR_RESET_ALL:
 		s.Command = "RESET ALL"
+		sub.Kind = SubResetVariable
+	case pg_query.VariableSetKind_VAR_SET_DEFAULT:
+		s.Command = "SET"
+		if stmt.IsLocal {
+			s.Command = "SET LOCAL"
+		}
+		sub.Kind = SubResetVariable
 	default:
 		s.Command = "SET"
 		if stmt.IsLocal {
 			s.Command = "SET LOCAL"
+		}
+		switch stmt.Kind {
+		case pg_query.VariableSetKind_VAR_SET_CURRENT:
+			sub.Kind = SubSetVariableCurrent
+		case pg_query.VariableSetKind_VAR_SET_MULTI:
+			// SET TRANSACTION / SET SESSION CHARACTERISTICS. The grammar files the modes under a
+			// parameter named TRANSACTION, which is not a GUC anything tracks.
+			sub.Kind = SubSetTransaction
 		}
 	}
 	s.Subcommands = []Subcommand{sub}

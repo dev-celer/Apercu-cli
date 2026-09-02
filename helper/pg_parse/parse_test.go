@@ -312,3 +312,39 @@ func TestPartitionByMakesTheNewTablePartitioned(t *testing.T) {
 	require.NotEmpty(t, sub.Relations)
 	assert.Equal(t, pg_contract.RelationKindPartitionedTable, sub.Relations[0].Kind)
 }
+
+// TestVariableSetFormsAreDistinct covers what the session context branches on: "SET x = v" writes a
+// value, "SET x TO DEFAULT" and "RESET x" restore the P-19 baseline, and the LOCAL half of the
+// command says whether the change survives COMMIT.
+func TestVariableSetFormsAreDistinct(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		sql     string
+		command pg_contract.Command
+		kind    SubKind
+		name    string
+		value   string
+	}{
+		{"SET search_path = a, b", "SET", SubSetVariable, "search_path", "a, b"},
+		{"SET SESSION lock_timeout = '5s'", "SET", SubSetVariable, "lock_timeout", "5s"},
+		{"SET LOCAL lock_timeout = '5s'", "SET LOCAL", SubSetVariable, "lock_timeout", "5s"},
+		{"SET search_path TO DEFAULT", "SET", SubResetVariable, "search_path", ""},
+		{"SET LOCAL search_path TO DEFAULT", "SET LOCAL", SubResetVariable, "search_path", ""},
+		{"RESET search_path", "RESET", SubResetVariable, "search_path", ""},
+		{"RESET ALL", "RESET ALL", SubResetVariable, "", ""},
+		{"SET search_path FROM CURRENT", "SET", SubSetVariableCurrent, "search_path", ""},
+		{"SET TRANSACTION ISOLATION LEVEL SERIALIZABLE", "SET", SubSetTransaction, "TRANSACTION", ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.sql, func(t *testing.T) {
+			statement := ParseOne(tc.sql)
+			require.Len(t, statement.Subcommands, 1)
+			assert.Equal(t, tc.command, statement.Command)
+			assert.Equal(t, tc.kind, statement.Subcommands[0].Kind)
+			assert.Equal(t, tc.name, statement.Subcommands[0].Name)
+			assert.Equal(t, tc.value, statement.Subcommands[0].Value)
+		})
+	}
+}
