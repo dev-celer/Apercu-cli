@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"apercu-cli/helper/pg_contract"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -293,4 +294,21 @@ func TestExclusionKeepsExpressionElements(t *testing.T) {
 	mixed := constraintOf(t, ParseOne("ALTER TABLE t ADD CONSTRAINT c EXCLUDE USING gist (room WITH =, tsrange(a, b) WITH &&)"))
 	assert.Equal(t, []string{"room"}, mixed.Columns)
 	assert.Len(t, mixed.KeyExprs, 1)
+}
+
+func TestPartitionByMakesTheNewTablePartitioned(t *testing.T) {
+	t.Parallel()
+
+	plain := ParseOne("CREATE TABLE t (a int)")
+	require.Len(t, plain.Relations, 1)
+	assert.Equal(t, pg_contract.RelationKindTable, plain.Relations[0].Kind)
+
+	parted := ParseOne("CREATE TABLE t (a int) PARTITION BY RANGE (a)")
+	require.Len(t, parted.Relations, 1)
+	assert.Equal(t, pg_contract.RelationKindPartitionedTable, parted.Relations[0].Kind)
+
+	// A sub-partitioned child is both a partition and a parent, and R-AT-001 reads the parent half.
+	sub := ParseOne("CREATE TABLE c PARTITION OF p FOR VALUES FROM (1) TO (2) PARTITION BY RANGE (b)")
+	require.NotEmpty(t, sub.Relations)
+	assert.Equal(t, pg_contract.RelationKindPartitionedTable, sub.Relations[0].Kind)
 }

@@ -71,7 +71,12 @@ func normalizeCreateTable(stmt *pg_query.CreateStmt, s Statement) Statement {
 	// For shim attachFeatures
 	s.featureDepth = 1
 
-	s.Relations = []RelationRef{{Name: relationRef(stmt.Relation).Name, Kind: pg_contract.RelationKindTable}}
+	// PARTITION BY makes the new table a partitioned parent
+	kind := pg_contract.RelationKindTable
+	if stmt.Partspec != nil {
+		kind = pg_contract.RelationKindPartitionedTable
+	}
+	s.Relations = []RelationRef{{Name: relationRef(stmt.Relation).Name, Kind: kind}}
 
 	for _, element := range stmt.TableElts {
 		switch element.GetNode().(type) {
@@ -104,14 +109,14 @@ func normalizeCreateTable(stmt *pg_query.CreateStmt, s Statement) Statement {
 	}
 
 	// PARTITION OF and INHERITS share the parent list, only a partition bound tells them apart.
-	kind := SubAddInherit
+	parentKind := SubAddInherit
 	if stmt.Partbound != nil {
-		kind = SubAttachPartition
+		parentKind = SubAttachPartition
 	}
 	for _, parent := range stmt.InhRelations {
 		if rv, ok := parent.GetNode().(*pg_query.Node_RangeVar); ok {
 			ref := relationRef(rv.RangeVar)
-			sub := Subcommand{Kind: kind, Relations: []RelationRef{ref}, Name: ref.Name.Table}
+			sub := Subcommand{Kind: parentKind, Relations: []RelationRef{ref}, Name: ref.Name.Table}
 			if stmt.Partbound != nil && stmt.Partbound.IsDefault {
 				sub.Value = "DEFAULT"
 			}

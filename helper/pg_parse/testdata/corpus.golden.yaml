@@ -869,6 +869,25 @@
       value: DEFAULT
       relations:
         - table: p
+- rule: R-TB-CREATE-PARTBY
+  sql: CREATE TABLE c (a int PRIMARY KEY, b date) PARTITION BY RANGE (date)
+  command: CREATE TABLE
+  relations:
+    - table: c
+      kind: PARTITIONED_TABLE
+  subcommands:
+    - kind: ADD COLUMN
+      name: a
+      column:
+        name: a
+        type: pg_catalog.int4
+        constraints:
+          - type: PRIMARY KEY
+    - kind: ADD COLUMN
+      name: b
+      column:
+        name: b
+        type: date
 - rule: R-TB-CREATE-INHERITS
   sql: CREATE TABLE c (a int) INHERITS (p)
   command: CREATE TABLE
