@@ -335,6 +335,11 @@ func (c *Catalog) SearchPath() []string {
 	return ParseSearchPath(value, c.pre.Header.User)
 }
 
+// SnapshotUser is the role the preview was captured as.
+func (c *Catalog) SnapshotUser() string {
+	return c.pre.Header.User
+}
+
 // ParseSearchPath splits a search_path setting into the schemas it names, substituting
 // "$user" with the given user and dropping it when there is none.
 func ParseSearchPath(value, user string) []string {

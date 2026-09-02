@@ -64,11 +64,25 @@ func RelationKindFromRelkind(relkind string) RelationKind {
 	return relkinds[relkind[0]]
 }
 
+// relkindOf is relkinds inverted, keyed on RelationKind and giving a string.
+var relkindOf = func() map[RelationKind]string {
+	out := make(map[RelationKind]string, len(relkinds))
+	for relkind, kind := range relkinds {
+		out[kind] = string(relkind)
+	}
+	return out
+}()
+
 func (k RelationKind) String() string {
 	if name, ok := relationKindNames[k]; ok {
 		return name
 	}
 	return "UNKNOWN"
+}
+
+// Relkind is the pg_class.relkind for this kind, empty for RelationKindUnknown.
+func (k RelationKind) Relkind() string {
+	return relkindOf[k]
 }
 
 // IsTable reports whether if the relation is a table, partitioned parents included.
