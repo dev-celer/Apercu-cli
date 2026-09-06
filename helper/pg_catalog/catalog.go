@@ -30,6 +30,7 @@ type Catalog struct {
 
 	relations  relationIndex
 	types      typeIndex
+	names      nameIndex
 	settings   map[string]Setting
 	tableStats map[helper.FullRelationName]TableStat // Table usage statistics from the production database.
 }
@@ -92,6 +93,7 @@ func NewCatalog(opts CatalogOptions) (*Catalog, error) {
 
 	c.relations.build(opts.Pre)
 	c.types.build(opts.Pre)
+	c.names.build(opts.Pre, opts.Post)
 
 	rawProdSize := map[helper.FullRelationName]int64{}
 	if opts.Prod != nil {
