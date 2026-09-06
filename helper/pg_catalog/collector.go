@@ -67,6 +67,7 @@ var items = []item{
 	{id: "S-17", source: fromProd, pit: preOnly, collect: collectTableStats},
 	{id: "S-18", source: fromPreview, pit: prePost, collect: collectRoles},
 	{id: "S-19", source: fromPreview, pit: prePost, collect: collectCollations},
+	{id: "S-20", source: fromPreview, pit: prePost, collect: collectTablespaces},
 }
 
 // wanted reports whether the item should be captured under these options.
@@ -136,13 +137,15 @@ const headerQuery = `
 SELECT current_setting('server_version_num')::int AS server_version_num,
        current_database(), current_user, current_setting('search_path') AS search_path,
        current_setting('TimeZone') AS timezone,
-       pg_is_in_recovery() AS from_replica`
+       pg_is_in_recovery() AS from_replica,
+       (SELECT d.dattablespace FROM pg_database d WHERE d.datname = current_database()) AS default_tablespace`
 
 // collectHeader is S-00.
 func collectHeader(ctx context.Context, tx *sql.Tx, snapshot *Snapshot) error {
 	h := Header{}
 	err := tx.QueryRowContext(ctx, headerQuery).Scan(
 		&h.ServerVersionNum, &h.Database, &h.User, &h.SearchPath, &h.TimeZone, &h.FromReplica,
+		&h.DefaultTablespace,
 	)
 	if err != nil {
 		return fmt.Errorf("Failed to collect snapshot item S-00: %v", err)

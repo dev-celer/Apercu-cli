@@ -67,6 +67,7 @@ type Snapshot struct {
 	Roles           []Role           `json:"roles"`            // S-18
 	RelACLs         []RelACL         `json:"rel_acls"`         // S-18
 	Collations      []Collation      `json:"collations"`       // S-19
+	Tablespaces     []Tablespace     `json:"tablespaces"`      // S-20
 }
 
 // Header is S-00. General information about the server / the database.
@@ -80,6 +81,8 @@ type Header struct {
 	TimeZone         string              `json:"timezone"`
 	// FromReplica is pg_is_in_recovery(). Activity statistics (S-17) are meaningless when it is true.
 	FromReplica bool `json:"from_replica"`
+	// DefaultTablespace is the default tablespace, OID link to Tablespace
+	DefaultTablespace OID `json:"default_tablespace"`
 }
 
 // Schema is S-01.
@@ -115,6 +118,12 @@ type Relation struct {
 
 func (r Relation) RelationName() helper.FullRelationName {
 	return helper.FullRelationName{Schema: r.Namespace, Table: r.Name}
+}
+
+// Tablespace is S-20: the list of all tablespaces with their name and OID.
+type Tablespace struct {
+	OID  OID    `json:"oid"`
+	Name string `json:"name"`
 }
 
 // Column is S-03.

@@ -589,3 +589,16 @@ func collectCollations(ctx context.Context, tx *sql.Tx, snapshot *Snapshot) erro
 	snapshot.Collations = rows
 	return err
 }
+
+const tablespacesQuery = `SELECT s.oid, s.spcname FROM pg_tablespace s`
+
+// collectTablespaces is S-20.
+func collectTablespaces(ctx context.Context, tx *sql.Tx, snapshot *Snapshot) error {
+	rows, err := queryRows(ctx, tx, tablespacesQuery, func(r *sql.Rows) (Tablespace, error) {
+		s := Tablespace{}
+		err := r.Scan(&s.OID, &s.Name)
+		return s, err
+	})
+	snapshot.Tablespaces = rows
+	return err
+}
