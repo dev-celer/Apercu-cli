@@ -99,7 +99,8 @@ func (f Finding) MaxOpKind() OpKind {
 type Error struct {
 	Code    Code   `json:"code" yaml:"code"`
 	Message string `json:"message" yaml:"message"`
-	// Versions is the range on which the error appear. Only used if the real version could not be determined from the production database
+	// Versions is the range on which the error disappear.
+	// Only used if the real version could not be determined from the production database
 	Versions VersionRange `json:"versions" yaml:"versions"`
 }
 
