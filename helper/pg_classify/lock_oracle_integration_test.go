@@ -1,0 +1,466 @@
+//go:build integration
+
+package pg_classify
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"slices"
+	"strings"
+	"sync"
+	"testing"
+
+	"apercu-cli/helper"
+	"apercu-cli/helper/pg_catalog"
+	"apercu-cli/helper/pg_contract"
+	"apercu-cli/helper/pg_parse"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// oracleSchema is the schema the lock oracle runs against.
+const oracleSchema = "apercu_lock_oracle"
+
+const oracleDDL = `
+CREATE SCHEMA ` + oracleSchema + `;
+SET search_path TO ` + oracleSchema + `;
+
+CREATE TABLE users (id bigint PRIMARY KEY, email text NOT NULL, created_at timestamptz);
+CREATE TABLE orders (
+    id      bigint PRIMARY KEY,
+    user_id bigint REFERENCES users(id),
+    total   numeric(10,2),
+    status  text,
+    code    text
+);
+CREATE INDEX orders_status_idx ON orders (status);
+CREATE UNIQUE INDEX orders_code_uidx ON orders (code);
+ALTER TABLE orders ADD CONSTRAINT orders_status_nn CHECK (status IS NOT NULL);
+ALTER TABLE orders ADD CONSTRAINT orders_total_nv CHECK (total >= 0) NOT VALID;
+
+CREATE FUNCTION next_code() RETURNS text LANGUAGE sql VOLATILE AS $$ SELECT 'c' $$;
+CREATE FUNCTION bump() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$;
+CREATE TRIGGER orders_bump BEFORE UPDATE ON orders FOR EACH ROW EXECUTE FUNCTION bump();
+
+CREATE DOMAIN positive_int AS integer CHECK (VALUE > 0);
+CREATE DOMAIN loose_text AS text;
+
+-- events has no default partition, so a concurrent detach is allowed on it.
+CREATE TABLE events (id bigint NOT NULL, at timestamptz NOT NULL) PARTITION BY RANGE (at);
+CREATE TABLE events_2025 PARTITION OF events FOR VALUES FROM ('2025-01-01') TO ('2026-01-01');
+CREATE TABLE events_2026 (id bigint NOT NULL, at timestamptz NOT NULL, CONSTRAINT events_id_check CHECK (id > 0));
+ALTER TABLE events ADD CONSTRAINT events_id_check CHECK (id > 0);
+
+-- parted has one, which is what R-AT-ATTACH rescans and R-AT-DETACH-CONC refuses to work with.
+CREATE TABLE parted (id bigint NOT NULL) PARTITION BY RANGE (id);
+CREATE TABLE parted_1 PARTITION OF parted FOR VALUES FROM (1) TO (100);
+CREATE TABLE parted_default PARTITION OF parted DEFAULT;
+CREATE TABLE parted_2 (id bigint NOT NULL);
+
+CREATE TABLE legacy_parent (id bigint NOT NULL);
+CREATE TABLE legacy_child () INHERITS (legacy_parent);
+CREATE TABLE orphan (id bigint NOT NULL, CONSTRAINT legacy_id_check CHECK (id > 0));
+ALTER TABLE legacy_parent ADD CONSTRAINT legacy_id_check CHECK (id > 0);
+
+-- A generated column of each storage kind: R-AT-SETEXPR and R-AT-DROPEXPR branch on it, and the
+-- virtual half of the branch exists only on 18 ⟨oracleDDL18⟩.
+CREATE TABLE computed (
+    id           bigint PRIMARY KEY,
+    base         numeric(10,2),
+    stored_total numeric(10,2) GENERATED ALWAYS AS (base * 2) STORED
+);
+
+CREATE VIEW active_users AS SELECT id, email FROM users;
+
+-- A second role, so OWNER TO actually changes something: PostgreSQL returns early when the
+-- new owner is the one already recorded, and then locks nothing at all.
+CREATE ROLE apercu_lock_oracle_owner;
+
+INSERT INTO users SELECT i, 'u' || i, now() FROM generate_series(1, 200) i;
+INSERT INTO orders SELECT i, (i % 200) + 1, i, 'open', 'c' || i FROM generate_series(1, 200) i;
+INSERT INTO events SELECT i, '2025-06-01'::timestamptz FROM generate_series(1, 100) i;
+INSERT INTO parted SELECT i FROM generate_series(1, 99) i;
+INSERT INTO computed (id, base) SELECT i, i FROM generate_series(1, 200) i;
+ANALYZE;
+`
+
+// oracleDDL18 is the part of the fixture only PostgreSQL 18 can hold.
+const oracleDDL18 = `
+SET search_path TO ` + oracleSchema + `;
+ALTER TABLE computed ADD COLUMN virtual_total numeric(10,2) GENERATED ALWAYS AS (base * 3) VIRTUAL;
+`
+
+// oracleTablespace is created out of band: CREATE TABLESPACE needs a directory that already
+// exists and belongs to the server's own user, and it cannot run inside a transaction block, so it
+// is neither part of oracleDDL nor something a plain fixture can carry.
+const oracleTablespace = "apercu_lock_oracle_ts"
+
+var oracleTablespaceSetup = []string{
+	`COPY (SELECT 1) TO PROGRAM 'mkdir -p /tmp/` + oracleTablespace + ` && chmod 700 /tmp/` + oracleTablespace + `'`,
+	`CREATE TABLESPACE ` + oracleTablespace + ` LOCATION '/tmp/` + oracleTablespace + `'`,
+}
+
+// oracleTablespaceDDL puts one relation of every relkind "ALL IN TABLESPACE" can select into that
+// tablespace, plus a partitioned parent whose partition stays behind, so a rule that recursed or
+// moved the wrong relkind would be caught.
+const oracleTablespaceDDL = `
+SET search_path TO ` + oracleSchema + `;
+CREATE TABLE ts_table (id bigint PRIMARY KEY) TABLESPACE ` + oracleTablespace + `;
+CREATE INDEX ts_table_idx ON ts_table (id) TABLESPACE ` + oracleTablespace + `;
+CREATE MATERIALIZED VIEW ts_matview TABLESPACE ` + oracleTablespace + ` AS SELECT id FROM ts_table;
+CREATE TABLE ts_parted (id bigint) PARTITION BY RANGE (id) TABLESPACE ` + oracleTablespace + `;
+CREATE TABLE ts_parted_1 PARTITION OF ts_parted FOR VALUES FROM (1) TO (100) TABLESPACE pg_default;
+`
+
+// lockScript is one statement replayed against a live server.
+type lockScript struct {
+	sql string
+	// since is the oldest server that accepts the statement at all. Older ones never run it.
+	since pg_contract.Version
+	// refusedOn lists the versions the server is expected to reject the statement on, which is
+	// what the classifier's REJECTED branch predicts. The two have to agree, version by version.
+	refusedOn []pg_contract.Version
+	// outsideTransaction runs the statement with no BEGIN, for the ones that cannot sit in a
+	// block. No lock can be read back for those, so only the refusal is compared.
+	outsideTransaction bool
+}
+
+func (s lockScript) runsOn(version pg_contract.Version) bool {
+	return s.since == pg_contract.VersionUnknown || version >= s.since
+}
+
+func (s lockScript) refused(version pg_contract.Version) bool {
+	return slices.Contains(s.refusedOn, version)
+}
+
+// The version sets the refusals below are drawn from.
+var (
+	onEveryVersion = []pg_contract.Version{15, 16, 17, 18}
+	upTo17         = []pg_contract.Version{15, 16, 17}
+	from18         = []pg_contract.Version{18}
+)
+
+// lockScripts is one entry per §4 rule id whose lock the requirements assert rather than measure.
+var lockScripts = []lockScript{
+	// 4.1 columns.
+	{sql: "ALTER TABLE orders ADD COLUMN z int"},
+	{sql: "ALTER TABLE orders ADD COLUMN z text DEFAULT next_code()"},
+	{sql: "ALTER TABLE orders ADD COLUMN z positive_int"},
+	{sql: "ALTER TABLE orders ADD COLUMN z text UNIQUE"},
+	{sql: "ALTER TABLE events ADD COLUMN z int"},
+	{sql: "ALTER TABLE legacy_parent ADD COLUMN z int"},
+	{sql: "ALTER TABLE orders DROP COLUMN code"},
+	{sql: "ALTER TABLE orders ALTER COLUMN total TYPE numeric(12,2)"},
+	{sql: "ALTER TABLE orders ALTER COLUMN total TYPE numeric(10,4)"},
+	{sql: "ALTER TABLE orders ALTER COLUMN status TYPE text USING upper(status)"},
+	{sql: "ALTER TABLE users ALTER COLUMN created_at TYPE timestamp"},
+	{sql: "ALTER TABLE orders ALTER COLUMN status SET DEFAULT 'open'"},
+	{sql: "ALTER TABLE orders ALTER COLUMN status DROP DEFAULT"},
+	{sql: "ALTER TABLE orders ALTER COLUMN status SET NOT NULL"},
+	{sql: "ALTER TABLE orders ALTER COLUMN code SET NOT NULL"},
+	{sql: "ALTER TABLE users ALTER COLUMN email DROP NOT NULL"},
+	{sql: "ALTER TABLE orders ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY"},
+	{sql: "ALTER TABLE orders ALTER COLUMN status SET STATISTICS 500"},
+	{sql: "ALTER TABLE orders ALTER COLUMN status SET STATISTICS DEFAULT", since: pg_contract.Version17},
+	{sql: "ALTER TABLE orders ALTER COLUMN status SET (n_distinct = 10)"},
+	{sql: "ALTER TABLE orders ALTER COLUMN status RESET (n_distinct)"},
+	{sql: "ALTER TABLE orders ALTER COLUMN status SET STORAGE EXTERNAL"},
+	{sql: "ALTER TABLE orders ALTER COLUMN status SET STORAGE DEFAULT", since: pg_contract.Version16},
+	{sql: "ALTER TABLE orders ALTER COLUMN status SET COMPRESSION pglz"},
+	{sql: "ALTER TABLE orders RENAME COLUMN status TO state"},
+
+	// SET EXPRESSION is 17, and a virtual generated column to point it at is 18.
+	{sql: "ALTER TABLE computed ALTER COLUMN stored_total SET EXPRESSION AS (base * 4)", since: pg_contract.Version17},
+	{sql: "ALTER TABLE computed ALTER COLUMN virtual_total SET EXPRESSION AS (base * 5)", since: pg_contract.Version18},
+	{sql: "ALTER TABLE computed ALTER COLUMN stored_total DROP EXPRESSION"},
+	{sql: "ALTER TABLE computed ALTER COLUMN virtual_total DROP EXPRESSION", since: pg_contract.Version18, refusedOn: from18},
+
+	// 4.2 constraints.
+	{sql: "ALTER TABLE orders ADD CONSTRAINT c CHECK (total >= 0)"},
+	{sql: "ALTER TABLE orders ADD CONSTRAINT c CHECK (total >= 0) NOT VALID"},
+	{sql: "ALTER TABLE orders ADD CONSTRAINT c CHECK (total >= 0) NOT ENFORCED", since: pg_contract.Version18},
+	{sql: "ALTER TABLE users ADD CONSTRAINT u UNIQUE (email)"},
+	{sql: "ALTER TABLE orders ADD CONSTRAINT u UNIQUE USING INDEX orders_code_uidx"},
+	{sql: "ALTER TABLE events ADD CONSTRAINT pk PRIMARY KEY (id, at)"},
+	{sql: "ALTER TABLE orders ADD CONSTRAINT fk FOREIGN KEY (user_id) REFERENCES users (id)"},
+	{sql: "ALTER TABLE orders ADD CONSTRAINT fk FOREIGN KEY (user_id) REFERENCES users (id) NOT VALID"},
+	{sql: "ALTER TABLE events ADD CONSTRAINT fk FOREIGN KEY (id) REFERENCES users (id) NOT VALID", refusedOn: upTo17},
+	{sql: "ALTER TABLE orders ADD CONSTRAINT n NOT NULL code NOT VALID", since: pg_contract.Version18},
+	{sql: "ALTER TABLE orders VALIDATE CONSTRAINT orders_total_nv"},
+	{sql: "ALTER TABLE orders VALIDATE CONSTRAINT orders_status_nn"},
+	{sql: "ALTER TABLE orders DROP CONSTRAINT orders_total_nv"},
+	{sql: "ALTER TABLE orders DROP CONSTRAINT orders_user_id_fkey"},
+	{sql: "ALTER TABLE orders ALTER CONSTRAINT orders_user_id_fkey DEFERRABLE"},
+	{sql: "ALTER TABLE orders RENAME CONSTRAINT orders_total_nv TO c"},
+
+	// 4.3 triggers and row level security.
+	{sql: "ALTER TABLE orders DISABLE TRIGGER orders_bump"},
+	{sql: "ALTER TABLE orders ENABLE REPLICA TRIGGER orders_bump"},
+	{sql: "ALTER TABLE orders ENABLE ROW LEVEL SECURITY"},
+	{sql: "ALTER TABLE orders FORCE ROW LEVEL SECURITY"},
+
+	// 4.4 storage, layout, ownership.
+	{sql: "ALTER TABLE orders SET (fillfactor = 70)"},
+	{sql: "ALTER TABLE orders SET (autovacuum_vacuum_scale_factor = 0.1)"},
+	{sql: "ALTER TABLE orders SET (fillfactor = 70, user_catalog_table = true)"},
+	{sql: "ALTER TABLE orders RESET (fillfactor)"},
+	{sql: "ALTER TABLE events SET (fillfactor = 70)", refusedOn: onEveryVersion},
+	{sql: "ALTER TABLE orders SET ACCESS METHOD heap"},
+	{sql: "ALTER TABLE orders SET UNLOGGED"},
+	{sql: "ALTER TABLE events SET UNLOGGED", refusedOn: from18},
+	{sql: "ALTER TABLE orders CLUSTER ON orders_pkey"},
+	{sql: "ALTER TABLE orders SET WITHOUT CLUSTER"},
+	{sql: "ALTER TABLE events CLUSTER ON events_pkey", refusedOn: onEveryVersion},
+	{sql: "ALTER TABLE orders SET WITHOUT OIDS"},
+	{sql: "ALTER TABLE orders OWNER TO apercu_lock_oracle_owner"},
+	{sql: "ALTER TABLE orders REPLICA IDENTITY FULL"},
+	{sql: "ALTER TABLE orders REPLICA IDENTITY USING INDEX orders_pkey"},
+	{sql: "ALTER TABLE legacy_child NO INHERIT legacy_parent"},
+	{sql: "ALTER TABLE orphan INHERIT legacy_parent"},
+	{sql: "ALTER TABLE orders RENAME TO orders_old"},
+	{sql: "ALTER TABLE orders SET SCHEMA public"},
+	{sql: "ALTER TABLE ts_table SET TABLESPACE pg_default"},
+
+	// 4.4 "ALL IN TABLESPACE", where the target set is the snapshot's answer and not the
+	// statement's: each object type moves its own relkinds, and none of them recurses.
+	{sql: "ALTER TABLE ALL IN TABLESPACE " + oracleTablespace + " SET TABLESPACE pg_default"},
+	{sql: "ALTER INDEX ALL IN TABLESPACE " + oracleTablespace + " SET TABLESPACE pg_default"},
+	{sql: "ALTER MATERIALIZED VIEW ALL IN TABLESPACE " + oracleTablespace + " SET TABLESPACE pg_default"},
+	{sql: "ALTER TABLE ALL IN TABLESPACE " + oracleTablespace + " OWNED BY apercu_lock_oracle_owner SET TABLESPACE pg_default"},
+	{sql: "ALTER TABLE ALL IN TABLESPACE pg_default SET TABLESPACE " + oracleTablespace},
+
+	// 4.5 partitions.
+	{sql: "ALTER TABLE events ATTACH PARTITION events_2026 FOR VALUES FROM ('2026-01-01') TO ('2027-01-01')"},
+	{sql: "ALTER TABLE parted ATTACH PARTITION parted_2 FOR VALUES FROM (100) TO (200)"},
+	{sql: "ALTER TABLE parted DETACH PARTITION parted_1"},
+	{sql: "ALTER TABLE ONLY events ADD CONSTRAINT c CHECK (id > 0)", refusedOn: onEveryVersion},
+	{sql: "ALTER TABLE ONLY events ADD COLUMN z int", refusedOn: onEveryVersion},
+	{sql: "ALTER TABLE ONLY events DROP COLUMN id", refusedOn: onEveryVersion},
+	{sql: "ALTER TABLE ONLY events ALTER COLUMN id SET NOT NULL"},
+	{sql: "ALTER TABLE ONLY events ALTER COLUMN id TYPE int", refusedOn: onEveryVersion},
+	{sql: "ALTER TABLE ONLY events ALTER COLUMN id DROP NOT NULL", refusedOn: upTo17},
+	{sql: "ALTER TABLE ONLY events DROP CONSTRAINT events_id_check", refusedOn: upTo17},
+	{sql: "ALTER TABLE events DROP CONSTRAINT events_id_check"},
+	{sql: "ALTER TABLE ONLY legacy_parent DROP CONSTRAINT legacy_id_check"},
+	{sql: "ALTER TABLE ONLY events RENAME COLUMN id TO ident", refusedOn: onEveryVersion},
+	{sql: "ALTER TABLE ONLY events ALTER COLUMN id SET DEFAULT 1"},
+	{sql: "ALTER TABLE ONLY legacy_parent ADD COLUMN z int", refusedOn: onEveryVersion},
+	{sql: "ALTER TABLE ONLY legacy_parent DROP COLUMN id"},
+	{sql: "ALTER TABLE ONLY legacy_parent ADD CONSTRAINT c CHECK (id > 0)", refusedOn: onEveryVersion},
+	{sql: "ALTER TABLE ONLY legacy_parent ALTER COLUMN id SET NOT NULL"},
+	{sql: "ALTER TABLE ONLY legacy_parent ALTER COLUMN id SET DEFAULT 1"},
+	{sql: "ALTER TABLE ONLY legacy_parent ALTER COLUMN id SET STORAGE PLAIN"},
+	{sql: "ALTER TABLE ONLY legacy_parent ALTER COLUMN id DROP NOT NULL"},
+	{sql: "ALTER TABLE ONLY events ALTER COLUMN id SET STORAGE PLAIN"},
+	{sql: "ALTER TABLE ONLY events ENABLE TRIGGER ALL"},
+	{sql: "ALTER TABLE ONLY events ALTER COLUMN id SET STATISTICS 100"},
+	{sql: "ALTER TABLE ONLY events OWNER TO apercu_lock_oracle_owner"},
+	{sql: "ALTER TABLE parted DETACH PARTITION parted_1 CONCURRENTLY", outsideTransaction: true, refusedOn: onEveryVersion},
+}
+
+// lockModes maps the spelling pg_locks uses onto the enum §1.2 defines.
+var lockModes = map[string]pg_contract.Lock{
+	"AccessShareLock":          pg_contract.LockAccessShare,
+	"RowShareLock":             pg_contract.LockRowShare,
+	"RowExclusiveLock":         pg_contract.LockRowExclusive,
+	"ShareUpdateExclusiveLock": pg_contract.LockShareUpdateExclusive,
+	"ShareLock":                pg_contract.LockShare,
+	"ShareRowExclusiveLock":    pg_contract.LockShareRowExclusive,
+	"ExclusiveLock":            pg_contract.LockExclusive,
+	"AccessExclusiveLock":      pg_contract.LockAccessExclusive,
+}
+
+// observedLocks reads what one backend is actually holding, from another session.
+const observedLocksQuery = `
+SELECT n.nspname, c.relname, c.relkind, l.mode
+  FROM pg_locks l
+  JOIN pg_class c ON c.oid = l.relation
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+ WHERE l.pid = $1 AND l.locktype = 'relation' AND l.granted
+   AND n.nspname = $2`
+
+// lockedRelation is one row of that.
+type lockedRelation struct {
+	name helper.FullRelationName
+	kind string
+	lock pg_contract.Lock
+}
+
+// TestPredictedLocksMatchTheServer is the lock oracle. §4 asserts a lock level for every rule id;
+// this runs each one on 15, 16, 17 and 18 and reads back what the server took, from a second
+// session, while the transaction is still open.
+func TestPredictedLocksMatchTheServer(t *testing.T) {
+	t.Parallel()
+
+	var wg sync.WaitGroup
+	for _, version := range integrationVersions {
+		wg.Add(1)
+		go func(version pg_contract.Version) {
+			defer wg.Done()
+			t.Run(fmt.Sprintf("pg%d", version), func(t *testing.T) {
+				db := startPostgres(t, version)
+				_, err := db.Exec(oracleDDL)
+				require.NoError(t, err)
+				for _, statement := range oracleTablespaceSetup {
+					_, err = db.Exec(statement)
+					require.NoErrorf(t, err, "%s", statement)
+				}
+				_, err = db.Exec(oracleTablespaceDDL)
+				require.NoError(t, err)
+				if version >= pg_contract.Version18 {
+					_, err = db.Exec(oracleDDL18)
+					require.NoError(t, err)
+				}
+
+				catalog := oracleCatalog(t, db)
+				require.Equal(t, version, catalog.Version(), "P-18 has to see the version the rules are gated on")
+
+				for _, script := range lockScripts {
+					if !script.runsOn(version) {
+						continue
+					}
+					t.Run(script.sql, func(t *testing.T) { replayLocks(t, db, catalog, script, version) })
+				}
+			})
+		}(version)
+	}
+	wg.Wait()
+}
+
+// oracleCatalog captures the seeded database the way the CLI would, as both the preview and the
+// production snapshot, so P-18 answers and G-07 can branch.
+func oracleCatalog(t *testing.T, db *sql.DB) *pg_catalog.Catalog {
+	t.Helper()
+	ctx := context.Background()
+
+	pre, err := pg_catalog.Collect(ctx, db, pg_catalog.CollectOptions{Source: pg_catalog.SourcePreview, PIT: pg_catalog.PITPre})
+	require.NoError(t, err)
+	prod, err := pg_catalog.Collect(ctx, db, pg_catalog.CollectOptions{Source: pg_catalog.SourceProd, PIT: pg_catalog.PITPre, ProdAvailable: true})
+	require.NoError(t, err)
+
+	catalog, err := pg_catalog.NewCatalog(pg_catalog.CatalogOptions{Pre: pre, Prod: prod})
+	require.NoError(t, err)
+	return catalog
+}
+
+// replayLocks runs one statement and compares what the classifier said against what the server did.
+func replayLocks(t *testing.T, db *sql.DB, catalog *pg_catalog.Catalog, script lockScript, version pg_contract.Version) {
+	t.Helper()
+	ctx := context.Background()
+
+	statements := pg_parse.Parse(script.sql)
+	require.Len(t, statements, 1)
+	analysis := NewClassifier(catalog).Next(statements[0])
+
+	conn, err := db.Conn(ctx)
+	require.NoError(t, err)
+	defer func() { _ = conn.Close() }()
+	_, err = conn.ExecContext(ctx, "SET search_path TO "+oracleSchema)
+	require.NoError(t, err)
+
+	pid := 0
+	require.NoError(t, conn.QueryRowContext(ctx, "SELECT pg_backend_pid()").Scan(&pid))
+
+	if !script.outsideTransaction {
+		_, err = conn.ExecContext(ctx, "BEGIN")
+		require.NoError(t, err)
+		defer func() { _, _ = conn.ExecContext(ctx, "ROLLBACK") }()
+	}
+
+	_, execErr := conn.ExecContext(ctx, script.sql)
+
+	// The refusal is a prediction of its own: a clause the classifier rejects has to be a clause
+	// the server refuses, on exactly the versions it refuses it on.
+	assert.Equalf(t, script.refused(version), execErr != nil,
+		"the server %s %q, the script says it %s (server said: %v)",
+		accepted(execErr), script.sql, expected(script.refused(version)), execErr)
+	assert.Equalf(t, script.refused(version), analysis.HasErrors(),
+		"the classifier %s %q, the server %s it", classifierVerdict(analysis), script.sql, accepted(execErr))
+	if execErr != nil || script.outsideTransaction {
+		return
+	}
+
+	observed := readLocks(t, db, pid)
+	predicted := predictedLocks(analysis)
+
+	for _, held := range observed {
+		expectedLock, named := predicted[held.name]
+		kind := pg_contract.RelationKindFromRelkind(held.kind)
+		if !named {
+			// An index is locked with the table it belongs to whether or not a rule names it
+			assert.Falsef(t, kind.IsTable() || kind == pg_contract.RelationKindMaterializedView,
+				"%q locks %s at %s and the classifier never named it", script.sql, held.name, held.lock.Short())
+			continue
+		}
+		assert.Equalf(t, held.lock.Short(), expectedLock.Short(), "%q on %s", script.sql, held.name)
+	}
+
+	for name, lock := range predicted {
+		if _, held := observed[name]; !held {
+			assert.Failf(t, "unlocked target",
+				"%q predicts %s on %s and the server locked nothing there", script.sql, lock.Short(), name)
+		}
+	}
+}
+
+func accepted(err error) string {
+	if err != nil {
+		return "refused"
+	}
+	return "accepted"
+}
+
+func expected(refused bool) string {
+	if refused {
+		return "refuses it"
+	}
+	return "runs"
+}
+
+func classifierVerdict(analysis pg_contract.StatementAnalysis) string {
+	if analysis.HasErrors() {
+		return "rejected"
+	}
+	return "accepted"
+}
+
+// readLocks is the second session: it reads what the first one is holding while it still holds it.
+func readLocks(t *testing.T, db *sql.DB, pid int) map[helper.FullRelationName]lockedRelation {
+	t.Helper()
+
+	rows, err := db.QueryContext(context.Background(), observedLocksQuery, pid, oracleSchema)
+	require.NoError(t, err)
+	defer func() { _ = rows.Close() }()
+
+	held := map[helper.FullRelationName]lockedRelation{}
+	for rows.Next() {
+		var schema, name, kind, mode string
+		require.NoError(t, rows.Scan(&schema, &name, &kind, &mode))
+		lock, known := lockModes[mode]
+		require.Truef(t, known, "pg_locks reported an unknown mode %q", mode)
+
+		relation := helper.FullRelationName{Schema: schema, Table: name}
+		if previous, seen := held[relation]; seen {
+			lock = pg_contract.MaxLock(lock, previous.lock)
+		}
+		held[relation] = lockedRelation{name: relation, kind: kind, lock: lock}
+	}
+	require.NoError(t, rows.Err())
+	return held
+}
+
+// predictedLocks is the strongest lock the classifier says the statement takes on each relation.
+func predictedLocks(analysis pg_contract.StatementAnalysis) map[helper.FullRelationName]pg_contract.Lock {
+	out := map[helper.FullRelationName]pg_contract.Lock{}
+	for _, finding := range analysis.Findings {
+		for _, target := range finding.Targets {
+			if !strings.EqualFold(target.Relation.Name.Schema, oracleSchema) {
+				continue
+			}
+			out[target.Relation.Name] = pg_contract.MaxLock(out[target.Relation.Name], target.Lock)
+		}
+	}
+	return out
+}

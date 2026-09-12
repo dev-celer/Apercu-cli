@@ -1,5 +1,10 @@
 package pg_catalog
 
+import (
+	"strconv"
+	"strings"
+)
+
 // Volatility mirrors pg_proc.provolatile.
 type Volatility uint8
 
@@ -41,8 +46,8 @@ func (v Volatility) MayBeVolatile() bool {
 	return v == VolatilityVolatile || v == VolatilityUnknown
 }
 
-// worst returns the more volatile of the two, so a composite expression is graded on its least predictable part.
-func (v Volatility) worst(other Volatility) Volatility {
+// Worst returns the more volatile of the two, so a composite expression is graded on its least predictable part.
+func (v Volatility) Worst(other Volatility) Volatility {
 	if v == VolatilityUnknown || other == VolatilityUnknown {
 		return VolatilityUnknown
 	}
@@ -174,7 +179,7 @@ func (c *Catalog) CastVolatility(source, target OID) Volatility {
 	case "f":
 		return c.ProcVolatility(cast.Func)
 	case "i":
-		return c.typeOutputVolatility(source).worst(c.TypeInputVolatility(target))
+		return c.typeOutputVolatility(source).Worst(c.TypeInputVolatility(target))
 	default:
 		return VolatilityUnknown
 	}
@@ -288,6 +293,48 @@ func (c *Catalog) coercedType(typeOID OID) (OID, bool) {
 func (c *Catalog) hasModifierCoercion(typeOID OID) bool {
 	cast, ok := c.types.casts[castKey{typeOID, typeOID}]
 	return ok && cast.Method == "f"
+}
+
+// EncodeTypmod packs the modifier a statement wrote into the form pg_attribute stores it in.
+// It answers false for a type whose packing it does not know.
+func (c *Catalog) EncodeTypmod(typeOID OID, mods []string) (int32, bool) {
+	if len(mods) == 0 {
+		// No modifier at all asks for no coercion, whatever the type.
+		return -1, true
+	}
+	numbers := make([]int32, 0, len(mods))
+	for _, mod := range mods {
+		value, err := strconv.Atoi(strings.TrimSpace(mod))
+		if err != nil {
+			return -1, false
+		}
+		numbers = append(numbers, int32(value))
+	}
+
+	// An array stores its element's modifier, so the packing is the element type's.
+	element, _ := c.coercedType(typeOID)
+	switch element {
+	case oidVarchar:
+		if len(numbers) != 1 {
+			return -1, false
+		}
+		return numbers[0] + varHdrSz, true
+	case oidVarbit, oidTime, oidTimeTz, oidTimestamp, oidTimestampTz:
+		if len(numbers) != 1 {
+			return -1, false
+		}
+		return numbers[0], true
+	case oidNumeric:
+		if len(numbers) > 2 {
+			return -1, false
+		}
+		scale := int32(0)
+		if len(numbers) == 2 {
+			scale = numbers[1]
+		}
+		return ((numbers[0] << 16) | (scale & 0x7ff)) + varHdrSz, true
+	}
+	return -1, false
 }
 
 // varHdrSz is the four bytes the varlena types add to a packed modifier.
