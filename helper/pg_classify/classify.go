@@ -38,6 +38,7 @@ func (c *Classifier) Next(statement pg_parse.Statement) pg_contract.StatementAna
 		analysis.Subcommands = append(analysis.Subcommands, sub.Kind.String())
 	}
 	if !statement.Parsed() {
+		c.session.Declare(statement, context)
 		return analysis
 	}
 
@@ -46,6 +47,7 @@ func (c *Classifier) Next(statement pg_parse.Statement) pg_contract.StatementAna
 		analysis.Findings = findings
 		analysis.Errors = errors
 	}
+	c.session.Declare(statement, context)
 
 	collapseStatementLocks(analysis.Findings)
 	return analysis

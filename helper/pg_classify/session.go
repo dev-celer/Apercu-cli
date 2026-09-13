@@ -63,21 +63,28 @@ func NewSession(catalog *pg_catalog.Catalog) *Session {
 }
 
 // Next advances the session by one statement and returns the context that statement runs under.
+// The caller has to follow it with Declare once the statement has been classified.
 func (s *Session) Next(statement pg_parse.Statement) Context {
 	s.openGroup(statement)
 	context := s.context()
 
-	s.declare(statement, context)
 	s.applySetting(statement)
 	s.applyTransaction(statement)
 	return context
+}
+
+// Declare records in the shadow catalog what the statement creates.
+func (s *Session) Declare(statement pg_parse.Statement, context Context) {
+	s.declare(statement, context)
 }
 
 // Walk is Next over a whole migration, for callers that want the contexts up front.
 func (s *Session) Walk(statements []pg_parse.Statement) []Context {
 	contexts := make([]Context, 0, len(statements))
 	for _, statement := range statements {
-		contexts = append(contexts, s.Next(statement))
+		context := s.Next(statement)
+		s.Declare(statement, context)
+		contexts = append(contexts, context)
 	}
 	return contexts
 }
