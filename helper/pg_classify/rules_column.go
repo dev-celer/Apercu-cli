@@ -29,7 +29,7 @@ func (s scope) typeOf(ref pg_parse.TypeRef) (pg_catalog.Type, bool) {
 
 // ruleAddColumn is R-AT-ADDCOL.
 func ruleAddColumn(s scope, sub pg_parse.Subcommand) effect {
-	e := newEffect("R-AT-ADDCOL", "")
+	e := newEffect(s, "R-AT-ADDCOL", "")
 	column := sub.Column
 	if column == nil {
 		e.op = pg_contract.OpKindRewrite
@@ -99,7 +99,7 @@ func buildsIndex(constraints []pg_parse.ConstraintDef) bool {
 
 // ruleDropColumn is R-AT-DROPCOL.
 func ruleDropColumn(s scope, sub pg_parse.Subcommand) effect {
-	e := newEffect("R-AT-DROPCOL", "the column is marked dropped in the catalog; existing rows keep their pages until something else rewrites them")
+	e := newEffect(s, "R-AT-DROPCOL", "the column is marked dropped in the catalog; existing rows keep their pages until something else rewrites them")
 	// ONLY stops the column being dropped from the children, not the children being locked: their
 	// inheritance count still has to come down.
 	e.childrenUnderOnly = true
@@ -129,7 +129,7 @@ func ruleDropColumn(s scope, sub pg_parse.Subcommand) effect {
 
 // ruleAlterColumnType is R-AT-TYPE.
 func ruleAlterColumnType(s scope, sub pg_parse.Subcommand) effect {
-	e := newEffect("R-AT-TYPE", "")
+	e := newEffect(s, "R-AT-TYPE", "")
 	e.op = pg_contract.OpKindRewrite
 
 	def := sub.Column
@@ -209,18 +209,18 @@ func isTimestampSwap(from, to string) bool {
 }
 
 // ruleSetDefault is R-AT-SETDEF.
-func ruleSetDefault(scope, pg_parse.Subcommand) effect {
-	return newEffect("R-AT-SETDEF", "the default is recorded in the catalog and applies to later inserts only")
+func ruleSetDefault(s scope, _ pg_parse.Subcommand) effect {
+	return newEffect(s, "R-AT-SETDEF", "the default is recorded in the catalog and applies to later inserts only")
 }
 
 // ruleDropDefault is R-AT-DROPDEF.
-func ruleDropDefault(scope, pg_parse.Subcommand) effect {
-	return newEffect("R-AT-DROPDEF", "the default is removed from the catalog; no stored row changes")
+func ruleDropDefault(s scope, _ pg_parse.Subcommand) effect {
+	return newEffect(s, "R-AT-DROPDEF", "the default is removed from the catalog; no stored row changes")
 }
 
 // ruleSetNotNull is R-AT-SETNOTNULL.
 func ruleSetNotNull(s scope, sub pg_parse.Subcommand) effect {
-	e := newEffect("R-AT-SETNOTNULL", "")
+	e := newEffect(s, "R-AT-SETNOTNULL", "")
 	if !s.relation().Exists() {
 		e.op = pg_contract.OpKindScan
 		e.message = "the table is not in the snapshot, so the full scan is assumed"
@@ -238,7 +238,7 @@ func ruleSetNotNull(s scope, sub pg_parse.Subcommand) effect {
 
 // ruleDropNotNull is R-AT-DROPNOTNULL.
 func ruleDropNotNull(s scope, _ pg_parse.Subcommand) effect {
-	e := newEffect("R-AT-DROPNOTNULL", "the constraint is dropped from the catalog; no row is read")
+	e := newEffect(s, "R-AT-DROPNOTNULL", "the constraint is dropped from the catalog; no row is read")
 	// From 18 a NOT NULL is a constraint with an inheritance count, so the children are opened to
 	// have theirs corrected even under ONLY. Up to 17 it is nothing but attnotnull on the parent's
 	// own row, and ONLY really does stop there.
@@ -248,7 +248,7 @@ func ruleDropNotNull(s scope, _ pg_parse.Subcommand) effect {
 
 // ruleSetExpression is R-AT-SETEXPR ⟨VERSION >= 17⟩.
 func ruleSetExpression(s scope, sub pg_parse.Subcommand) effect {
-	e := newEffect("R-AT-SETEXPR", "")
+	e := newEffect(s, "R-AT-SETEXPR", "")
 	column, ok := s.column(sub.Name)
 	switch {
 	case ok && column.Generated == "v":
@@ -265,7 +265,7 @@ func ruleSetExpression(s scope, sub pg_parse.Subcommand) effect {
 
 // ruleDropExpression is R-AT-DROPEXPR.
 func ruleDropExpression(s scope, sub pg_parse.Subcommand) effect {
-	e := newEffect("R-AT-DROPEXPR", "the column keeps the values it has and stops being generated")
+	e := newEffect(s, "R-AT-DROPEXPR", "the column keeps the values it has and stops being generated")
 	if column, ok := s.column(sub.Name); ok && column.Generated == "v" {
 		return e.reject("DROP EXPRESSION is not supported for virtual generated columns", pg_contract.AnyVersion)
 	}
@@ -273,51 +273,51 @@ func ruleDropExpression(s scope, sub pg_parse.Subcommand) effect {
 }
 
 // ruleAddIdentity is R-AT-ADDIDENT.
-func ruleAddIdentity(scope, pg_parse.Subcommand) effect {
-	return newEffect("R-AT-ADDIDENT", "the column keeps its values and gains a sequence for later inserts")
+func ruleAddIdentity(s scope, _ pg_parse.Subcommand) effect {
+	return newEffect(s, "R-AT-ADDIDENT", "the column keeps its values and gains a sequence for later inserts")
 }
 
 // ruleSetIdentity is R-AT-SETIDENT.
-func ruleSetIdentity(scope, pg_parse.Subcommand) effect {
-	return newEffect("R-AT-SETIDENT", "the identity's sequence options change; no stored row is touched")
+func ruleSetIdentity(s scope, _ pg_parse.Subcommand) effect {
+	return newEffect(s, "R-AT-SETIDENT", "the identity's sequence options change; no stored row is touched")
 }
 
 // ruleDropIdentity is R-AT-DROPIDENT.
-func ruleDropIdentity(scope, pg_parse.Subcommand) effect {
-	return newEffect("R-AT-DROPIDENT", "the column keeps its values and loses its sequence")
+func ruleDropIdentity(s scope, _ pg_parse.Subcommand) effect {
+	return newEffect(s, "R-AT-DROPIDENT", "the column keeps its values and loses its sequence")
 }
 
 // ruleSetStatistics is R-AT-SETSTATS.
 // more than the lock a vacuum takes.
-func ruleSetStatistics(_ scope, sub pg_parse.Subcommand) effect {
-	e := newEffect("R-AT-SETSTATS", fmt.Sprintf("the statistics target becomes %s, which the next ANALYZE reads", sub.Value))
+func ruleSetStatistics(s scope, sub pg_parse.Subcommand) effect {
+	e := newEffect(s, "R-AT-SETSTATS", fmt.Sprintf("the statistics target becomes %s, which the next ANALYZE reads", sub.Value))
 	e.lock = pg_contract.LockShareUpdateExclusive
 	return e
 }
 
 // ruleAttributeOptions is R-AT-ATTROPT.
-func ruleAttributeOptions(_ scope, sub pg_parse.Subcommand) effect {
+func ruleAttributeOptions(s scope, sub pg_parse.Subcommand) effect {
 	names := make([]string, 0, len(sub.Options))
 	for _, option := range sub.Options {
 		names = append(names, option.Name)
 	}
-	e := newEffect("R-AT-ATTROPT", fmt.Sprintf("the planner estimate carried by %s is recorded on the column", strings.Join(names, ", ")))
+	e := newEffect(s, "R-AT-ATTROPT", fmt.Sprintf("the planner estimate carried by %s is recorded on the column", strings.Join(names, ", ")))
 	e.lock = pg_contract.LockShareUpdateExclusive
 	e.recursion = parentOnly
 	return e
 }
 
 // ruleSetStorage is R-AT-SETSTORAGE.
-func ruleSetStorage(_ scope, sub pg_parse.Subcommand) effect {
-	return newEffect("R-AT-SETSTORAGE", fmt.Sprintf("later writes store the column as %s; values already written keep their form", sub.Value))
+func ruleSetStorage(s scope, sub pg_parse.Subcommand) effect {
+	return newEffect(s, "R-AT-SETSTORAGE", fmt.Sprintf("later writes store the column as %s; values already written keep their form", sub.Value))
 }
 
 // ruleSetCompression is R-AT-SETCOMPRESSION.
-func ruleSetCompression(_ scope, sub pg_parse.Subcommand) effect {
-	return newEffect("R-AT-SETCOMPRESSION", fmt.Sprintf("later writes compress the column with %s; values already written keep theirs", sub.Value))
+func ruleSetCompression(s scope, sub pg_parse.Subcommand) effect {
+	return newEffect(s, "R-AT-SETCOMPRESSION", fmt.Sprintf("later writes compress the column with %s; values already written keep theirs", sub.Value))
 }
 
 // ruleRenameColumn is R-AT-RENAMECOL.
-func ruleRenameColumn(_ scope, sub pg_parse.Subcommand) effect {
-	return newEffect("R-AT-RENAMECOL", fmt.Sprintf("the column is renamed to %q in the catalog", sub.NewName))
+func ruleRenameColumn(s scope, sub pg_parse.Subcommand) effect {
+	return newEffect(s, "R-AT-RENAMECOL", fmt.Sprintf("the column is renamed to %q in the catalog", sub.NewName))
 }

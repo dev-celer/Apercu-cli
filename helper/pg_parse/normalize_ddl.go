@@ -204,8 +204,25 @@ func normalizeDrop(stmt *pg_query.DropStmt, s Statement) Statement {
 				Kind: SubUnknown,
 				Name: nameParts(names[len(names)-1:])[0],
 			})
+		case pg_query.ObjectType_OBJECT_TYPE, pg_query.ObjectType_OBJECT_DOMAIN:
+			// A type is not a relation. The rules read its name off the clause and resolve it against the type index instead.
+			if typeName, ok := object.GetNode().(*pg_query.Node_TypeName); ok {
+				s.Subcommands = append(s.Subcommands, Subcommand{
+					Kind: SubUnknown,
+					Name: strings.Join(nameParts(typeName.TypeName.Names), "."),
+				})
+			}
+		case pg_query.ObjectType_OBJECT_STATISTIC_EXT:
+			// A statistics object is not a relation, S-21 is what leads back to its table.
+			if len(names) == 0 {
+				continue
+			}
+			s.Subcommands = append(s.Subcommands, Subcommand{
+				Kind: SubSetStatistics,
+				Name: strings.Join(nameParts(names), "."),
+			})
 		default:
-			// A DROP TYPE or DROP EXTENSION spells its object as a type name rather than as a relation.
+			// A DROP EXTENSION spells its object as a bare name rather than as a relation.
 			if len(names) == 0 {
 				continue
 			}

@@ -9,7 +9,7 @@ import (
 
 // ruleAttachPartition is R-AT-ATTACH.
 func ruleAttachPartition(s scope, sub pg_parse.Subcommand) effect {
-	e := newEffect("R-AT-ATTACH", "")
+	e := newEffect(s, "R-AT-ATTACH", "")
 	e.lock = pg_contract.LockShareUpdateExclusive
 	e.recursion = parentOnly
 
@@ -48,7 +48,7 @@ func ruleAttachPartition(s scope, sub pg_parse.Subcommand) effect {
 func ruleDetachPartition(s scope, sub pg_parse.Subcommand) effect {
 	switch {
 	case sub.Flags.Finalize:
-		e := newEffect("R-AT-DETACH-FIN", "an interrupted concurrent detach is completed; the catalog edge is already half gone")
+		e := newEffect(s, "R-AT-DETACH-FIN", "an interrupted concurrent detach is completed; the catalog edge is already half gone")
 		e.lock = pg_contract.LockShareUpdateExclusive
 		e.recursion = parentOnly
 		return e
@@ -56,7 +56,7 @@ func ruleDetachPartition(s scope, sub pg_parse.Subcommand) effect {
 		return detachConcurrently(s, sub)
 	}
 
-	e := newEffect("R-AT-DETACH", "the partition is separated from the parent; no row moves")
+	e := newEffect(s, "R-AT-DETACH", "the partition is separated from the parent; no row moves")
 	e.recursion = parentOnly
 	e.extra = append(e.extra, s.partitionTargets(sub, pg_contract.LockAccessExclusive)...)
 	return e
@@ -64,7 +64,7 @@ func ruleDetachPartition(s scope, sub pg_parse.Subcommand) effect {
 
 // detachConcurrently is R-AT-DETACH-CONC.
 func detachConcurrently(s scope, sub pg_parse.Subcommand) effect {
-	e := newEffect("R-AT-DETACH-CONC", "the parent is held at SHARE UPDATE EXCLUSIVE across two internal transactions, waiting between them for every transaction still using it; the partition ends at ACCESS EXCLUSIVE")
+	e := newEffect(s, "R-AT-DETACH-CONC", "the parent is held at SHARE UPDATE EXCLUSIVE across two internal transactions, waiting between them for every transaction still using it; the partition ends at ACCESS EXCLUSIVE")
 	e.lock = pg_contract.LockShareUpdateExclusive
 	e.recursion = parentOnly
 	e.extra = append(e.extra, s.partitionTargets(sub, pg_contract.LockAccessExclusive)...)

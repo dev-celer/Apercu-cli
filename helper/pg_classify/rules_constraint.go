@@ -12,7 +12,7 @@ import (
 func ruleAddConstraint(s scope, sub pg_parse.Subcommand) effect {
 	constraint := sub.Constraint
 	if constraint == nil {
-		e := newEffect("R-AT-ADDCON", "the constraint definition did not reach the IR, so a full scan is assumed")
+		e := newEffect(s, "R-AT-ADDCON", "the constraint definition did not reach the IR, so a full scan is assumed")
 		e.op = pg_contract.OpKindScan
 		return e
 	}
@@ -20,7 +20,7 @@ func ruleAddConstraint(s scope, sub pg_parse.Subcommand) effect {
 	var e effect
 	switch constraint.Type {
 	case pg_parse.ConstraintCheck:
-		e = addCheck(*constraint)
+		e = addCheck(s, *constraint)
 	case pg_parse.ConstraintNotNull:
 		e = addNotNull(s, sub, *constraint)
 	case pg_parse.ConstraintPrimaryKey, pg_parse.ConstraintUnique, pg_parse.ConstraintExclusion:
@@ -28,7 +28,7 @@ func ruleAddConstraint(s scope, sub pg_parse.Subcommand) effect {
 	case pg_parse.ConstraintForeignKey:
 		e = addForeignKey(s, *constraint)
 	default:
-		e = newEffect("R-AT-ADDCON", "an unmodelled constraint; a full scan is assumed")
+		e = newEffect(s, "R-AT-ADDCON", "an unmodelled constraint; a full scan is assumed")
 		e.op = pg_contract.OpKindScan
 	}
 
@@ -36,14 +36,14 @@ func ruleAddConstraint(s scope, sub pg_parse.Subcommand) effect {
 }
 
 // addCheck is R-AT-ADDCHECK.
-func addCheck(constraint pg_parse.ConstraintDef) effect {
+func addCheck(s scope, constraint pg_parse.ConstraintDef) effect {
 	switch {
 	case constraint.NotEnforced:
-		return newEffect("R-AT-ADDCHECK-NE", "NOT ENFORCED is a permanent opt-out: the constraint is recorded and never checked, now or later")
+		return newEffect(s, "R-AT-ADDCHECK-NE", "NOT ENFORCED is a permanent opt-out: the constraint is recorded and never checked, now or later")
 	case constraint.NotValid:
-		return newEffect("R-AT-ADDCHECK-NV", "NOT VALID records the constraint and enforces it for new rows; the existing ones are read by a later VALIDATE CONSTRAINT")
+		return newEffect(s, "R-AT-ADDCHECK-NV", "NOT VALID records the constraint and enforces it for new rows; the existing ones are read by a later VALIDATE CONSTRAINT")
 	}
-	e := newEffect("R-AT-ADDCHECK", "every existing row is read to prove the predicate holds")
+	e := newEffect(s, "R-AT-ADDCHECK", "every existing row is read to prove the predicate holds")
 	e.op = pg_contract.OpKindScan
 	return e
 }
@@ -51,7 +51,7 @@ func addCheck(constraint pg_parse.ConstraintDef) effect {
 // addNotNull is the PG18 spelling of a NOT NULL.
 func addNotNull(s scope, sub pg_parse.Subcommand, constraint pg_parse.ConstraintDef) effect {
 	if constraint.NotValid {
-		return newEffect("R-AT-ADDNN-NV", "NOT VALID records the constraint and enforces it for new rows; the existing ones are read by a later VALIDATE CONSTRAINT")
+		return newEffect(s, "R-AT-ADDNN-NV", "NOT VALID records the constraint and enforces it for new rows; the existing ones are read by a later VALIDATE CONSTRAINT")
 	}
 	column := sub.Name
 	if len(constraint.Columns) > 0 {
@@ -63,23 +63,23 @@ func addNotNull(s scope, sub pg_parse.Subcommand, constraint pg_parse.Constraint
 // addKey is R-AT-ADDPK, R-AT-ADDUNIQUE and R-AT-ADDUSINGIDX.
 func addKey(s scope, constraint pg_parse.ConstraintDef) effect {
 	if constraint.UsingIndex != "" {
-		e := newEffect("R-AT-ADDUSINGIDX", fmt.Sprintf("the constraint adopts the existing index %q instead of building one, so no row is read", constraint.UsingIndex))
+		e := newEffect(s, "R-AT-ADDUSINGIDX", fmt.Sprintf("the constraint adopts the existing index %q instead of building one, so no row is read", constraint.UsingIndex))
 		e.extra = append(e.extra, s.indexTarget(constraint.UsingIndex, pg_contract.LockShareUpdateExclusive, pg_contract.OpKindMetadata))
 		return e
 	}
 
 	if constraint.Type != pg_parse.ConstraintPrimaryKey {
-		e := newEffect("R-AT-ADDUNIQUE", "the index behind the constraint is built under ACCESS EXCLUSIVE, reading every row; CREATE INDEX CONCURRENTLY followed by ADD CONSTRAINT … USING INDEX does the same work without the lock")
+		e := newEffect(s, "R-AT-ADDUNIQUE", "the index behind the constraint is built under ACCESS EXCLUSIVE, reading every row; CREATE INDEX CONCURRENTLY followed by ADD CONSTRAINT … USING INDEX does the same work without the lock")
 		e.op = pg_contract.OpKindScan
 		return e
 	}
 
-	e := newEffect("R-AT-ADDPK", "the index behind the primary key is built under ACCESS EXCLUSIVE, reading every row, and the key columns are made NOT NULL with it")
+	e := newEffect(s, "R-AT-ADDPK", "the index behind the primary key is built under ACCESS EXCLUSIVE, reading every row, and the key columns are made NOT NULL with it")
 	e.op = pg_contract.OpKindScan
 	// 15-17 hold SHARE on each partition while the parent's index is built, 18 holds
 	// ACCESS EXCLUSIVE. An unknown production version takes the stronger reading.
 	if s.partitioned() && !s.atLeast18() {
-		e.partitionLock = pg_contract.LockShare
+		e = e.onPartitions(pg_contract.LockShare)
 		e.message += "; on PostgreSQL 15-17 each partition is held at SHARE rather than ACCESS EXCLUSIVE"
 	}
 	return e
@@ -89,9 +89,9 @@ func addKey(s scope, constraint pg_parse.ConstraintDef) effect {
 func addForeignKey(s scope, constraint pg_parse.ConstraintDef) effect {
 	var e effect
 	if constraint.NotValid {
-		e = newEffect("R-AT-ADDFK-NV", "NOT VALID records the key and enforces it for new rows; no existing row is read")
+		e = newEffect(s, "R-AT-ADDFK-NV", "NOT VALID records the key and enforces it for new rows; no existing row is read")
 	} else {
-		e = newEffect("R-AT-ADDFK", "every existing row is read and matched against the referenced table; writes are blocked on both tables, reads on neither")
+		e = newEffect(s, "R-AT-ADDFK", "every existing row is read and matched against the referenced table; writes are blocked on both tables, reads on neither")
 		e.op = pg_contract.OpKindScan
 	}
 	e.lock = pg_contract.LockShareRowExclusive
@@ -125,7 +125,7 @@ func (s scope) indexTarget(name string, lock pg_contract.Lock, op pg_contract.Op
 
 // ruleValidateConstraint is R-AT-VALIDATE.
 func ruleValidateConstraint(s scope, sub pg_parse.Subcommand) effect {
-	e := newEffect("R-AT-VALIDATE", "every existing row is read to prove the constraint holds, under a lock that blocks neither reads nor writes")
+	e := newEffect(s, "R-AT-VALIDATE", "every existing row is read to prove the constraint holds, under a lock that blocks neither reads nor writes")
 	e.lock = pg_contract.LockShareUpdateExclusive
 	e.op = pg_contract.OpKindScan
 
@@ -155,7 +155,7 @@ func ruleValidateConstraint(s scope, sub pg_parse.Subcommand) effect {
 
 // ruleDropConstraint is R-AT-DROPCON.
 func ruleDropConstraint(s scope, sub pg_parse.Subcommand) effect {
-	e := newEffect("R-AT-DROPCON", fmt.Sprintf("constraint %q is removed from the catalog", sub.Name))
+	e := newEffect(s, "R-AT-DROPCON", fmt.Sprintf("constraint %q is removed from the catalog", sub.Name))
 	// ONLY stops the constraint being dropped from the children,
 	// not the children being locked: their inheritance count still has to come down.
 	e.childrenUnderOnly = true
@@ -179,22 +179,22 @@ func ruleDropConstraint(s scope, sub pg_parse.Subcommand) effect {
 func ruleAlterConstraint(s scope, sub pg_parse.Subcommand) effect {
 	constraint := sub.Constraint
 	if constraint == nil {
-		return newEffect("R-AT-ALTERCON", "the constraint's attributes change; no row is read and the referenced table is not locked")
+		return newEffect(s, "R-AT-ALTERCON", "the constraint's attributes change; no row is read and the referenced table is not locked")
 	}
 
 	switch {
 	case constraint.EnforcementSet:
 		return alterEnforcement(s, sub, *constraint)
 	case constraint.NoInheritSet:
-		return newEffect("R-AT-ALTERCON-INH", "the constraint's inheritance changes in the catalog; no row is read")
+		return newEffect(s, "R-AT-ALTERCON-INH", "the constraint's inheritance changes in the catalog; no row is read")
 	default:
-		return newEffect("R-AT-ALTERCON", "the constraint's deferrability changes in the catalog; no row is read and the referenced table is not locked")
+		return newEffect(s, "R-AT-ALTERCON", "the constraint's deferrability changes in the catalog; no row is read and the referenced table is not locked")
 	}
 }
 
 // alterEnforcement is R-AT-ALTERCON-ENF.
 func alterEnforcement(s scope, sub pg_parse.Subcommand, constraint pg_parse.ConstraintDef) effect {
-	e := newEffect("R-AT-ALTERCON-ENF", "")
+	e := newEffect(s, "R-AT-ALTERCON-ENF", "")
 	referencedLock := pg_contract.LockAccessExclusive
 	if constraint.NotEnforced {
 		e.message = fmt.Sprintf("constraint %q stops being checked; no existing row is read", sub.Name)
@@ -218,8 +218,8 @@ func alterEnforcement(s scope, sub pg_parse.Subcommand, constraint pg_parse.Cons
 }
 
 // ruleRenameConstraint is R-AT-RENAMECON.
-func ruleRenameConstraint(_ scope, sub pg_parse.Subcommand) effect {
-	return newEffect("R-AT-RENAMECON", fmt.Sprintf("constraint %q is renamed to %q in the catalog", sub.Name, sub.NewName))
+func ruleRenameConstraint(s scope, sub pg_parse.Subcommand) effect {
+	return newEffect(s, "R-AT-RENAMECON", fmt.Sprintf("constraint %q is renamed to %q in the catalog", sub.Name, sub.NewName))
 }
 
 // constraint resolves one named constraint of the table.

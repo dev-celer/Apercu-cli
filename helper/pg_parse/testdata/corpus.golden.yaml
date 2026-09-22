@@ -1114,6 +1114,9 @@
   sql: DROP TYPE IF EXISTS ct CASCADE
   command: DROP TYPE
   flags: [if_exists, cascade]
+  subcommands:
+    - kind: UNKNOWN
+      name: ct
 - rule: R-OB-PUB
   sql: ALTER PUBLICATION pb ADD TABLE t, ONLY u
   command: ALTER PUBLICATION

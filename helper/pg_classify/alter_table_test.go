@@ -108,8 +108,8 @@ func TestRecursionReachesDescendants(t *testing.T) {
 		},
 		{
 			name:      "a parent-only clause never reaches them",
-			sql:       "ALTER TABLE events OWNER TO app",
-			code:      "R-AT-OWNER",
+			sql:       "ALTER TABLE events SET SCHEMA public",
+			code:      "R-AT-SETSCHEMA",
 			relations: []string{"apercu_snapshot_test.events"},
 		},
 		{
@@ -342,38 +342,3 @@ func TestUnknownRelationFailsSafe(t *testing.T) {
 }
 
 // TestClassificationFollowsTheSessionContext validate that classification work on the shadow catalog.
-func TestClassificationFollowsTheSessionContext(t *testing.T) {
-	t.Parallel()
-
-	t.Run("a table created earlier in the file is not an unknown one", func(t *testing.T) {
-		analyses := analyze(t, testCatalog(t), "CREATE TABLE fresh (id int); ALTER TABLE fresh ADD COLUMN z int")
-		finding := findingOf(t, analyses[1], "R-AT-ADDCOL")
-		target := targetOf(t, finding, "apercu_snapshot_test.fresh")
-		assert.Equal(t, pg_contract.RelationKindTable, target.Relation.Kind)
-	})
-
-	t.Run("the transaction group is carried onto every statement", func(t *testing.T) {
-		analyses := analyze(t, testCatalog(t), "BEGIN; ALTER TABLE orders ADD COLUMN z int; COMMIT; ALTER TABLE orders ADD COLUMN y int")
-		assert.Equal(t, []pg_contract.TxnGroup{1, 1, 1, 2}, groupsOf(analyses))
-	})
-
-	t.Run("an unparsed statement classifies to nothing", func(t *testing.T) {
-		analyses := analyze(t, testCatalog(t), "NOT SQL AT ALL")
-		assert.Empty(t, analyses[0].Findings)
-		assert.Empty(t, analyses[0].Errors)
-	})
-
-	t.Run("a command §5 has not reached yet classifies to nothing", func(t *testing.T) {
-		analysis := single(t, testCatalog(t), "CREATE INDEX CONCURRENTLY i ON orders (status)")
-		assert.Empty(t, analysis.Findings)
-		assert.Equal(t, pg_contract.Command("CREATE INDEX"), analysis.Command)
-	})
-}
-
-func groupsOf(analyses []pg_contract.StatementAnalysis) []pg_contract.TxnGroup {
-	out := make([]pg_contract.TxnGroup, 0, len(analyses))
-	for _, analysis := range analyses {
-		out = append(out, analysis.TxnGroup)
-	}
-	return out
-}

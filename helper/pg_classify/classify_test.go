@@ -93,8 +93,11 @@ type ruleCase struct {
 	lock pg_contract.Lock
 	op   pg_contract.OpKind
 	// table defaults to the orders table, which most of the cases below act on.
-	table  string
-	errors []string
+	table string
+	// noTargets is a rule that names an object the target vocabulary cannot carry: a type, an
+	// extension, a schema. It reports what the statement does and locks nothing.
+	noTargets bool
+	errors    []string
 }
 
 func (c ruleCase) run(t *testing.T, catalog *pg_catalog.Catalog) {
@@ -113,6 +116,11 @@ func (c ruleCase) run(t *testing.T, catalog *pg_catalog.Catalog) {
 	}
 
 	finding := findingOf(t, analysis, c.code)
+	if c.noTargets {
+		assert.Emptyf(t, finding.Targets, "%s should name no relation for %q", c.code, c.sql)
+		assert.NotEmptyf(t, finding.Message, "%s says nothing about %q", c.code, c.sql)
+		return
+	}
 	relation := c.table
 	if relation == "" {
 		relation = "apercu_snapshot_test.orders"
@@ -153,4 +161,54 @@ func tablespaceCatalog(t *testing.T) *pg_catalog.Catalog {
 	catalog, err := pg_catalog.NewCatalog(pg_catalog.CatalogOptions{Pre: pre})
 	require.NoError(t, err)
 	return catalog
+}
+
+// The two tests below are the pipeline's own, rather than any rule's: what the classifier carries
+// from the session onto every statement, and which commands the registry deliberately ignores.
+func TestClassificationFollowsTheSessionContext(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a table created earlier in the file is not an unknown one", func(t *testing.T) {
+		analyses := analyze(t, testCatalog(t), "CREATE TABLE fresh (id int); ALTER TABLE fresh ADD COLUMN z int")
+		finding := findingOf(t, analyses[1], "R-AT-ADDCOL")
+		target := targetOf(t, finding, "apercu_snapshot_test.fresh")
+		assert.Equal(t, pg_contract.RelationKindTable, target.Relation.Kind)
+	})
+
+	t.Run("the transaction group is carried onto every statement", func(t *testing.T) {
+		analyses := analyze(t, testCatalog(t), "BEGIN; ALTER TABLE orders ADD COLUMN z int; COMMIT; ALTER TABLE orders ADD COLUMN y int")
+		assert.Equal(t, []pg_contract.TxnGroup{1, 1, 1, 2}, groupsOf(analyses))
+	})
+
+	t.Run("an unparsed statement classifies to nothing", func(t *testing.T) {
+		analyses := analyze(t, testCatalog(t), "NOT SQL AT ALL")
+		assert.Empty(t, analyses[0].Findings)
+		assert.Empty(t, analyses[0].Errors)
+	})
+}
+
+func groupsOf(analyses []pg_contract.StatementAnalysis) []pg_contract.TxnGroup {
+	out := make([]pg_contract.TxnGroup, 0, len(analyses))
+	for _, analysis := range analyses {
+		out = append(out, analysis.TxnGroup)
+	}
+	return out
+}
+
+func TestTransactionAndSessionControlClassifyToNothing(t *testing.T) {
+	t.Parallel()
+
+	cases := []ruleCase{
+		{name: "R-TX-BEGIN", sql: "BEGIN"},
+		{name: "R-TX-COMMIT", sql: "COMMIT"},
+		{name: "R-TX-ROLLBACK", sql: "ROLLBACK"},
+		{name: "R-TX-SAVEPOINT", sql: "SAVEPOINT s"},
+		{name: "R-TX-SET", sql: "SET LOCAL lock_timeout = '5s'"},
+		{name: "R-TX-RESET", sql: "RESET ALL"},
+	}
+
+	catalog := testCatalog(t)
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) { testCase.run(t, catalog) })
+	}
 }

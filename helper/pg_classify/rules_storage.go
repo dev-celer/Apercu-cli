@@ -9,31 +9,31 @@ import (
 )
 
 // ruleTrigger is R-AT-TRIG and R-AT-TRIG-REP.
-func ruleTrigger(_ scope, sub pg_parse.Subcommand) effect {
+func ruleTrigger(s scope, sub pg_parse.Subcommand) effect {
 	code := pg_contract.Code("R-AT-TRIG")
 	if sub.Value == "REPLICA" || sub.Value == "ALWAYS" {
 		code = "R-AT-TRIG-REP"
 	}
-	e := newEffect(code, "the trigger's firing mode changes in the catalog; writes on the table wait, reads do not")
+	e := newEffect(s, code, "the trigger's firing mode changes in the catalog; writes on the table wait, reads do not")
 	e.lock = pg_contract.LockShareRowExclusive
 	return e
 }
 
 // ruleRule is R-AT-RULE.
-func ruleRule(_ scope, sub pg_parse.Subcommand) effect {
-	return newEffect("R-AT-RULE", fmt.Sprintf("rule %q changes its firing mode in the catalog", sub.Name))
+func ruleRule(s scope, sub pg_parse.Subcommand) effect {
+	return newEffect(s, "R-AT-RULE", fmt.Sprintf("rule %q changes its firing mode in the catalog", sub.Name))
 }
 
 // ruleRowSecurity is R-AT-RLS.
-func ruleRowSecurity(_ scope, _ pg_parse.Subcommand) effect {
-	e := newEffect("R-AT-RLS", "row level security is switched on or off for the table; the policies themselves are untouched")
+func ruleRowSecurity(s scope, _ pg_parse.Subcommand) effect {
+	e := newEffect(s, "R-AT-RLS", "row level security is switched on or off for the table; the policies themselves are untouched")
 	e.recursion = parentOnly
 	return e
 }
 
 // ruleForceRowSecurity is R-AT-RLS-FORCE.
-func ruleForceRowSecurity(_ scope, _ pg_parse.Subcommand) effect {
-	e := newEffect("R-AT-RLS-FORCE", "row level security starts or stops applying to the table's owner as well")
+func ruleForceRowSecurity(s scope, _ pg_parse.Subcommand) effect {
+	e := newEffect(s, "R-AT-RLS-FORCE", "row level security starts or stops applying to the table's owner as well")
 	e.recursion = parentOnly
 	return e
 }
@@ -65,7 +65,7 @@ func relOptionLock(option pg_parse.Option) pg_contract.Lock {
 
 // ruleRelOptions is R-AT-RELOPT.
 func ruleRelOptions(s scope, sub pg_parse.Subcommand) effect {
-	e := newEffect("R-AT-RELOPT", "")
+	e := newEffect(s, "R-AT-RELOPT", "")
 	e.lock = pg_contract.LockNone
 	names := make([]string, 0, len(sub.Options))
 	for _, option := range sub.Options {
@@ -88,8 +88,8 @@ func ruleRelOptions(s scope, sub pg_parse.Subcommand) effect {
 }
 
 // ruleSetTablespace is R-AT-TABLESPACE.
-func ruleSetTablespace(_ scope, sub pg_parse.Subcommand) effect {
-	e := newEffect("R-AT-TABLESPACE", fmt.Sprintf("the heap is copied file by file into tablespace %q; the indexes are left where they are", sub.Value))
+func ruleSetTablespace(s scope, sub pg_parse.Subcommand) effect {
+	e := newEffect(s, "R-AT-TABLESPACE", fmt.Sprintf("the heap is copied file by file into tablespace %q; the indexes are left where they are", sub.Value))
 	e.op = pg_contract.OpKindRewrite
 	e.recursion = parentOnly
 	return e
@@ -97,7 +97,7 @@ func ruleSetTablespace(_ scope, sub pg_parse.Subcommand) effect {
 
 // ruleSetAccessMethod is R-AT-ACCESSMETHOD.
 func ruleSetAccessMethod(s scope, sub pg_parse.Subcommand) effect {
-	e := newEffect("R-AT-ACCESSMETHOD", "")
+	e := newEffect(s, "R-AT-ACCESSMETHOD", "")
 	e.recursion = parentOnly
 
 	current := s.relation().Relation.AccessMethod
@@ -116,7 +116,7 @@ func ruleSetLogged(s scope, sub pg_parse.Subcommand) effect {
 	if sub.Kind == pg_parse.SubSetUnlogged {
 		target = "UNLOGGED"
 	}
-	e := newEffect("R-AT-LOGGED", fmt.Sprintf("the table becomes %s, which rewrites the heap and follows through to the sequences its identity and serial columns own", target))
+	e := newEffect(s, "R-AT-LOGGED", fmt.Sprintf("the table becomes %s, which rewrites the heap and follows through to the sequences its identity and serial columns own", target))
 	e.op = pg_contract.OpKindRewrite
 	e.recursion = parentOnly
 
@@ -137,7 +137,7 @@ func ruleCluster(s scope, sub pg_parse.Subcommand) effect {
 	if sub.Kind == pg_parse.SubClusterOn && sub.Name != "" {
 		marked = sub.Name
 	}
-	e := newEffect("R-AT-CLUSTERON", fmt.Sprintf("%s is recorded as the index a later CLUSTER would use; no row moves now", marked))
+	e := newEffect(s, "R-AT-CLUSTERON", fmt.Sprintf("%s is recorded as the index a later CLUSTER would use; no row moves now", marked))
 	e.lock = pg_contract.LockShareUpdateExclusive
 	if marked != "no index" {
 		e.extra = append(e.extra, s.indexTarget(marked, pg_contract.LockShareUpdateExclusive, pg_contract.OpKindMetadata))
@@ -149,13 +149,13 @@ func ruleCluster(s scope, sub pg_parse.Subcommand) effect {
 }
 
 // ruleWithoutOids is R-AT-WITHOUTOIDS.
-func ruleWithoutOids(_ scope, _ pg_parse.Subcommand) effect {
-	return newEffect("R-AT-WITHOUTOIDS", "system OID columns no longer exist, so the statement is accepted and changes nothing")
+func ruleWithoutOids(s scope, _ pg_parse.Subcommand) effect {
+	return newEffect(s, "R-AT-WITHOUTOIDS", "system OID columns no longer exist, so the statement is accepted and changes nothing")
 }
 
 // ruleOwner is R-AT-OWNER.
 func ruleOwner(s scope, sub pg_parse.Subcommand) effect {
-	e := newEffect("R-AT-OWNER", fmt.Sprintf("the table and its indexes change owner to %s", sub.Value))
+	e := newEffect(s, "R-AT-OWNER", fmt.Sprintf("the table and its indexes change owner to %s", sub.Value))
 	e.recursion = parentOnly
 	if !s.relation().Exists() {
 		return e
@@ -177,7 +177,7 @@ func ruleOwner(s scope, sub pg_parse.Subcommand) effect {
 
 // ruleReplicaIdentity is R-AT-REPLIDENT.
 func ruleReplicaIdentity(s scope, sub pg_parse.Subcommand) effect {
-	e := newEffect("R-AT-REPLIDENT", fmt.Sprintf("the replica identity becomes %s", sub.Value))
+	e := newEffect(s, "R-AT-REPLIDENT", fmt.Sprintf("the replica identity becomes %s", sub.Value))
 	e.recursion = parentOnly
 	if sub.Value == "FULL" {
 		e.message += "; every later UPDATE and DELETE will log the whole old row, which is a replication cost and not a lock cost"
@@ -191,7 +191,7 @@ func ruleReplicaIdentity(s scope, sub pg_parse.Subcommand) effect {
 
 // ruleRenameRelation is R-AT-RENAME.
 func ruleRenameRelation(s scope, sub pg_parse.Subcommand) effect {
-	e := newEffect("R-AT-RENAME", fmt.Sprintf("the relation is renamed to %q in the catalog", sub.NewName))
+	e := newEffect(s, "R-AT-RENAME", fmt.Sprintf("the relation is renamed to %q in the catalog", sub.NewName))
 	e.recursion = parentOnly
 	if pg_contract.RelationKindFromRelkind(s.relation().Relation.Kind).IsIndex() {
 		e.message += "; the target is an index, and ALTER INDEX … RENAME does the same under SHARE UPDATE EXCLUSIVE"
@@ -200,8 +200,8 @@ func ruleRenameRelation(s scope, sub pg_parse.Subcommand) effect {
 }
 
 // ruleSetSchema is R-AT-SETSCHEMA.
-func ruleSetSchema(_ scope, sub pg_parse.Subcommand) effect {
-	e := newEffect("R-AT-SETSCHEMA", fmt.Sprintf("the relation moves to schema %q in the catalog", sub.Value))
+func ruleSetSchema(s scope, sub pg_parse.Subcommand) effect {
+	e := newEffect(s, "R-AT-SETSCHEMA", fmt.Sprintf("the relation moves to schema %q in the catalog", sub.Value))
 	e.recursion = parentOnly
 	return e
 }
@@ -213,7 +213,7 @@ func ruleInherit(s scope, sub pg_parse.Subcommand) effect {
 		verb, parentLock = "stops inheriting from", pg_contract.LockAccessShare
 	}
 
-	e := newEffect("R-AT-INHERIT", "")
+	e := newEffect(s, "R-AT-INHERIT", "")
 	parent := "an unnamed parent"
 	if len(sub.Relations) > 0 {
 		resolved := contract(s.resolve(sub.Relations[0]))
@@ -230,9 +230,9 @@ func ruleInherit(s scope, sub pg_parse.Subcommand) effect {
 }
 
 // ruleOf is R-AT-OF.
-func ruleOf(_ scope, sub pg_parse.Subcommand) effect {
+func ruleOf(s scope, sub pg_parse.Subcommand) effect {
 	if sub.Kind == pg_parse.SubDropOf {
-		return newEffect("R-AT-OF", "the table stops being a typed table; its columns are unchanged")
+		return newEffect(s, "R-AT-OF", "the table stops being a typed table; its columns are unchanged")
 	}
-	return newEffect("R-AT-OF", fmt.Sprintf("the table becomes a typed table over %s; its columns already match", sub.Value))
+	return newEffect(s, "R-AT-OF", fmt.Sprintf("the table becomes a typed table over %s; its columns already match", sub.Value))
 }
