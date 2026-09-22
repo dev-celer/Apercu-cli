@@ -83,6 +83,7 @@ func TestInventoryQueriesAreScoped(t *testing.T) {
 		"S-11 view deps":   viewDepsQuery,
 		"S-12 depends":     dependsQuery,
 		"S-18 relacls":     relACLsQuery,
+		"S-21 ext stats":   extStatsQuery,
 	}
 	reference := map[string]string{
 		"S-09 types":      typesQuery,

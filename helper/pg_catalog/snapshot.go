@@ -68,6 +68,7 @@ type Snapshot struct {
 	RelACLs         []RelACL         `json:"rel_acls"`         // S-18
 	Collations      []Collation      `json:"collations"`       // S-19
 	Tablespaces     []Tablespace     `json:"tablespaces"`      // S-20
+	ExtStats        []ExtStat        `json:"ext_stats"`        // S-21
 }
 
 // Header is S-00. General information about the server / the database.
@@ -124,6 +125,18 @@ func (r Relation) RelationName() helper.FullRelationName {
 type Tablespace struct {
 	OID  OID    `json:"oid"`
 	Name string `json:"name"`
+}
+
+// ExtStat is S-21.
+type ExtStat struct {
+	OID       OID    `json:"oid"`
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	RelID     OID    `json:"relid"` // The table the statistics are built on, the OID link to Relation
+}
+
+func (e ExtStat) RelationName() helper.FullRelationName {
+	return helper.FullRelationName{Schema: e.Namespace, Table: e.Name}
 }
 
 // Column is S-03.

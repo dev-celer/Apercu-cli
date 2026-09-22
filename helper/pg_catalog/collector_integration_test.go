@@ -82,6 +82,7 @@ CREATE TABLE computed (
 CREATE COLLATION case_sensitive (LC_COLLATE = 'C', LC_CTYPE = 'C');
 CREATE TABLE labels (id bigint, name text COLLATE case_sensitive, weight int);
 CREATE INDEX labels_name_idx ON labels (name, weight);
+CREATE STATISTICS labels_stats ON name, weight FROM labels;
 
 INSERT INTO users (email) SELECT 'user' || i || '@example.com' FROM generate_series(1, 500) i;
 INSERT INTO orders (id, user_id, total, status)
@@ -450,6 +451,16 @@ func collectAndVerify(t *testing.T, db *sql.DB) {
 		for _, kind := range []string{"r", "p", "i", "v", "m", "S"} {
 			assert.True(t, kinds[kind], "relkind %q missing from the inventory", kind)
 		}
+	})
+
+	t.Run("S-21 extended statistics", func(t *testing.T) {
+		require.Len(t, preview.ExtStats, 1)
+		assert.Equal(t, "labels_stats", preview.ExtStats[0].Name)
+		assert.Equal(t, testSchema, preview.ExtStats[0].Namespace)
+
+		labels, found := findRelation(preview, "labels")
+		require.True(t, found)
+		assert.Equal(t, labels.OID, preview.ExtStats[0].RelID)
 	})
 
 	t.Run("reference data", func(t *testing.T) {

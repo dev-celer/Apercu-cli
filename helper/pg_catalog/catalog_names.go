@@ -192,6 +192,23 @@ func (n *nameIndex) tablespaceOID(name string) (OID, bool) {
 	return oid, true
 }
 
+// ExtStatTable is the table an extended statistics object is built on. The name is resolved
+// through the search path the way a relation's is, because that is how the statement writes it.
+func (c *Catalog) ExtStatTable(schema, name string, searchPath []string) (Relation, bool) {
+	schemas := []string{schema}
+	if schema == "" {
+		schemas = searchPath
+	}
+	for _, candidate := range schemas {
+		for _, stat := range c.pre.ExtStats {
+			if stat.Namespace == candidate && stat.Name == name {
+				return c.ByOID(stat.RelID)
+			}
+		}
+	}
+	return Relation{}, false
+}
+
 // RelationsInTablespace lists the relations in a tablespace filtered by RelationKind and, optionally, owner
 //
 // exact is false when the name cannot be resolved.

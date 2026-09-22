@@ -590,6 +590,23 @@ func collectCollations(ctx context.Context, tx *sql.Tx, snapshot *Snapshot) erro
 	return err
 }
 
+const extStatsQuery = `
+SELECT e.oid, n.nspname, e.stxname, e.stxrelid
+FROM pg_statistic_ext e
+JOIN pg_namespace n ON n.oid = e.stxnamespace AND ` + userNS + `
+`
+
+// collectExtStats is S-21.
+func collectExtStats(ctx context.Context, tx *sql.Tx, snapshot *Snapshot) error {
+	rows, err := queryRows(ctx, tx, extStatsQuery, func(r *sql.Rows) (ExtStat, error) {
+		e := ExtStat{}
+		err := r.Scan(&e.OID, &e.Namespace, &e.Name, &e.RelID)
+		return e, err
+	})
+	snapshot.ExtStats = rows
+	return err
+}
+
 const tablespacesQuery = `SELECT s.oid, s.spcname FROM pg_tablespace s`
 
 // collectTablespaces is S-20.
