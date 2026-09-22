@@ -28,6 +28,7 @@ type relationIndex struct {
 	columnByName   map[columnKey]Column        // All Column keyed by columnKey (table OID + column name)
 	defaults       map[columnKey]ColumnDefault // All Column default keyed by columnKey (table OID + column name)
 	viewDeps       map[OID][]ViewDep           // All ViewDep, keyed by the referenced relation OID
+	viewSources    map[OID][]ViewDep           // All ViewDep, keyed by the dependent relation OID
 	collations     map[OID]Collation           // All Collation, keyed by Collation OID
 }
 
@@ -45,6 +46,7 @@ func (r *relationIndex) build(snapshot *Snapshot) {
 	r.columnByName = make(map[columnKey]Column, len(snapshot.Columns))
 	r.defaults = make(map[columnKey]ColumnDefault, len(snapshot.Defaults))
 	r.viewDeps = map[OID][]ViewDep{}
+	r.viewSources = map[OID][]ViewDep{}
 	r.collations = make(map[OID]Collation, len(snapshot.Collations))
 
 	for _, index := range snapshot.Indexes {
@@ -81,6 +83,7 @@ func (r *relationIndex) build(snapshot *Snapshot) {
 	}
 	for _, dep := range snapshot.ViewDeps {
 		r.viewDeps[dep.ReferencedRelID] = append(r.viewDeps[dep.ReferencedRelID], dep)
+		r.viewSources[dep.DependentRelID] = append(r.viewSources[dep.DependentRelID], dep)
 	}
 	for _, collation := range snapshot.Collations {
 		r.collations[collation.OID] = collation
@@ -353,6 +356,11 @@ func checkProvesNotNull(def, column string) bool {
 // ViewDependents lists the views and matviews built on a relation.
 func (c *Catalog) ViewDependents(relID OID) []ViewDep {
 	return c.relations.viewDeps[relID]
+}
+
+// ViewSources lists the relations a view or a materialized view reads.
+func (c *Catalog) ViewSources(relID OID) []ViewDep {
+	return c.relations.viewSources[relID]
 }
 
 // ViewDependentsOfColumn lists the views and matviews built on a relation that read one particular column.
