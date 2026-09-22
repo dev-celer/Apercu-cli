@@ -4,6 +4,7 @@ import (
 	"apercu-cli/helper"
 	"apercu-cli/helper/pg_contract"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -212,6 +213,23 @@ func (c *Catalog) lookup(name helper.FullRelationName) RelationInfo {
 func (c *Catalog) ByOID(oid OID) (Relation, bool) {
 	rel, ok := c.byOID[oid]
 	return rel, ok
+}
+
+// RelationsInSchema lists the relations of a schema, filtered by RelationKind.
+// An empty schema name answers with every relation the snapshot holds, which is the target set of
+// a database-wide statement.
+func (c *Catalog) RelationsInSchema(schema string, kinds []pg_contract.RelationKind) []Relation {
+	var relations []Relation
+	for _, rel := range c.pre.Relations {
+		if schema != "" && rel.Namespace != schema {
+			continue
+		}
+		if !slices.Contains(kinds, pg_contract.RelationKindFromRelkind(rel.Kind)) {
+			continue
+		}
+		relations = append(relations, rel)
+	}
+	return relations
 }
 
 // Declare records an object the migration creates.
