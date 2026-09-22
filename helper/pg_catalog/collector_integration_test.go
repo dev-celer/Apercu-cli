@@ -53,6 +53,7 @@ ALTER TABLE orders ADD CONSTRAINT orders_status_not_null CHECK (status IS NOT NU
 CREATE TABLE events (id bigint, at timestamptz NOT NULL) PARTITION BY RANGE (at);
 CREATE TABLE events_2025 PARTITION OF events FOR VALUES FROM ('2025-01-01') TO ('2026-01-01');
 CREATE TABLE events_default PARTITION OF events DEFAULT;
+CREATE INDEX events_at_idx ON events (at);
 
 CREATE TABLE legacy_parent (id bigint);
 CREATE TABLE legacy_child () INHERITS (legacy_parent);
@@ -448,7 +449,7 @@ func collectAndVerify(t *testing.T, db *sql.DB) {
 				kinds[rel.Kind] = true
 			}
 		}
-		for _, kind := range []string{"r", "p", "i", "v", "m", "S"} {
+		for _, kind := range []string{"r", "p", "i", "I", "v", "m", "S"} {
 			assert.True(t, kinds[kind], "relkind %q missing from the inventory", kind)
 		}
 	})
