@@ -21,6 +21,7 @@ type relationIndex struct {
 	fkFrom         map[OID][]Constraint        // All foreign key Constraint starting from this table, keyed by table OID
 	fkTo           map[OID][]Constraint        // All foreign key Constraint targeting this table, keyed by table OID
 	sequences      map[OID]Sequence            // All Sequence, keyed by sequence OID
+	sequencesOwned map[OID][]Sequence          // All Sequence a table owns, keyed by the owning table OID
 	children       map[OID][]InheritEdge       // All InheritEdge children for a relation, keyed by parent relation OID
 	parents        map[OID][]InheritEdge       // All InheritEdge parents for a relation, keyed by children relation OID
 	columns        map[OID][]Column            // All Column for a table, keyed by table OID
@@ -37,6 +38,7 @@ func (r *relationIndex) build(snapshot *Snapshot) {
 	r.fkFrom = map[OID][]Constraint{}
 	r.fkTo = map[OID][]Constraint{}
 	r.sequences = make(map[OID]Sequence, len(snapshot.Sequences))
+	r.sequencesOwned = map[OID][]Sequence{}
 	r.children = map[OID][]InheritEdge{}
 	r.parents = map[OID][]InheritEdge{}
 	r.columns = map[OID][]Column{}
@@ -60,6 +62,9 @@ func (r *relationIndex) build(snapshot *Snapshot) {
 	}
 	for _, sequence := range snapshot.Sequences {
 		r.sequences[sequence.SeqRelID] = sequence
+		if sequence.OwnerTable != 0 {
+			r.sequencesOwned[sequence.OwnerTable] = append(r.sequencesOwned[sequence.OwnerTable], sequence)
+		}
 	}
 	for _, edge := range snapshot.Inherits {
 		r.children[edge.Parent] = append(r.children[edge.Parent], edge)
@@ -179,6 +184,11 @@ func (c *Catalog) SequenceOwner(seqRelID OID) (OID, int16, bool) {
 		return 0, 0, false
 	}
 	return sequence.OwnerTable, sequence.OwnerAttNum, true
+}
+
+// SequencesOwnedBy lists the sequences a table's identity and serial columns draw from.
+func (c *Catalog) SequencesOwnedBy(relID OID) []Sequence {
+	return c.relations.sequencesOwned[relID]
 }
 
 // Children lists the direct children of a relation.
