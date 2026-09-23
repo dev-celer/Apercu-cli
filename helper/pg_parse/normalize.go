@@ -58,7 +58,7 @@ func normalizeNode(node *pg_query.Node, s Statement) Statement {
 		s = normalizeCreateStats(n.CreateStatsStmt, s)
 	case *pg_query.Node_AlterStatsStmt:
 		s.Command = "ALTER STATISTICS"
-		s.Subcommands = []Subcommand{{Kind: SubSetStatistics, Name: strings.Join(nameParts(n.AlterStatsStmt.Defnames), ".")}}
+		s.Subcommands = []Subcommand{{Kind: SubSetStatistics, Object: objectRef(n.AlterStatsStmt.Defnames).Name}}
 	case *pg_query.Node_CommentStmt:
 		s = normalizeComment(n.CommentStmt, s)
 	case *pg_query.Node_GrantStmt:

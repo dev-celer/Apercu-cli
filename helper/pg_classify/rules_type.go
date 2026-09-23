@@ -3,6 +3,7 @@ package pg_classify
 import (
 	"fmt"
 
+	"apercu-cli/helper"
 	"apercu-cli/helper/pg_catalog"
 	"apercu-cli/helper/pg_contract"
 	"apercu-cli/helper/pg_parse"
@@ -33,7 +34,7 @@ func enumClause(s scope) (string, string) {
 		return "", ""
 	}
 	sub := s.statement.Subcommands[0]
-	return sub.Value, sub.Name
+	return sub.Value, sub.ObjectName()
 }
 
 // typeClauseRules is the ALTER TYPE half of the clause registry.
@@ -142,19 +143,19 @@ func classifyAlterDomain(s scope) ([]pg_contract.Finding, []pg_contract.Error) {
 func ruleDomainAddConstraint(s scope, sub pg_parse.Subcommand) effect {
 	notValid := sub.Constraint != nil && sub.Constraint.NotValid
 
-	e := newEffect(s, "R-TY-DOMAIN-ADD", fmt.Sprintf("a constraint is added to domain %s, and every table holding a column of it is read to prove it", sub.Name))
+	e := newEffect(s, "R-TY-DOMAIN-ADD", fmt.Sprintf("a constraint is added to domain %s, and every table holding a column of it is read to prove it", sub.ObjectName()))
 	e.lock = pg_contract.LockShare
 	e.op = pg_contract.OpKindScan
 	e.recursion = parentOnly
 	if notValid {
 		// NOT VALID reads no user relation, the change is limited to the type only.
 		e.op = pg_contract.OpKindMetadata
-		e.message = fmt.Sprintf("NOT VALID records the constraint on domain %s and enforces it for new values only; no existing row is read and no table holding a column of it is opened", sub.Name)
+		e.message = fmt.Sprintf("NOT VALID records the constraint on domain %s and enforces it for new values only; no existing row is read and no table holding a column of it is opened", sub.ObjectName())
 		return e.onNone()
 	}
 
 	e = e.onNone()
-	e.extra = append(e.extra, s.domainColumnTargets(sub.Name, e.lock, e.op)...)
+	e.extra = append(e.extra, s.domainColumnTargets(sub.Object, e.lock, e.op)...)
 	if len(e.extra) == 0 {
 		e.message += "; no column in the snapshot uses it, so nothing is read"
 	}
@@ -162,9 +163,8 @@ func ruleDomainAddConstraint(s scope, sub pg_parse.Subcommand) effect {
 }
 
 // domainColumnTargets is the tables holding a column of a type.
-func (s scope) domainColumnTargets(name string, lock pg_contract.Lock, op pg_contract.OpKind) []pg_contract.Target {
-	schema, base := splitQualified(name)
-	domain, ok := s.catalog.TypeByName(schema, base, s.context.SearchPath)
+func (s scope) domainColumnTargets(name helper.FullRelationName, lock pg_contract.Lock, op pg_contract.OpKind) []pg_contract.Target {
+	domain, ok := s.catalog.TypeByName(name.Schema, name.Table, s.context.SearchPath)
 	if !ok {
 		return nil
 	}
@@ -197,8 +197,8 @@ func ruleDropType(s scope) effect {
 	names := make([]string, 0, len(s.statement.Subcommands))
 	used := false
 	for _, sub := range s.statement.Subcommands {
-		names = append(names, sub.Name)
-		targets := s.domainColumnTargets(sub.Name, pg_contract.LockAccessExclusive, pg_contract.OpKindMetadata)
+		names = append(names, sub.ObjectName())
+		targets := s.domainColumnTargets(sub.Object, pg_contract.LockAccessExclusive, pg_contract.OpKindMetadata)
 		used = used || len(targets) > 0
 		e.extra = append(e.extra, targets...)
 	}

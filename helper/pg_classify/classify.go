@@ -237,16 +237,6 @@ func (s scope) descendantsOf(info pg_catalog.RelationInfo) []descendant {
 	return out
 }
 
-// splitQualified breaks a dotted name into its schema and its base.
-func splitQualified(name string) (string, string) {
-	for i := len(name) - 1; i >= 0; i-- {
-		if name[i] == '.' {
-			return name[:i], name[i+1:]
-		}
-	}
-	return "", name
-}
-
 // contract is a resolved relation in the vocabulary a finding speaks.
 func contract(info pg_catalog.RelationInfo) pg_contract.Relation {
 	return pg_contract.Relation{

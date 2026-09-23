@@ -140,6 +140,45 @@ func TestUnqualifiedNamesStayUnqualified(t *testing.T) {
 	assert.Equal(t, "s", qualified.Relations[0].Name.Schema)
 }
 
+// TestObjectNamesKeepTheirParts covers the clauses that name something which is not a relation:
+// a type, a domain, an extended statistics object. They carry a qualified name that has nowhere
+// to go in Relations, and it is kept in parts rather than joined, because an identifier may hold
+// a dot of its own and joining makes the two spellings indistinguishable.
+func TestObjectNamesKeepTheirParts(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		sql    string
+		schema string
+		name   string
+		render string
+	}{
+		{`DROP TYPE ct`, "", "ct", "ct"},
+		{`DROP TYPE s.ct`, "s", "ct", "s.ct"},
+		{`DROP TYPE "my.type"`, "", "my.type", `"my.type"`},
+		{`DROP DOMAIN s."odd.one"`, "s", "odd.one", `s."odd.one"`},
+		{`DROP STATISTICS "odd.stat"`, "", "odd.stat", `"odd.stat"`},
+		{`CREATE STATISTICS s.st ON a, b FROM t`, "s", "st", "s.st"},
+		{`ALTER STATISTICS s.st SET STATISTICS 100`, "s", "st", "s.st"},
+		{`ALTER TYPE s.e ADD VALUE 'v'`, "s", "e", "s.e"},
+		{`ALTER TYPE "my.enum" RENAME VALUE 'a' TO 'b'`, "", "my.enum", `"my.enum"`},
+		{`ALTER DOMAIN "my.domain" ADD CONSTRAINT c CHECK (VALUE > 0)`, "", "my.domain", `"my.domain"`},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.sql, func(t *testing.T) {
+			statement := ParseOne(testCase.sql)
+			require.Len(t, statement.Subcommands, 1)
+
+			sub := statement.Subcommands[0]
+			assert.Equal(t, testCase.schema, sub.Object.Schema, "schema")
+			assert.Equal(t, testCase.name, sub.Object.Table, "name")
+			assert.Equal(t, testCase.render, sub.ObjectName(), "rendering")
+			assert.Empty(t, sub.Name, "the object name belongs in Object, not in Name")
+		})
+	}
+}
+
 // TestSingleLockStatementDecomposition is R-AT-000: the clauses arrive in the order written, and
 // the clauses that can never share a statement say so.
 func TestSingleLockStatementDecomposition(t *testing.T) {

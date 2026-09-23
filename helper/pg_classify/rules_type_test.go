@@ -70,6 +70,25 @@ func TestAttributeClausesSayWhichOneTheyAre(t *testing.T) {
 	}
 }
 
+// TestDottedIdentifierIsNotASchema pins the fix for a name the parser used to flatten: a quoted
+// identifier holding a dot was indistinguishable from a qualified name by the time a rule saw it,
+// so the lookup went to a schema nobody wrote.
+func TestDottedIdentifierIsNotASchema(t *testing.T) {
+	t.Parallel()
+
+	catalog := testCatalog(t)
+
+	// "mood.x" is one identifier. Read as apercu_snapshot_test."mood.x" it resolves to nothing,
+	// where splitting it would have looked for a type x in a schema mood.
+	quoted := findingOf(t, single(t, catalog, `DROP TYPE "mood.x" CASCADE`), "R-TY-DROP")
+	assert.Contains(t, quoted.Message, `"mood.x"`, "the message quotes the name back as written")
+	assert.Empty(t, quoted.Targets, "nothing in the snapshot declares a column of it")
+
+	// The qualified spelling still resolves, which is what makes the two distinguishable.
+	qualified := findingOf(t, single(t, catalog, "DROP TYPE apercu_snapshot_test.mood CASCADE"), "R-TY-DROP")
+	assert.Equal(t, pg_contract.LockAccessExclusive, targetOf(t, qualified, "apercu_snapshot_test.profiles").Lock)
+}
+
 func TestDroppingATypeNamesWhatWouldLoseAColumn(t *testing.T) {
 	t.Parallel()
 

@@ -66,10 +66,9 @@ func ruleStatistics(s scope) effect {
 		return e
 	}
 	for _, sub := range s.statement.Subcommands {
-		schema, name := splitQualified(sub.Name)
-		table, ok := s.catalog.ExtStatTable(schema, name, s.context.SearchPath)
+		table, ok := s.catalog.ExtStatTable(sub.Object.Schema, sub.Object.Table, s.context.SearchPath)
 		if !ok {
-			e.message += fmt.Sprintf("; the snapshot holds no statistics object named %s, so the table behind it is unknown", sub.Name)
+			e.message += fmt.Sprintf("; the snapshot holds no statistics object named %s, so the table behind it is unknown", sub.ObjectName())
 			continue
 		}
 		e.extra = append(e.extra, pg_contract.Target{

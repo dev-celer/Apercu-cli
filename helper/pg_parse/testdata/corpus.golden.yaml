@@ -1051,7 +1051,7 @@
     - table: t
   subcommands:
     - kind: SET STATISTICS
-      name: st
+      object: st
 - rule: R-OB-COMMENT
   sql: COMMENT ON TABLE s.t IS 'x'
   command: COMMENT ON TABLE
@@ -1076,7 +1076,7 @@
   command: ALTER TYPE ADD VALUE
   subcommands:
     - kind: ADD VALUE
-      name: e
+      object: e
       value: v
       flags: [if_not_exists]
 - rule: R-TY-RENAMEVALUE
@@ -1084,7 +1084,7 @@
   command: ALTER TYPE RENAME VALUE
   subcommands:
     - kind: RENAME VALUE
-      name: e
+      object: e
       new_name: b
       value: a
 - rule: R-TY-ATTR
@@ -1104,7 +1104,7 @@
   command: ALTER DOMAIN
   subcommands:
     - kind: ADD CONSTRAINT
-      name: d
+      object: d
       constraint:
         type: CHECK
         name: c
@@ -1116,7 +1116,7 @@
   flags: [if_exists, cascade]
   subcommands:
     - kind: UNKNOWN
-      name: ct
+      object: ct
 - rule: R-OB-PUB
   sql: ALTER PUBLICATION pb ADD TABLE t, ONLY u
   command: ALTER PUBLICATION

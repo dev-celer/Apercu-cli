@@ -208,8 +208,8 @@ func normalizeDrop(stmt *pg_query.DropStmt, s Statement) Statement {
 			// A type is not a relation. The rules read its name off the clause and resolve it against the type index instead.
 			if typeName, ok := object.GetNode().(*pg_query.Node_TypeName); ok {
 				s.Subcommands = append(s.Subcommands, Subcommand{
-					Kind: SubUnknown,
-					Name: strings.Join(nameParts(typeName.TypeName.Names), "."),
+					Kind:   SubUnknown,
+					Object: objectRef(typeName.TypeName.Names).Name,
 				})
 			}
 		case pg_query.ObjectType_OBJECT_STATISTIC_EXT:
@@ -218,8 +218,8 @@ func normalizeDrop(stmt *pg_query.DropStmt, s Statement) Statement {
 				continue
 			}
 			s.Subcommands = append(s.Subcommands, Subcommand{
-				Kind: SubSetStatistics,
-				Name: strings.Join(nameParts(names), "."),
+				Kind:   SubSetStatistics,
+				Object: objectRef(names).Name,
 			})
 		default:
 			// A DROP EXTENSION spells its object as a bare name rather than as a relation.
@@ -264,7 +264,7 @@ func normalizeCreateStats(stmt *pg_query.CreateStatsStmt, s Statement) Statement
 	s.Command = "CREATE STATISTICS"
 	s.Flags.IfNotExists = stmt.IfNotExists
 	s.Relations = rangeRelations(stmt.Relations)
-	s.Subcommands = []Subcommand{{Kind: SubSetStatistics, Name: strings.Join(nameParts(stmt.Defnames), ".")}}
+	s.Subcommands = []Subcommand{{Kind: SubSetStatistics, Object: objectRef(stmt.Defnames).Name}}
 	return s
 }
 
@@ -327,7 +327,7 @@ func normalizeGrant(stmt *pg_query.GrantStmt, s Statement) Statement {
 // normalizeAlterEnum
 func normalizeAlterEnum(stmt *pg_query.AlterEnumStmt, s Statement) Statement {
 	s.Command = "ALTER TYPE ADD VALUE"
-	sub := Subcommand{Kind: SubAddEnumValue, Name: strings.Join(nameParts(stmt.TypeName), "."), Value: stmt.NewVal}
+	sub := Subcommand{Kind: SubAddEnumValue, Object: objectRef(stmt.TypeName).Name, Value: stmt.NewVal}
 	sub.Flags.IfNotExists = stmt.SkipIfNewValExists
 	if stmt.OldVal != "" {
 		s.Command = "ALTER TYPE RENAME VALUE"
@@ -341,7 +341,7 @@ func normalizeAlterEnum(stmt *pg_query.AlterEnumStmt, s Statement) Statement {
 
 func normalizeAlterDomain(stmt *pg_query.AlterDomainStmt, s Statement) Statement {
 	s.Command = "ALTER DOMAIN"
-	sub := Subcommand{Name: strings.Join(nameParts(stmt.TypeName), ".")}
+	sub := Subcommand{Object: objectRef(stmt.TypeName).Name}
 	switch stmt.Subtype {
 	case "C":
 		sub.Kind = SubAddConstraint

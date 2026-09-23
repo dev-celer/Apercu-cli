@@ -110,6 +110,8 @@ type Subcommand struct {
 	// Name is the object the clause acts on: a column, a constraint, a trigger, a rule.
 	// Empty when the clause acts on the relation as a whole.
 	Name string
+	// Object is the qualified name of an object that is not the primary relation acted on.
+	Object helper.FullRelationName
 	// NewName is the target of a RENAME.
 	NewName string
 	// Column carries the definition of ADD COLUMN and the new type of ALTER COLUMN TYPE.
@@ -132,6 +134,23 @@ type Subcommand struct {
 	// loc is where the clause starts in the parsed text.
 	// The shim uses it to attach a feature it had to blank out to the clause the feature belonged to.
 	loc int
+}
+
+// ObjectName renders Object the way the statement wrote it: the schema only when the statement
+// qualified it, and a part holding a dot of its own quoted, so that "my.type" and my.type stay
+// distinguishable in a message the way they already are in the field.
+func (s Subcommand) ObjectName() string {
+	if s.Object.Schema == "" {
+		return quoteDotted(s.Object.Table)
+	}
+	return quoteDotted(s.Object.Schema) + "." + quoteDotted(s.Object.Table)
+}
+
+func quoteDotted(part string) string {
+	if strings.Contains(part, ".") {
+		return `"` + part + `"`
+	}
+	return part
 }
 
 // Persistence is the storage durability a CREATE asks for.

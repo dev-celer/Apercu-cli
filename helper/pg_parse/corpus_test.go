@@ -1,6 +1,7 @@
 package pg_parse
 
 import (
+	"apercu-cli/helper"
 	"bytes"
 	"os"
 	"path/filepath"
@@ -125,6 +126,7 @@ type fixtureRelation struct {
 type fixtureSub struct {
 	Kind       string             `yaml:"kind"`
 	Name       string             `yaml:"name,omitempty"`
+	Object     string             `yaml:"object,omitempty"`
 	NewName    string             `yaml:"new_name,omitempty"`
 	Value      string             `yaml:"value,omitempty"`
 	Flags      []string           `yaml:"flags,omitempty,flow"`
@@ -233,6 +235,9 @@ func newFixtureSub(sub Subcommand) fixtureSub {
 		Value:   sub.Value,
 		Flags:   flagNames(sub.Flags),
 		Options: optionNames(sub.Options),
+	}
+	if sub.Object != (helper.FullRelationName{}) {
+		fixture.Object = sub.ObjectName()
 	}
 	if sub.Expr != nil {
 		fixture.Expr = sub.Expr.String()
