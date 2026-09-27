@@ -372,6 +372,61 @@ func TestVersionRangeOverlaps(t *testing.T) {
 	assert.False(t, Exactly(Version15).Overlaps(Exactly(Version16)))
 }
 
+func TestLevel(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, LevelUnset, Level(0))
+	assert.False(t, LevelUnset.Decided())
+	assert.True(t, LevelLow.Decided())
+	assert.Equal(t, LevelHigh, MaxLevel(LevelLow, LevelHigh, LevelMedium))
+	assert.Equal(t, LevelUnset, MaxLevel())
+
+	// Test that level can be converted to warning's level.
+	assert.Equal(t, uint8(warning_interface.WarningLevelLow), uint8(LevelLow))
+	assert.Equal(t, uint8(warning_interface.WarningLevelMedium), uint8(LevelMedium))
+	assert.Equal(t, uint8(warning_interface.WarningLevelHigh), uint8(LevelHigh))
+
+	for _, spelling := range []string{"high", "HIGH", "High"} {
+		level, err := ParseLevel(spelling)
+		require.NoError(t, err)
+		assert.Equal(t, LevelHigh, level)
+	}
+	unset, err := ParseLevel("")
+	require.NoError(t, err)
+	assert.Equal(t, LevelUnset, unset)
+
+	_, err = ParseLevel("screaming")
+	assert.Error(t, err)
+
+	for _, level := range []Level{LevelUnset, LevelLow, LevelMedium, LevelHigh} {
+		asJSON, err := json.Marshal(level)
+		require.NoErrorf(t, err, "%s", level)
+
+		var fromJSON Level
+		require.NoError(t, json.Unmarshal(asJSON, &fromJSON))
+		assert.Equal(t, level, fromJSON)
+
+		asYAML, err := yaml.Marshal(level)
+		require.NoError(t, err)
+
+		var fromYAML Level
+		require.NoError(t, yaml.Unmarshal(asYAML, &fromYAML))
+		assert.Equal(t, level, fromYAML)
+	}
+}
+
+func TestFindingLevelIsOmittedWhenUndecided(t *testing.T) {
+	t.Parallel()
+
+	undecided, err := json.Marshal(Finding{Code: "R-AT-ADDCOL", Severity: SeverityInfo, Message: "m"})
+	require.NoError(t, err)
+	assert.NotContains(t, string(undecided), "level")
+
+	decided, err := json.Marshal(Finding{Code: "V-02", Severity: SeverityWarn, Message: "m", Level: LevelHigh})
+	require.NoError(t, err)
+	assert.Contains(t, string(decided), `"level":"HIGH"`)
+}
+
 func TestVersionRangeString(t *testing.T) {
 	t.Parallel()
 

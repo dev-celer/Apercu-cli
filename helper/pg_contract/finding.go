@@ -74,6 +74,7 @@ type Finding struct {
 	Severity Severity `json:"severity" yaml:"severity"`
 	Message  string   `json:"message" yaml:"message"`
 	Targets  []Target `json:"targets,omitempty" yaml:"targets,omitempty"`
+	Level    Level    `json:"level,omitempty" yaml:"level,omitempty"`
 }
 
 // MaxLock is the strongest lock any of the finding's targets takes.
@@ -109,6 +110,80 @@ func (e Error) Error() string {
 		return fmt.Sprintf("%s: %s", e.Code, e.Message)
 	}
 	return fmt.Sprintf("%s: %s (valid on %s)", e.Code, e.Message, e.Versions)
+}
+
+// Level describe the impact of the finding, it can be converted to warning's level.
+//
+// LevelUnset is used for most of the finding as a temporary state, until it receive prod database metrics.
+type Level uint8
+
+const (
+	LevelUnset  Level = 0
+	LevelLow    Level = 1
+	LevelMedium Level = 2
+	LevelHigh   Level = 3
+)
+
+var levelNames = map[Level]string{
+	LevelUnset:  "UNSET",
+	LevelLow:    "LOW",
+	LevelMedium: "MEDIUM",
+	LevelHigh:   "HIGH",
+}
+
+var levelAliases = buildAliases(levelNames, map[string]Level{
+	"": LevelUnset,
+})
+
+func (l Level) String() string {
+	if name, ok := levelNames[l]; ok {
+		return name
+	}
+	return "UNKNOWN"
+}
+
+// Decided reports whether the level is already set or if it is waiting for prod metrics.
+func (l Level) Decided() bool { return l != LevelUnset }
+
+// MaxLevel returns the highest of the given levels, LevelUnset for none.
+func MaxLevel(levels ...Level) Level {
+	highest := LevelUnset
+	for _, l := range levels {
+		if l > highest {
+			highest = l
+		}
+	}
+	return highest
+}
+
+// ParseLevel accepts any spelling of a level. Empty is LevelUnset.
+func ParseLevel(s string) (Level, error) {
+	return parseEnum(s, levelAliases)
+}
+
+func (l Level) MarshalText() ([]byte, error) {
+	return marshalEnum(l, levelNames)
+}
+
+func (l *Level) UnmarshalText(data []byte) error {
+	parsed, err := ParseLevel(string(data))
+	if err != nil {
+		return err
+	}
+	*l = parsed
+	return nil
+}
+
+func (l Level) MarshalYAML() (any, error) {
+	return l.String(), nil
+}
+
+func (l *Level) UnmarshalYAML(unmarshal func(any) error) error {
+	var s string
+	if err := unmarshal(&s); err != nil {
+		return err
+	}
+	return l.UnmarshalText([]byte(s))
 }
 
 // StatementAnalysis is the parser's record for one statement.
