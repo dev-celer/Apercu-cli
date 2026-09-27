@@ -500,6 +500,81 @@ func TestStatementAnalysisAggregates(t *testing.T) {
 	assert.Equal(t, OpKindNone, empty.MaxOpKind())
 }
 
+func TestMigrationAnalysis(t *testing.T) {
+	t.Parallel()
+
+	orders := helper.FullRelationName{Schema: "public", Table: "orders"}
+	users := helper.FullRelationName{Schema: "public", Table: "users"}
+
+	analysis := MigrationAnalysis{
+		Statements: []StatementAnalysis{
+			{RawSQL: "BEGIN", TxnGroup: 1},
+			{RawSQL: "ALTER TABLE orders ADD COLUMN z int", TxnGroup: 1,
+				Errors: []Error{{Code: "V-01", Message: "first"}}},
+			{RawSQL: "ALTER TABLE users ADD COLUMN z int", TxnGroup: 1},
+			{RawSQL: "COMMIT", TxnGroup: 1,
+				Errors: []Error{{Code: "V-05", Message: "second"}}},
+		},
+		Envelopes: []LockEnvelope{
+			{Relation: Relation{Name: orders, Kind: RelationKindTable}, Lock: LockAccessExclusive,
+				TxnGroup: 1, OpenedBy: 1, BlockingWindow: 3 * time.Second, Statements: 3},
+			{Relation: Relation{Name: users, Kind: RelationKindTable}, Lock: LockAccessExclusive,
+				TxnGroup: 1, OpenedBy: 2, BlockingWindow: 2 * time.Second, Statements: 2},
+		},
+	}
+
+	errors := analysis.Errors()
+	require.Len(t, errors, 2)
+	assert.Equal(t, "first", errors[0].Message, "errors come back in statement order")
+	assert.Equal(t, "second", errors[1].Message)
+
+	onOrders := analysis.EnvelopesOn(orders)
+	require.Len(t, onOrders, 1)
+	assert.Equal(t, 3*time.Second, onOrders[0].BlockingWindow)
+	assert.Empty(t, analysis.EnvelopesOn(helper.FullRelationName{Schema: "public", Table: "absent"}))
+
+	assert.Equal(t, "public.orders AEL for 3s over 3 statement(s)", onOrders[0].String())
+}
+
+func TestMigrationAnalysisSerialization(t *testing.T) {
+	t.Parallel()
+
+	analysis := MigrationAnalysis{
+		Statements: []StatementAnalysis{{
+			RawSQL:   "VACUUM FULL orders",
+			TxnGroup: 1,
+			Command:  "VACUUM",
+			Findings: []Finding{{
+				Code: "V-07", Severity: SeverityWarn, Level: LevelHigh,
+				Message: "a full rewrite under ACCESS EXCLUSIVE",
+			}},
+		}},
+		Envelopes: []LockEnvelope{{
+			Relation: NewRelation("public", "orders", RelationKindTable),
+			Lock:     LockAccessExclusive, TxnGroup: 1, OpenedBy: 0,
+			BlockingWindow: 250 * time.Millisecond, Statements: 1,
+		}},
+	}
+
+	asJSON, err := json.Marshal(analysis)
+	require.NoError(t, err)
+
+	var fromJSON MigrationAnalysis
+	require.NoError(t, json.Unmarshal(asJSON, &fromJSON))
+	assert.Equal(t, analysis, fromJSON)
+
+	asYAML, err := yaml.Marshal(analysis)
+	require.NoError(t, err)
+
+	var fromYAML MigrationAnalysis
+	require.NoError(t, yaml.Unmarshal(asYAML, &fromYAML))
+	assert.Equal(t, analysis, fromYAML)
+
+	bare, err := json.Marshal(MigrationAnalysis{Statements: []StatementAnalysis{{RawSQL: "SELECT 1"}}})
+	require.NoError(t, err)
+	assert.NotContains(t, string(bare), "envelopes")
+}
+
 func TestError(t *testing.T) {
 	t.Parallel()
 

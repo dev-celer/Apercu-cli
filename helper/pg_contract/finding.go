@@ -1,10 +1,6 @@
 package pg_contract
 
-import (
-	"apercu-cli/helper"
-	"apercu-cli/helper/warning_interface"
-	"fmt"
-)
+import "fmt"
 
 type Severity uint8
 
@@ -64,9 +60,6 @@ type Code string
 
 // Command is the statement's top-level command, e.g. "ALTER TABLE".
 type Command string
-
-// TxnGroup numbers the transaction a statement belongs to.
-type TxnGroup int
 
 // Finding is one thing a rule observed about a statement.
 type Finding struct {
@@ -184,53 +177,4 @@ func (l *Level) UnmarshalYAML(unmarshal func(any) error) error {
 		return err
 	}
 	return l.UnmarshalText([]byte(s))
-}
-
-// StatementAnalysis is the parser's record for one statement.
-type StatementAnalysis struct {
-	RawSQL      string                      `json:"raw_sql" yaml:"raw_sql"`
-	TxnGroup    TxnGroup                    `json:"txn_group" yaml:"txn_group"`
-	Command     Command                     `json:"command" yaml:"command"`
-	Subcommands []string                    `json:"subcommands,omitempty" yaml:"subcommands,omitempty"`
-	Findings    []Finding                   `json:"findings,omitempty" yaml:"findings,omitempty"`
-	Warnings    []warning_interface.Warning `json:"warnings,omitempty" yaml:"warnings,omitempty"`
-	Errors      []Error                     `json:"errors,omitempty" yaml:"errors,omitempty"`
-}
-
-// MaxLock is the strongest lock the statement takes on any relation. A statement
-// holds every lock it takes until it commits, so this is what the user waits on.
-func (s StatementAnalysis) MaxLock() Lock {
-	strongest := LockNone
-	for _, f := range s.Findings {
-		strongest = MaxLock(strongest, f.MaxLock())
-	}
-	return strongest
-}
-
-// MaxOpKind is the most severe operation the statement performs on any relation.
-func (s StatementAnalysis) MaxOpKind() OpKind {
-	worst := OpKindNone
-	for _, f := range s.Findings {
-		worst = MaxOpKind(worst, f.MaxOpKind())
-	}
-	return worst
-}
-
-// LockOn is the strongest lock the statement takes on one relation, LockNone if
-// it never touches it.
-func (s StatementAnalysis) LockOn(relation helper.FullRelationName) Lock {
-	strongest := LockNone
-	for _, f := range s.Findings {
-		for _, t := range f.Targets {
-			if t.Relation.Name == relation {
-				strongest = MaxLock(strongest, t.Lock)
-			}
-		}
-	}
-	return strongest
-}
-
-// HasErrors reports whether the statement produced any error.
-func (s StatementAnalysis) HasErrors() bool {
-	return len(s.Errors) > 0
 }
