@@ -2,8 +2,10 @@ package pg_contract
 
 import (
 	"apercu-cli/helper"
+	"apercu-cli/helper/warning_interface"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -370,6 +372,37 @@ func TestVersionRangeOverlaps(t *testing.T) {
 	assert.False(t, AtLeast(Version18).Overlaps(AtMost(Version17)))
 	assert.True(t, AnyVersion.Overlaps(Exactly(Version15)))
 	assert.False(t, Exactly(Version15).Overlaps(Exactly(Version16)))
+}
+
+func TestVersionRangeContainsRange(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		rng      VersionRange
+		other    VersionRange
+		expected bool
+	}{
+		{name: "anything is inside unbounded", rng: AnyVersion, other: Between(Version15, Version18), expected: true},
+		{name: "unbounded is inside nothing bounded", rng: Between(Version15, Version18), other: AnyVersion, expected: false},
+		{name: "18+ holds 18+", rng: AtLeast(Version18), other: AtLeast(Version18), expected: true},
+		{name: "18+ does not hold 15-18", rng: AtLeast(Version18), other: Between(Version15, Version18), expected: false},
+		{name: "18+ does not hold an open lower bound", rng: AtLeast(Version18), other: AtMost(Version18), expected: false},
+		{name: "15-18 holds a single version inside it", rng: Between(Version15, Version18), other: Exactly(Version17), expected: true},
+		{name: "15-17 does not hold 18", rng: Between(Version15, Version17), other: Exactly(Version18), expected: false},
+		{name: "a range holds itself", rng: Between(Version16, Version17), other: Between(Version16, Version17), expected: true},
+		{name: "overlapping is not containing", rng: AtLeast(Version17), other: Between(Version15, Version18), expected: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, test.expected, test.rng.ContainsRange(test.other))
+			if test.expected {
+				assert.True(t, test.rng.Overlaps(test.other), "containing implies overlapping")
+			}
+		})
+	}
 }
 
 func TestLevel(t *testing.T) {

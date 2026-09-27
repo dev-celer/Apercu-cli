@@ -74,6 +74,17 @@ func (r VersionRange) Contains(v Version) bool {
 	return true
 }
 
+// ContainsRange whether the whole range of other can be contained in the range r.
+func (r VersionRange) ContainsRange(other VersionRange) bool {
+	if r.Min != VersionUnknown && (other.Min == VersionUnknown || other.Min < r.Min) {
+		return false
+	}
+	if r.Max != VersionUnknown && (other.Max == VersionUnknown || other.Max > r.Max) {
+		return false
+	}
+	return true
+}
+
 func (r VersionRange) IsUnbounded() bool {
 	return r.Min == VersionUnknown && r.Max == VersionUnknown
 }
