@@ -14,12 +14,21 @@ const DefaultHotPercentile float64 = 0.75
 const DefaultWarmPercentile float64 = 0.25
 
 type QueryEvent struct {
-	SQL          string        `json:"sql"`
-	StartedAt    time.Time     `json:"started_at"`
-	Duration     time.Duration `json:"duration"`
-	CommandTag   string        `json:"command_tag"`
-	RowsAffected int64         `json:"rows_affected"`
-	Error        string        `json:"error,omitempty"`
+	SQL       string        `json:"sql"`
+	StartedAt time.Time     `json:"started_at"`
+	Duration  time.Duration `json:"duration"`
+	// On multi statement single protocol query, you should refer to Statements[].CommandTag
+	CommandTag   string `json:"command_tag"`
+	RowsAffected int64  `json:"rows_affected"`
+	Error        string `json:"error,omitempty"`
+	// Statements is, for simple protocol queries, the breakdown of each statement duration.
+	Statements []StatementTiming `json:"statements,omitempty"`
+}
+
+// StatementTiming is one statement of a multi-statement event.
+type StatementTiming struct {
+	CommandTag string        `json:"command_tag"`
+	Duration   time.Duration `json:"duration"`
 }
 
 type QueryEventAnalysis struct {
