@@ -2,6 +2,8 @@ package main
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestStripLeadingComments(t *testing.T) {
@@ -29,6 +31,41 @@ func TestStripLeadingComments(t *testing.T) {
 			if got := stripLeadingComments(tc.in); got != tc.want {
 				t.Errorf("stripLeadingComments(%q) = %q, want %q", tc.in, got, tc.want)
 			}
+		})
+	}
+}
+
+func TestStatementExtraction(t *testing.T) {
+	cases := []struct {
+		name string
+		sql  string
+		want string
+	}{
+		{
+			name: "a named migration keeps its statement",
+			sql:  "-- name: add the column\nALTER TABLE t ADD COLUMN a int",
+			want: "ALTER TABLE t ADD COLUMN a int",
+		},
+		{
+			name: "several leading comments of both kinds",
+			sql:  "-- migrate:up\n/* tool */\n-- and again\nSELECT\n\t1,\n\t2",
+			want: "SELECT 1, 2",
+		},
+		{
+			name: "a comment with nothing after it is nothing",
+			sql:  "-- just a note",
+			want: "",
+		},
+		{
+			name: "a newline inside a literal is data and stays",
+			sql:  "INSERT INTO t VALUES ('a\nb')",
+			want: "INSERT INTO t VALUES ('a\nb')",
+		},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			assert.Equal(t, testCase.want, collapseSpaces(stripLeadingComments(testCase.sql)))
 		})
 	}
 }

@@ -8,7 +8,6 @@ import (
 )
 
 func handleEvent(ev metrics.QueryEvent) {
-	ev.SQL = strings.ReplaceAll(ev.SQL, "\n", " ")
 	ev.SQL = stripLeadingComments(ev.SQL)
 	ev.SQL = collapseSpaces(ev.SQL)
 
