@@ -9,6 +9,7 @@ import (
 type Config struct {
 	DatabaseHost string `json:"database_host"`
 	DatabasePort string `json:"database_port"`
+	ProxyPort    string `json:"proxy_port"`
 }
 
 func main() {
@@ -23,7 +24,15 @@ func main() {
 		return
 	}
 
-	config := Config{DatabaseHost: DatabaseHost, DatabasePort: DatabasePort}
+	proxyPort := os.Getenv("PROXY_PORT")
+	if proxyPort == "" {
+		proxyPort = "5432"
+	}
+	config := Config{
+		DatabaseHost: DatabaseHost,
+		DatabasePort: DatabasePort,
+		ProxyPort:    proxyPort,
+	}
 
 	if err := StartServer(context.Background(), config); err != nil {
 		fmt.Fprintln(os.Stderr, err)

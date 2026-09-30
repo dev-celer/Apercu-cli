@@ -11,12 +11,16 @@ import (
 )
 
 func StartServer(ctx context.Context, config Config) error {
-	listener, err := net.Listen("tcp", ":5432")
+	listener, err := net.Listen("tcp", net.JoinHostPort("", config.ProxyPort))
 	if err != nil {
 		return fmt.Errorf("Failed to start listener: %v", err)
 	}
 	defer listener.Close()
 
+	return serve(ctx, config, listener)
+}
+
+func serve(ctx context.Context, config Config, listener net.Listener) error {
 	// Cancel logic
 	go func() {
 		for {

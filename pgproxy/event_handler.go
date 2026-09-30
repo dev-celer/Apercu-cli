@@ -4,8 +4,13 @@ import (
 	"apercu-cli/helper/metrics"
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 )
+
+// out is where the proxy publishes its events.
+var out io.Writer = os.Stdout
 
 func handleEvent(ev metrics.QueryEvent) {
 	ev.SQL = stripLeadingComments(ev.SQL)
@@ -16,7 +21,7 @@ func handleEvent(ev metrics.QueryEvent) {
 		return
 	}
 
-	_, _ = fmt.Println(string(data))
+	_, _ = fmt.Fprintln(out, string(data))
 }
 
 func collapseSpaces(sql string) string {
