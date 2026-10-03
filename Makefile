@@ -40,9 +40,9 @@ build: build-cli build-pgproxy
 build-cli:
 	$(GO) build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $(CLI_BIN) .
 
-## build-pgproxy: build the pgproxy binary the docker image ships (static linux/amd64)
+## build-pgproxy: build the pgproxy binary for linux/amd64
 build-pgproxy:
-	CGO_ENABLED=0 GOOS=$(PGPROXY_OS) GOARCH=$(PGPROXY_ARCH) \
+	GOOS=$(PGPROXY_OS) GOARCH=$(PGPROXY_ARCH) \
 		$(GO) build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $(PGPROXY_BIN) ./pgproxy
 
 ## clean: remove the built binaries

@@ -1,2 +1,5 @@
 *
-!bin/apercu-pgproxy
+!go.mod
+!go.sum
+!pgproxy
+!helper

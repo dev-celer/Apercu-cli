@@ -47,40 +47,6 @@ func TestSimpleQueryOneStatement(t *testing.T) {
 	assert.Equal(t, "ALTER TABLE t ADD COLUMN a int", events[0].SQL)
 	assert.Equal(t, 3*time.Second, events[0].Duration)
 	assert.Equal(t, "ALTER TABLE", events[0].CommandTag)
-	assert.Empty(t, events[0].Statements, "a breakdown of one says nothing the event does not")
-}
-
-func TestSimpleQueryTimesMultipleStatement(t *testing.T) {
-	state, advance := clockedState()
-
-	observeClient(&pgproto3.Query{String: "BEGIN; ALTER TABLE t ADD COLUMN a int; COMMIT"}, state)
-	advance(10 * time.Millisecond)
-	events := drive(state, &pgproto3.CommandComplete{CommandTag: []byte("BEGIN")})
-	assert.Empty(t, events, "the batch is not finished until ReadyForQuery")
-
-	advance(4 * time.Second)
-	drive(state, &pgproto3.CommandComplete{CommandTag: []byte("ALTER TABLE")})
-	advance(20 * time.Millisecond)
-	drive(state, &pgproto3.CommandComplete{CommandTag: []byte("COMMIT")})
-	advance(5 * time.Millisecond)
-	events = drive(state, &pgproto3.ReadyForQuery{TxStatus: 'I'})
-
-	require.Len(t, events, 1, "a simple Query is still one event: only the proxy cannot split its SQL")
-	assert.Equal(t, 4035*time.Millisecond, events[0].Duration)
-
-	require.Len(t, events[0].Statements, 3)
-	assert.Equal(t, []metrics.StatementTiming{
-		{CommandTag: "BEGIN", Duration: 10 * time.Millisecond},
-		{CommandTag: "ALTER TABLE", Duration: 4 * time.Second},
-		{CommandTag: "COMMIT", Duration: 20 * time.Millisecond},
-	}, events[0].Statements)
-
-	// Assert that the total duration = each individual statement duration added
-	var total time.Duration
-	for _, timing := range events[0].Statements {
-		total += timing.Duration
-	}
-	assert.Less(t, total, events[0].Duration)
 }
 
 // Validate extended protocol pipeline.
@@ -113,29 +79,7 @@ func TestPipelinedExecutes(t *testing.T) {
 
 	for _, ev := range events {
 		assert.Equal(t, time.Second, ev.Duration)
-		assert.Empty(t, ev.Statements, "one Execute is one statement and needs no breakdown")
 	}
-}
-
-func TestAbortedSimpleProtocol(t *testing.T) {
-	state, advance := clockedState()
-
-	observeClient(&pgproto3.Query{String: "BEGIN; ALTER TABLE nope ADD COLUMN a int; COMMIT"}, state)
-	advance(time.Millisecond)
-	drive(state, &pgproto3.CommandComplete{CommandTag: []byte("BEGIN")})
-	advance(2 * time.Millisecond)
-	events := drive(state,
-		&pgproto3.ErrorResponse{Message: `relation "nope" does not exist`},
-		&pgproto3.ReadyForQuery{TxStatus: 'E'},
-	)
-
-	require.Len(t, events, 1)
-	assert.Equal(t, `relation "nope" does not exist`, events[0].Error)
-	assert.Equal(t, 3*time.Millisecond, events[0].Duration)
-
-	require.Len(t, events[0].Statements, 1)
-	assert.Equal(t, "BEGIN", events[0].Statements[0].CommandTag)
-	assert.Equal(t, time.Millisecond, events[0].Statements[0].Duration)
 }
 
 func TestAbortedExtendedProtocol(t *testing.T) {
@@ -227,36 +171,6 @@ func TestPortalInterleaved(t *testing.T) {
 
 	assert.Equal(t, 4*time.Second, fromP[0].Duration)
 	assert.Equal(t, 6*time.Second, fromP[0].Duration+fromQ[0].Duration)
-}
-
-func TestTwoQueriesQueuedAtOnce(t *testing.T) {
-	state, advance := clockedState()
-
-	observeClient(&pgproto3.Query{String: "BEGIN; ALTER TABLE a ADD COLUMN z int"}, state)
-	observeClient(&pgproto3.Query{String: "COMMIT"}, state)
-
-	advance(time.Millisecond)
-	drive(state, &pgproto3.CommandComplete{CommandTag: []byte("BEGIN")})
-	advance(2 * time.Second)
-	drive(state, &pgproto3.CommandComplete{CommandTag: []byte("ALTER TABLE")})
-	first := drive(state, &pgproto3.ReadyForQuery{TxStatus: 'T'})
-
-	require.Len(t, first, 1, "the first ReadyForQuery closes the first Query and nothing else")
-	assert.Equal(t, "BEGIN; ALTER TABLE a ADD COLUMN z int", first[0].SQL)
-	require.Len(t, first[0].Statements, 2)
-	assert.Equal(t, "BEGIN", first[0].Statements[0].CommandTag)
-	assert.Equal(t, 2*time.Second, first[0].Statements[1].Duration)
-
-	advance(3 * time.Millisecond)
-	second := drive(state,
-		&pgproto3.CommandComplete{CommandTag: []byte("COMMIT")},
-		&pgproto3.ReadyForQuery{TxStatus: 'I'},
-	)
-
-	require.Len(t, second, 1, "the second Query is published by its own ReadyForQuery")
-	assert.Equal(t, "COMMIT", second[0].SQL)
-	assert.Equal(t, "COMMIT", second[0].CommandTag)
-	assert.Empty(t, second[0].Statements, "and it collected none of the first one's timings")
 }
 
 func TestAQueryAheadOfAPipeline(t *testing.T) {
@@ -370,4 +284,107 @@ func TestReadyForQueryOutsideAStatementPublishesNothing(t *testing.T) {
 
 	assert.Empty(t, drive(state, &pgproto3.ReadyForQuery{TxStatus: 'I'}))
 	assert.Empty(t, drive(state, &pgproto3.CommandComplete{CommandTag: []byte("SELECT 1")}))
+}
+
+func TestRewrittenQueryIsOneEventPerStatement(t *testing.T) {
+	state, advance := clockedState()
+
+	sent := observeClient(&pgproto3.Query{String: "BEGIN; ALTER TABLE t ADD COLUMN a int; COMMIT"}, state)
+	require.Len(t, sent, 16, "three statements of five messages each, and one Sync to close the cycle")
+
+	advance(10 * time.Millisecond)
+	begin := drive(state, &pgproto3.CommandComplete{CommandTag: []byte("BEGIN")})
+	require.Len(t, begin, 1, "each statement is published as it completes")
+	assert.Equal(t, "BEGIN", begin[0].SQL)
+	assert.Equal(t, 10*time.Millisecond, begin[0].Duration)
+
+	advance(4 * time.Second)
+	alter := drive(state, &pgproto3.CommandComplete{CommandTag: []byte("ALTER TABLE")})
+	require.Len(t, alter, 1)
+	assert.Equal(t, "ALTER TABLE t ADD COLUMN a int", alter[0].SQL)
+	assert.Equal(t, 4*time.Second, alter[0].Duration, "the expensive statement is the one charged for it")
+
+	advance(20 * time.Millisecond)
+	commit := drive(state, &pgproto3.CommandComplete{CommandTag: []byte("COMMIT")})
+	require.Len(t, commit, 1)
+	assert.Equal(t, "COMMIT", commit[0].SQL)
+	assert.Equal(t, 20*time.Millisecond, commit[0].Duration)
+
+	advance(5 * time.Millisecond)
+	assert.Empty(t, drive(state, &pgproto3.ReadyForQuery{TxStatus: 'I'}),
+		"every statement was published as it finished, so the cycle closes with nothing left")
+}
+
+func TestRewriteHidesItsOwnBookkeeping(t *testing.T) {
+	state, _ := clockedState()
+	observeClient(&pgproto3.Query{String: "SELECT 1; SELECT 2"}, state)
+
+	for _, hidden := range []pgproto3.BackendMessage{
+		&pgproto3.ParseComplete{}, &pgproto3.BindComplete{},
+		&pgproto3.ParameterDescription{}, &pgproto3.NoData{},
+	} {
+		assert.Falsef(t, observeUpstream(hidden, state), "%T should not reach the client", hidden)
+	}
+	for _, shown := range []pgproto3.BackendMessage{
+		&pgproto3.RowDescription{}, &pgproto3.DataRow{},
+		&pgproto3.CommandComplete{CommandTag: []byte("SELECT 1")},
+	} {
+		assert.Truef(t, observeUpstream(shown, state), "%T is what a simple Query answers with", shown)
+	}
+
+	// Once the cycle is closed the filter is off: the client's own extended protocol messages,
+	// if it sends any, must come back to it untouched.
+	observeUpstream(&pgproto3.CommandComplete{CommandTag: []byte("SELECT 1")}, state)
+	observeUpstream(&pgproto3.ReadyForQuery{TxStatus: 'I'}, state)
+	assert.True(t, observeUpstream(&pgproto3.ParseComplete{}, state),
+		"nothing is being rewritten now, so this one is the client's")
+}
+
+func TestRewrittenQueryAborted(t *testing.T) {
+	state, advance := clockedState()
+
+	observeClient(&pgproto3.Query{String: "BEGIN; ALTER TABLE nope ADD COLUMN a int; COMMIT"}, state)
+	advance(time.Millisecond)
+	begin := drive(state, &pgproto3.CommandComplete{CommandTag: []byte("BEGIN")})
+	require.Len(t, begin, 1)
+	assert.Equal(t, "BEGIN", begin[0].SQL)
+
+	advance(2 * time.Millisecond)
+	events := drive(state,
+		&pgproto3.ErrorResponse{Message: `relation "nope" does not exist`},
+		&pgproto3.ReadyForQuery{TxStatus: 'E'},
+	)
+
+	require.Len(t, events, 1, "the statement that failed, and not the COMMIT the server never reached")
+	assert.Equal(t, "ALTER TABLE nope ADD COLUMN a int", events[0].SQL)
+	assert.Equal(t, `relation "nope" does not exist`, events[0].Error)
+	assert.Equal(t, 2*time.Millisecond, events[0].Duration)
+}
+
+func TestTwoQueriesQueuedAtOnce(t *testing.T) {
+	state, advance := clockedState()
+
+	observeClient(&pgproto3.Query{String: "BEGIN; ALTER TABLE a ADD COLUMN z int"}, state)
+	observeClient(&pgproto3.Query{String: "COMMIT"}, state)
+
+	advance(time.Millisecond)
+	drive(state, &pgproto3.CommandComplete{CommandTag: []byte("BEGIN")})
+	advance(2 * time.Second)
+	alter := drive(state, &pgproto3.CommandComplete{CommandTag: []byte("ALTER TABLE")})
+	require.Len(t, alter, 1)
+	assert.Equal(t, "ALTER TABLE a ADD COLUMN z int", alter[0].SQL)
+	assert.Equal(t, 2*time.Second, alter[0].Duration)
+
+	assert.Empty(t, drive(state, &pgproto3.ReadyForQuery{TxStatus: 'T'}),
+		"the rewritten cycle published its statements as they completed")
+
+	advance(3 * time.Millisecond)
+	second := drive(state,
+		&pgproto3.CommandComplete{CommandTag: []byte("COMMIT")},
+		&pgproto3.ReadyForQuery{TxStatus: 'I'},
+	)
+
+	require.Len(t, second, 1, "the second Query is published by its own ReadyForQuery")
+	assert.Equal(t, "COMMIT", second[0].SQL)
+	assert.Equal(t, "COMMIT", second[0].CommandTag)
 }
