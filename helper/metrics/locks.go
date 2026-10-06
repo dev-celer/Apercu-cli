@@ -1,8 +1,6 @@
 package metrics
 
 import (
-	"apercu-cli/helper"
-	"apercu-cli/helper/warning_interface"
 	"time"
 )
 
@@ -12,23 +10,6 @@ const DefaultHotFloorWriteActivity float64 = 1
 const DefaultColdCeilingWriteActivity float64 = 100
 const DefaultHotPercentile float64 = 0.75
 const DefaultWarmPercentile float64 = 0.25
-
-type QueryEvent struct {
-	SQL          string        `json:"sql"`
-	StartedAt    time.Time     `json:"started_at"`
-	Duration     time.Duration `json:"duration"`
-	CommandTag   string        `json:"command_tag"`
-	RowsAffected int64         `json:"rows_affected"`
-	Error        string        `json:"error,omitempty"`
-}
-
-type QueryEventAnalysis struct {
-	Event          *QueryEvent                 `json:"event"`
-	Type           EventOperationType          `json:"type"`
-	AffectedTables []helper.FullRelationName   `json:"affected_tables"`
-	Warnings       []warning_interface.Warning `json:"warnings"`
-	Lock           QueryLock                   `json:"lock,omitempty"`
-}
 
 type EventOperationType string
 

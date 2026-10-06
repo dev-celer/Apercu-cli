@@ -4,6 +4,7 @@ import (
 	"apercu-cli/helper"
 	"apercu-cli/helper/format"
 	"apercu-cli/helper/metrics"
+	"apercu-cli/helper/pg_contract"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -299,7 +300,7 @@ var lockWarningRemediation = map[Code]string{
 	CodeAlterTableAddConstraintExclude:     "",
 }
 
-func NewLockWarnings(query *metrics.QueryEventAnalysis, code Code, prodStats *metrics.DatabaseMetrics) []*LockWarning {
+func NewLockWarnings(query *pg_contract.QueryEventAnalysis, code Code, prodStats *metrics.DatabaseMetrics) []*LockWarning {
 	if query == nil {
 		return nil
 	}

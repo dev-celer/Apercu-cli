@@ -3,6 +3,7 @@ package engines
 import (
 	"apercu-cli/helper"
 	metricshelper "apercu-cli/helper/metrics"
+	"apercu-cli/helper/pg_contract"
 	parsinghelper "apercu-cli/helper/sql_parsing"
 	"apercu-cli/helper/warning"
 	"apercu-cli/output"
@@ -15,7 +16,7 @@ import (
 type LocksEngine struct {
 	prodDb             *sql.DB
 	ProdStats          metricshelper.DatabaseMetrics
-	PgProxyEvents      []metricshelper.QueryEventAnalysis
+	PgProxyEvents      []pg_contract.QueryEventAnalysis
 	WarningStore       *warning.WarningStore
 	initialLockTimeout int64
 }
@@ -24,7 +25,7 @@ func NewLocksEngine(prodDb *sql.DB, prodStats metricshelper.DatabaseMetrics, war
 	return &LocksEngine{
 		prodDb:             prodDb,
 		ProdStats:          prodStats,
-		PgProxyEvents:      make([]metricshelper.QueryEventAnalysis, 0),
+		PgProxyEvents:      make([]pg_contract.QueryEventAnalysis, 0),
 		WarningStore:       warningStore,
 		initialLockTimeout: 0,
 	}
@@ -41,12 +42,12 @@ func (e *LocksEngine) CollectPreMigrationMetrics() error {
 
 func (e *LocksEngine) SendPgProxyLogs(logs string) {
 	slog.Debug("Start pg proxy logs parsing for locks detection")
-	e.PgProxyEvents = make([]metricshelper.QueryEventAnalysis, 0)
+	e.PgProxyEvents = make([]pg_contract.QueryEventAnalysis, 0)
 
 	currentLockTimeout := e.initialLockTimeout
 
 	for line := range strings.Lines(logs) {
-		query := metricshelper.QueryEvent{}
+		query := pg_contract.QueryEvent{}
 		err := json.Unmarshal([]byte(line), &query)
 		if err != nil {
 			slog.Debug("Error parsing query line", "line", line, "error", err)
@@ -91,7 +92,7 @@ func (e *LocksEngine) SendPgProxyLogs(logs string) {
 			}
 		}
 
-		e.PgProxyEvents = append(e.PgProxyEvents, metricshelper.QueryEventAnalysis{
+		e.PgProxyEvents = append(e.PgProxyEvents, pg_contract.QueryEventAnalysis{
 			Event:          &query,
 			Type:           metricshelper.EventOperationTypeNonBlocking,
 			AffectedTables: tables,

@@ -528,9 +528,42 @@ func TestStatementAnalysisAggregates(t *testing.T) {
 	assert.Equal(t, LockNone, analysis.LockOn(helper.FullRelationName{Schema: "public", Table: "absent"}))
 	assert.False(t, analysis.HasErrors())
 
+	// One entry per relation at the strongest lock, in name order, whichever finding reported it.
+	assert.Equal(t, []RelationLock{
+		{Relation: Relation{Name: customers}, Lock: LockShare},
+		{Relation: Relation{Name: orders}, Lock: LockAccessExclusive},
+	}, analysis.LockedRelations())
+
+	// A rule that names a relation without locking it is reporting, not queueing.
+	unlocked := StatementAnalysis{Findings: []Finding{{
+		Code:    "R-OB-GRANT",
+		Targets: []Target{{Relation: Relation{Name: orders}, OpKind: OpKindMetadata}},
+	}}}
+	assert.Empty(t, unlocked.LockedRelations())
+
 	empty := StatementAnalysis{}
 	assert.Equal(t, LockNone, empty.MaxLock())
 	assert.Equal(t, OpKindNone, empty.MaxOpKind())
+	assert.Empty(t, empty.LockedRelations())
+}
+
+func TestElapseForUnsplittedSimpleQuery(t *testing.T) {
+	t.Parallel()
+
+	// Three statements the proxy could not time apart, between two it timed exactly.
+	statements := []StatementAnalysis{
+		{RawSQL: "BEGIN", Event: 0, Duration: time.Millisecond},
+		{RawSQL: "ALTER TABLE orders ADD COLUMN z int", Event: 1, Duration: 100 * time.Millisecond},
+		{RawSQL: "ANALYZE orders", Event: 1, Duration: 100 * time.Millisecond},
+		{RawSQL: "COMMIT", Event: 2, Duration: time.Millisecond},
+	}
+	assert.Equal(t, 102*time.Millisecond, Elapsed(statements))
+
+	// A run starting part-way into an event counts the whole of it: the reading covers the
+	// statement before it too, and nothing says how the time divided.
+	assert.Equal(t, 101*time.Millisecond, Elapsed(statements[2:]))
+
+	assert.Equal(t, time.Duration(0), Elapsed(nil))
 }
 
 func TestMigrationAnalysis(t *testing.T) {
@@ -553,6 +586,8 @@ func TestMigrationAnalysis(t *testing.T) {
 				TxnGroup: 1, OpenedBy: 1, BlockingWindow: 3 * time.Second, Statements: 3},
 			{Relation: Relation{Name: users, Kind: RelationKindTable}, Lock: LockAccessExclusive,
 				TxnGroup: 1, OpenedBy: 2, BlockingWindow: 2 * time.Second, Statements: 2},
+			{Relation: Relation{Name: orders, Kind: RelationKindTable}, Lock: LockRowExclusive,
+				TxnGroup: 1, OpenedBy: 3, BlockingWindow: time.Second, Statements: 1, Covered: true},
 		},
 	}
 
@@ -562,11 +597,19 @@ func TestMigrationAnalysis(t *testing.T) {
 	assert.Equal(t, "second", errors[1].Message)
 
 	onOrders := analysis.EnvelopesOn(orders)
-	require.Len(t, onOrders, 1)
+	require.Len(t, onOrders, 2, "a covered envelope is reported like any other")
 	assert.Equal(t, 3*time.Second, onOrders[0].BlockingWindow)
 	assert.Empty(t, analysis.EnvelopesOn(helper.FullRelationName{Schema: "public", Table: "absent"}))
 
 	assert.Equal(t, "public.orders AEL for 3s over 3 statement(s)", onOrders[0].String())
+	assert.Equal(t, "public.orders RE for 1s over 1 statement(s), covered", onOrders[1].String())
+
+	// What a roll-up reports is the locks that raised what the transaction was blocking.
+	effective := EffectiveEnvelopes(analysis.Envelopes)
+	require.Len(t, effective, 2)
+	assert.Equal(t, orders, effective[0].Relation.Name)
+	assert.Equal(t, users, effective[1].Relation.Name)
+	assert.Empty(t, EffectiveEnvelopes(nil))
 }
 
 func TestMigrationAnalysisSerialization(t *testing.T) {

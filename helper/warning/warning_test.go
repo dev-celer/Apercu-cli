@@ -4,6 +4,7 @@ import (
 	"apercu-cli/config"
 	"apercu-cli/helper"
 	metricshelper "apercu-cli/helper/metrics"
+	"apercu-cli/helper/pg_contract"
 	"encoding/json"
 	"testing"
 
@@ -54,8 +55,8 @@ func TestConverterRoundTrip(t *testing.T) {
 		},
 	}
 
-	lockWarnings := NewLockWarnings(&metricshelper.QueryEventAnalysis{
-		Event:          &metricshelper.QueryEvent{SQL: "CREATE INDEX idx_orders_id ON public.orders (id)"},
+	lockWarnings := NewLockWarnings(&pg_contract.QueryEventAnalysis{
+		Event:          &pg_contract.QueryEvent{SQL: "CREATE INDEX idx_orders_id ON public.orders (id)"},
 		Type:           metricshelper.EventOperationTypeScanUnderLock,
 		AffectedTables: []helper.FullRelationName{{Schema: "public", Table: "orders"}},
 		Lock:           metricshelper.QueryLockShare,
@@ -167,8 +168,8 @@ func TestConvertStatesToWarnings_UnknownCodeSkipped(t *testing.T) {
 func newTestLockWarning(t *testing.T, prodMetrics *metricshelper.DatabaseMetrics) *LockWarning {
 	t.Helper()
 
-	w := NewLockWarnings(&metricshelper.QueryEventAnalysis{
-		Event:          &metricshelper.QueryEvent{SQL: "CREATE INDEX idx_orders_id ON public.orders (id)"},
+	w := NewLockWarnings(&pg_contract.QueryEventAnalysis{
+		Event:          &pg_contract.QueryEvent{SQL: "CREATE INDEX idx_orders_id ON public.orders (id)"},
 		Type:           metricshelper.EventOperationTypeScanUnderLock,
 		AffectedTables: []helper.FullRelationName{{Schema: "public", Table: "orders"}},
 		Lock:           metricshelper.QueryLockShare,

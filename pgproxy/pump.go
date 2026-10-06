@@ -1,7 +1,7 @@
 package main
 
 import (
-	"apercu-cli/helper/metrics"
+	"apercu-cli/helper/pg_contract"
 	"apercu-cli/helper/pg_parse"
 	"fmt"
 	"os"
@@ -65,8 +65,8 @@ func newConnState() *connState {
 }
 
 // flush publishes the queued events the closing function filter.
-func (s *connState) flush(at time.Time, closing func(*pendingEvent) bool) []metrics.QueryEvent {
-	events := make([]metrics.QueryEvent, 0, len(s.pending))
+func (s *connState) flush(at time.Time, closing func(*pendingEvent) bool) []pg_contract.QueryEvent {
+	events := make([]pg_contract.QueryEvent, 0, len(s.pending))
 	kept := s.pending[:0]
 
 	for _, pending := range s.pending {
@@ -147,10 +147,11 @@ func (p *pendingEvent) reportable() bool {
 }
 
 // event return the output event that the proxy should emit.
-func (p *pendingEvent) event(duration time.Duration) metrics.QueryEvent {
-	ev := metrics.QueryEvent{
+func (p *pendingEvent) event(duration time.Duration) pg_contract.QueryEvent {
+	ev := pg_contract.QueryEvent{
 		SQL:          p.sql,
 		StartedAt:    p.start,
+		Cycle:        p.cycle,
 		Duration:     duration,
 		CommandTag:   p.tag,
 		Error:        p.err,
@@ -318,7 +319,7 @@ func observeUpstream(msg pgproto3.BackendMessage, state *connState) bool {
 }
 
 // observeUpstream advances the state machine and answers with whatever the server just finished.
-func (s *connState) observeUpstream(msg pgproto3.BackendMessage) []metrics.QueryEvent {
+func (s *connState) observeUpstream(msg pgproto3.BackendMessage) []pg_contract.QueryEvent {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -337,7 +338,7 @@ func (s *connState) observeUpstream(msg pgproto3.BackendMessage) []metrics.Query
 		if !pending.simple {
 			// in extended protocol, one Execute is one statement, so it is finished and reportable on its own.
 			s.pending = append(s.pending[:index], s.pending[index+1:]...)
-			return []metrics.QueryEvent{pending.event(pending.elapsed + stretch)}
+			return []pg_contract.QueryEvent{pending.event(pending.elapsed + stretch)}
 		}
 		// For simple query that wasn't rewritten, only append the time passed to the event.
 		pending.elapsed += stretch

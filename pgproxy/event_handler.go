@@ -1,7 +1,7 @@
 package main
 
 import (
-	"apercu-cli/helper/metrics"
+	"apercu-cli/helper/pg_contract"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,7 +12,7 @@ import (
 // out is where the proxy publishes its events.
 var out io.Writer = os.Stdout
 
-func handleEvent(ev metrics.QueryEvent) {
+func handleEvent(ev pg_contract.QueryEvent) {
 	ev.SQL = stripLeadingComments(ev.SQL)
 	ev.SQL = collapseSpaces(ev.SQL)
 

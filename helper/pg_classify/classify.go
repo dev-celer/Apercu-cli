@@ -30,9 +30,10 @@ func (c *Classifier) Next(statement pg_parse.Statement) pg_contract.StatementAna
 	context := c.session.Next(statement)
 
 	analysis := pg_contract.StatementAnalysis{
-		RawSQL:   statement.RawSQL,
-		TxnGroup: pg_contract.TxnGroup(context.Group),
-		Command:  statement.Command,
+		RawSQL:        statement.RawSQL,
+		TxnGroup:      pg_contract.TxnGroup(context.Group),
+		InTransaction: context.InTransaction,
+		Command:       statement.Command,
 	}
 	for _, sub := range statement.Subcommands {
 		analysis.Subcommands = append(analysis.Subcommands, sub.Kind.String())

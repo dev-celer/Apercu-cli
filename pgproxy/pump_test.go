@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"apercu-cli/helper/metrics"
+	"apercu-cli/helper/pg_contract"
 
 	"github.com/jackc/pgx/v5/pgproto3"
 	"github.com/stretchr/testify/assert"
@@ -20,8 +20,8 @@ func clockedState() (*connState, func(d time.Duration)) {
 }
 
 // drive feeds messages through the state machine in order and collects what it published.
-func drive(state *connState, messages ...any) []metrics.QueryEvent {
-	var events []metrics.QueryEvent
+func drive(state *connState, messages ...any) []pg_contract.QueryEvent {
+	var events []pg_contract.QueryEvent
 	for _, msg := range messages {
 		switch m := msg.(type) {
 		case pgproto3.FrontendMessage:
@@ -64,7 +64,7 @@ func TestPipelinedExecutes(t *testing.T) {
 
 	drive(state, &pgproto3.Sync{})
 
-	var events []metrics.QueryEvent
+	var events []pg_contract.QueryEvent
 	for _, rows := range []string{"UPDATE 1", "UPDATE 2", "UPDATE 3"} {
 		advance(time.Second)
 		events = append(events, state.observeUpstream(&pgproto3.CommandComplete{CommandTag: []byte(rows)})...)

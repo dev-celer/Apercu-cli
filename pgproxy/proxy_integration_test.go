@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"apercu-cli/helper/metrics"
+	"apercu-cli/helper/pg_contract"
 
 	"github.com/jackc/pgx/v5/pgproto3"
 	"github.com/stretchr/testify/assert"
@@ -34,17 +34,17 @@ func (p *published) Write(b []byte) (int, error) {
 }
 
 // events return all the events the proxy emitted, as QueryEvent structs.
-func (p *published) events(t *testing.T) []metrics.QueryEvent {
+func (p *published) events(t *testing.T) []pg_contract.QueryEvent {
 	t.Helper()
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	var events []metrics.QueryEvent
+	var events []pg_contract.QueryEvent
 	for _, line := range strings.Split(p.lines.String(), "\n") {
 		if !strings.HasPrefix(line, "{") {
 			continue
 		}
-		ev := metrics.QueryEvent{}
+		ev := pg_contract.QueryEvent{}
 		require.NoErrorf(t, json.Unmarshal([]byte(line), &ev), "the proxy published %q", line)
 		events = append(events, ev)
 	}
@@ -250,6 +250,24 @@ func TestRewriteTimesEachStatement(t *testing.T) {
 	assert.Greater(t, events[1].Duration, 300*time.Millisecond, "the sleep is charged for its own time")
 	assert.Less(t, events[0].Duration, 100*time.Millisecond)
 	assert.Less(t, events[2].Duration, 100*time.Millisecond)
+
+	// Timed apart but run as one pipeline closed by one Sync, so they share a protocol cycle.
+	assert.Equal(t, events[0].Cycle, events[1].Cycle)
+	assert.Equal(t, events[0].Cycle, events[2].Cycle)
+}
+
+func TestSingleQueryHaveUniqueCycle(t *testing.T) {
+	addr, sink := startProxy(t)
+	c := dial(t, addr)
+
+	c.send(&pgproto3.Query{String: "SELECT 1"})
+	c.readCycles(1)
+	c.send(&pgproto3.Query{String: "SELECT 2"})
+	c.readCycles(1)
+
+	events := sink.events(t)
+	require.Len(t, events, 2)
+	assert.NotEqual(t, events[0].Cycle, events[1].Cycle)
 }
 
 // TestRewriteKeepsTheImplicitTransaction assert that the implicit transaction created by a multiple statement simple protocol query is kept.

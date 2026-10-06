@@ -244,6 +244,12 @@ func (c *Catalog) Declare(name helper.FullRelationName, kind string) {
 	delete(c.unresolved, name)
 }
 
+// CreatedByMigration reports whether the migration created this relation earlier in the file.
+func (c *Catalog) CreatedByMigration(name helper.FullRelationName) bool {
+	_, created := c.createdByMigration[name]
+	return created
+}
+
 // Unresolved lists the distinct names no snapshot explained.
 func (c *Catalog) Unresolved() []helper.FullRelationName {
 	names := make([]helper.FullRelationName, 0, len(c.unresolved))
