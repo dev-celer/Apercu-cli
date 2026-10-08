@@ -9,14 +9,13 @@ type FeatureName string
 
 const (
 	// G-03 — syntax libpg_query 17 cannot parse at all, recognised by the shim.
-	FeatureNotEnforced        FeatureName = "NOT ENFORCED"
-	FeatureNotNullConstraint  FeatureName = "NOT NULL CONSTRAINT"
-	FeatureConstraintInherit  FeatureName = "ALTER CONSTRAINT INHERIT"
-	FeatureVacuumOnly         FeatureName = "VACUUM ONLY"
-	FeatureAnalyzeOnly        FeatureName = "ANALYZE ONLY"
-	FeatureWithoutOverlaps    FeatureName = "WITHOUT OVERLAPS"
-	FeatureForeignKeyPeriod   FeatureName = "FOREIGN KEY PERIOD"
-	FeatureDropConstraintOnly FeatureName = "DROP CONSTRAINT ONLY"
+	FeatureNotEnforced       FeatureName = "NOT ENFORCED"
+	FeatureNotNullConstraint FeatureName = "NOT NULL CONSTRAINT"
+	FeatureConstraintInherit FeatureName = "ALTER CONSTRAINT INHERIT"
+	FeatureVacuumOnly        FeatureName = "VACUUM ONLY"
+	FeatureAnalyzeOnly       FeatureName = "ANALYZE ONLY"
+	FeatureWithoutOverlaps   FeatureName = "WITHOUT OVERLAPS"
+	FeatureForeignKeyPeriod  FeatureName = "FOREIGN KEY PERIOD"
 	// G-04 — a generated column with no STORED or VIRTUAL keyword. PG18 reads it as VIRTUAL,
 	// everything older rejects it outright.
 	FeatureVirtualGenerated FeatureName = "GENERATED VIRTUAL"
@@ -70,10 +69,6 @@ type Feature struct {
 	Name FeatureName
 	// Since is the oldest server that accepts it.
 	Since pg_contract.Version
-	// Ambiguous marks a construct whose meaning, not just its availability, depends on the
-	// version. G-04's bare GENERATED is the only one: it is virtual on 18 and a syntax error
-	// below, so it stays flagged even when production is known to be 18.
-	Ambiguous bool
 	// Detail is the construct's argument when it has one: the column a PG18 NOT NULL constraint
 	// names, or which of ENFORCED and NOT ENFORCED was written.
 	Detail string
@@ -94,7 +89,6 @@ func newFeature(name FeatureName, clause, subclause int, detail string) Feature 
 	return Feature{
 		Name:      name,
 		Since:     featureSince[name],
-		Ambiguous: name == FeatureBareGenerated,
 		Detail:    detail,
 		clause:    clause,
 		subclause: subclause,

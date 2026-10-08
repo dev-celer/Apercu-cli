@@ -489,6 +489,46 @@ func TestVersionRangeString(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestVersionRangeIntersect(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		a, b     VersionRange
+		expected VersionRange
+	}{
+		{"any changes nothing", Between(Version15, Version18), AnyVersion, Between(Version15, Version18)},
+		{"a floor raises the floor", Between(Version15, Version18), AtLeast(Version17), Between(Version17, Version18)},
+		{"a lower floor is already met", Between(Version17, Version18), AtLeast(Version15), Between(Version17, Version18)},
+		{"a ceiling lowers the ceiling", Between(Version15, Version18), AtMost(Version16), Between(Version15, Version16)},
+		{"an unbounded side takes the other's", AtLeast(Version16), AtMost(Version17), Between(Version16, Version17)},
+		{"disjoint bounds come back empty", AtLeast(Version18), AtMost(Version17), Between(Version18, Version17)},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, test.expected, test.a.Intersect(test.b))
+			assert.Equal(t, test.expected, test.b.Intersect(test.a), "intersection does not depend on the order")
+		})
+	}
+}
+
+func TestVersionRangeIsEmpty(t *testing.T) {
+	t.Parallel()
+
+	assert.True(t, Between(Version18, Version17).IsEmpty())
+	assert.False(t, Exactly(Version17).IsEmpty())
+	assert.False(t, AnyVersion.IsEmpty())
+	assert.False(t, AtLeast(Version18).IsEmpty(), "an open ceiling leaves 18 and later")
+	assert.False(t, AtMost(Version15).IsEmpty(), "an open floor leaves 15 and earlier")
+
+	empty := Between(Version18, Version17)
+	for _, version := range []Version{Version15, Version16, Version17, Version18} {
+		assert.False(t, empty.Contains(version), "%s", version)
+	}
+}
+
 func TestStatementAnalysisAggregates(t *testing.T) {
 	t.Parallel()
 

@@ -50,6 +50,12 @@ func (c *Classifier) Next(statement pg_parse.Statement) pg_contract.StatementAna
 	}
 	c.session.Declare(statement, context)
 
+	gateErrors := versionGate(c.catalog.Version(), statement)
+	analysis.Errors = append(analysis.Errors, gateErrors...)
+	if len(gateErrors) > 0 {
+		analysis.Findings = nil
+	}
+
 	collapseStatementLocks(analysis.Findings)
 	return analysis
 }

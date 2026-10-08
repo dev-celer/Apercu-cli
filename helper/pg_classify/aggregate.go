@@ -9,11 +9,10 @@ import (
 )
 
 // Analyze is the migration pipeline's entry point. It parses every event, classifies the statements
-// in order under one session and shadow catalog, and adds up the locks each transaction holds.
 func Analyze(catalog *pg_catalog.Catalog, events []pg_contract.QueryEvent) pg_contract.MigrationAnalysis {
 	classifier := NewClassifier(catalog)
 
-	var analysis pg_contract.MigrationAnalysis
+	analysis := pg_contract.MigrationAnalysis{Versions: catalog.VersionRange()}
 	for index, event := range events {
 		for _, parsed := range pg_parse.Parse(event.SQL) {
 			statement := classifier.Next(parsed)
@@ -21,6 +20,7 @@ func Analyze(catalog *pg_catalog.Catalog, events []pg_contract.QueryEvent) pg_co
 			statement.Event = index
 			statement.Duration = event.Duration
 			levelGrading(catalog, statement.Findings)
+			analysis.Versions = migrationVersions(analysis.Versions, parsed, statement.Errors)
 			analysis.Statements = append(analysis.Statements, statement)
 		}
 	}

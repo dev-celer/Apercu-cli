@@ -146,6 +146,9 @@ func Elapsed(statements []StatementAnalysis) time.Duration {
 type MigrationAnalysis struct {
 	Statements []StatementAnalysis `json:"statements" yaml:"statements"`
 	Envelopes  []LockEnvelope      `json:"envelopes,omitempty" yaml:"envelopes,omitempty"`
+	// Versions is the server version the migration can run on.
+	// Fixed if the version is known from prod else, narrowed from features used.
+	Versions VersionRange `json:"versions" yaml:"versions"`
 }
 
 // Elapsed is how long the migration ran.

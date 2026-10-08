@@ -89,6 +89,23 @@ func (r VersionRange) IsUnbounded() bool {
 	return r.Min == VersionUnknown && r.Max == VersionUnknown
 }
 
+// IsEmpty reports whether no version can enter the range.
+func (r VersionRange) IsEmpty() bool {
+	return r.Min != VersionUnknown && r.Max != VersionUnknown && r.Min > r.Max
+}
+
+// Intersect is the intersecting range between 2 version range
+func (r VersionRange) Intersect(other VersionRange) VersionRange {
+	out := r
+	if other.Min > out.Min {
+		out.Min = other.Min
+	}
+	if out.Max == VersionUnknown || (other.Max != VersionUnknown && other.Max < out.Max) {
+		out.Max = other.Max
+	}
+	return out
+}
+
 // Overlaps reports whether the two ranges share at least one version.
 func (r VersionRange) Overlaps(other VersionRange) bool {
 	if r.Min != VersionUnknown && other.Max != VersionUnknown && r.Min > other.Max {
