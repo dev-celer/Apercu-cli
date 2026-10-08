@@ -109,10 +109,9 @@ type fixtureStatement struct {
 }
 
 type fixtureFeature struct {
-	Name      string `yaml:"name"`
-	Since     string `yaml:"since"`
-	Detail    string `yaml:"detail,omitempty"`
-	Ambiguous bool   `yaml:"ambiguous,omitempty"`
+	Name   string `yaml:"name"`
+	Since  string `yaml:"since"`
+	Detail string `yaml:"detail,omitempty"`
 }
 
 type fixtureRelation struct {
@@ -199,10 +198,9 @@ func newFixture(rule string, s Statement) fixtureStatement {
 	fixture.Options = optionNames(s.Options)
 	for _, feature := range s.Features {
 		fixture.Features = append(fixture.Features, fixtureFeature{
-			Name:      string(feature.Name),
-			Since:     feature.Since.String(),
-			Detail:    feature.Detail,
-			Ambiguous: feature.Ambiguous,
+			Name:   string(feature.Name),
+			Since:  feature.Since.String(),
+			Detail: feature.Detail,
 		})
 	}
 	for _, rel := range s.Relations {

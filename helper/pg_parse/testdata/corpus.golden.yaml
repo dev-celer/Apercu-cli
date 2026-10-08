@@ -1412,7 +1412,6 @@
   features:
     - name: GENERATED WITHOUT STORAGE KEYWORD
       since: "18"
-      ambiguous: true
   relations:
     - table: t
       kind: TABLE

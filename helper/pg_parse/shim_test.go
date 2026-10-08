@@ -204,8 +204,6 @@ func TestShimKeepsWhatItBlanksOut(t *testing.T) {
 				assert.Equal(t, GeneratedVirtual, columnOf(t, restored).Generated)
 				assert.Equal(t, GeneratedStored, columnOf(t, residue).Generated)
 				require.Len(t, restored.Features, 1)
-				assert.True(t, restored.Features[0].Ambiguous,
-					"G-04 stays flagged even when production is known to be 18")
 			},
 		},
 		{

@@ -20,7 +20,6 @@ func versionGate(version pg_contract.Version, statement pg_parse.Statement) []pg
 				Code:    gateCode,
 				Message: fmt.Sprintf("%s requires PostgreSQL %s, production runs %s", feature.Name, feature.Since, version),
 			})
-			continue
 		}
 	}
 
