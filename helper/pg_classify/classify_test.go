@@ -3,6 +3,7 @@ package pg_classify
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"apercu-cli/helper/pg_catalog"
@@ -61,6 +62,14 @@ func findingOf(t *testing.T, analysis pg_contract.StatementAnalysis, code pg_con
 	}
 	require.Failf(t, "missing finding", "%q produced no %s, only %v", analysis.RawSQL, code, codesOf(analysis))
 	return pg_contract.Finding{}
+}
+
+// rulesOnly is the analysis with the validation findings taken out, leaving what the rules said.
+func rulesOnly(analysis pg_contract.StatementAnalysis) pg_contract.StatementAnalysis {
+	analysis.Findings = slices.DeleteFunc(slices.Clone(analysis.Findings), func(finding pg_contract.Finding) bool {
+		return finding.Code == queueRiskCode
+	})
+	return analysis
 }
 
 func codesOf(analysis pg_contract.StatementAnalysis) []pg_contract.Code {

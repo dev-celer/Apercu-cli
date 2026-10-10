@@ -2,6 +2,7 @@ package pg_classify
 
 import (
 	"fmt"
+	"strings"
 
 	"apercu-cli/helper/pg_contract"
 	"apercu-cli/helper/pg_parse"
@@ -9,6 +10,9 @@ import (
 
 // txnBlockCode is a statement the server refuses to run inside a transaction block.
 const txnBlockCode pg_contract.Code = "V-01"
+
+// queueRiskCode is a statement that can wait for a lock blocking writers or readers with nothing to bound the wait.
+const queueRiskCode pg_contract.Code = "V-02"
 
 // txnUnsafeSubject convert the command name from a parsed statement to the same way the server names it when it refuses to run
 // inside a transaction block. return an empty string if it is safe to run inside transaction.
@@ -65,4 +69,49 @@ func txnBlockSafety(s scope, inTransaction bool) []pg_contract.Error {
 		Code:    txnBlockCode,
 		Message: fmt.Sprintf("%s cannot run inside a transaction block", subject),
 	}}
+}
+
+// unboundedQueue create warn findings on a statement that take a blocking lock without lock_timeout set.
+// it ignores a relation that was created during the migration.
+func unboundedQueue(s scope, findings []pg_contract.Finding) []pg_contract.Finding {
+	if s.context.LockTimeout.Set() || s.statement.Flags.Nowait {
+		return nil
+	}
+
+	var targets []pg_contract.Target
+	for _, finding := range findings {
+		for _, target := range finding.Targets {
+			if !target.Lock.IsWriteBlocking() || s.catalog.CreatedByMigration(target.Relation.Name) {
+				continue
+			}
+			targets = append(targets, pg_contract.Target{
+				Relation: target.Relation,
+				Lock:     target.Lock,
+				OpKind:   pg_contract.OpKindNone,
+				Role:     target.Role,
+			})
+		}
+	}
+	if len(targets) == 0 {
+		return nil
+	}
+
+	return []pg_contract.Finding{{
+		Code:     queueRiskCode,
+		Severity: pg_contract.SeverityWarn,
+		Level:    pg_contract.LevelHigh,
+		Message: fmt.Sprintf("%s, so this statement can wait indefinitely for its locks; while it waits, the writers "+
+			"arriving after it queue behind it, and the readers too where the lock is ACCESS EXCLUSIVE", unboundedReason(s.context.LockTimeout)),
+		Targets: dedupeTargets(targets),
+	}}
+}
+
+func unboundedReason(timeout Timeout) string {
+	switch {
+	case timeout.Raw == "":
+		return "no lock_timeout is set"
+	case !timeout.Valid:
+		return fmt.Sprintf("lock_timeout '%s' is not a value the server accepts", strings.Trim(timeout.Raw, `'"`))
+	}
+	return "lock_timeout is disabled"
 }

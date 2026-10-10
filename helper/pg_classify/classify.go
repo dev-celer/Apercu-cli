@@ -66,6 +66,7 @@ func (c *Classifier) NextInCycle(statement pg_parse.Statement, sharedCycle bool)
 	}
 
 	collapseStatementLocks(analysis.Findings)
+	analysis.Findings = append(analysis.Findings, unboundedQueue(ruled, analysis.Findings)...)
 	return analysis
 }
 

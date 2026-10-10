@@ -1,6 +1,7 @@
 package pg_classify
 
 import (
+	"slices"
 	"time"
 
 	"apercu-cli/helper/pg_catalog"
@@ -24,7 +25,36 @@ func Analyze(catalog *pg_catalog.Catalog, events []pg_contract.QueryEvent) pg_co
 		analysis.Statements = append(analysis.Statements, statement)
 	}
 	analysis.Envelopes = envelopes(analysis.Statements)
+	pruneCoveredUnboundedQueueRisk(analysis.Statements, analysis.Envelopes)
 	return analysis
+}
+
+// pruneCoveredUnboundedQueueRisk drops findings for unbounded statement lock_timeout on statements that where covered.
+func pruneCoveredUnboundedQueueRisk(statements []pg_contract.StatementAnalysis, envelopes []pg_contract.LockEnvelope) {
+	covered := map[int]map[pg_contract.Relation]bool{}
+	for _, envelope := range envelopes {
+		if !envelope.Covered {
+			continue
+		}
+		if covered[envelope.OpenedBy] == nil {
+			covered[envelope.OpenedBy] = map[pg_contract.Relation]bool{}
+		}
+		covered[envelope.OpenedBy][envelope.Relation] = true
+	}
+
+	for index, held := range covered {
+		findings := statements[index].Findings[:0]
+		for _, finding := range statements[index].Findings {
+			if finding.Code == queueRiskCode {
+				finding.Targets = slices.DeleteFunc(finding.Targets, func(target pg_contract.Target) bool { return held[target.Relation] })
+				if len(finding.Targets) == 0 {
+					continue
+				}
+			}
+			findings = append(findings, finding)
+		}
+		statements[index].Findings = findings
+	}
 }
 
 // source is one parsed statement with metadata information.

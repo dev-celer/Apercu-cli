@@ -13,7 +13,7 @@ import (
 // locksOn is every lock a statement takes on one relation, one per finding.
 func locksOn(analysis pg_contract.StatementAnalysis, relation string) []string {
 	var locks []string
-	for _, finding := range analysis.Findings {
+	for _, finding := range rulesOnly(analysis).Findings {
 		for _, target := range finding.Targets {
 			if target.Relation.Name.String() == relation {
 				locks = append(locks, target.Lock.Short())
@@ -27,7 +27,7 @@ func locksOn(analysis pg_contract.StatementAnalysis, relation string) []string {
 func relationsOf(analysis pg_contract.StatementAnalysis) []string {
 	seen := map[string]bool{}
 	var out []string
-	for _, finding := range analysis.Findings {
+	for _, finding := range rulesOnly(analysis).Findings {
 		for _, target := range finding.Targets {
 			name := target.Relation.Name.String()
 			if !seen[name] {
@@ -303,7 +303,7 @@ func TestOnlyOnAParentWithChildren(t *testing.T) {
 				return
 			}
 			require.Empty(t, analysis.Errors)
-			require.Len(t, analysis.Findings, 1)
+			require.Len(t, rulesOnly(analysis).Findings, 1)
 
 			locked := relationsOf(analysis)[1:]
 			assert.ElementsMatch(t, testCase.children, locked, "what ONLY still reaches")
@@ -316,7 +316,7 @@ func TestRejectedClausesDoNotStopTheOthers(t *testing.T) {
 
 	analysis := single(t, testCatalog(t), "ALTER TABLE events SET (fillfactor = 70), ADD COLUMN z int")
 	assert.Len(t, analysis.Errors, 1)
-	assert.Equal(t, []pg_contract.Code{"R-AT-ADDCOL"}, codesOf(analysis))
+	assert.Equal(t, []pg_contract.Code{"R-AT-ADDCOL"}, codesOf(rulesOnly(analysis)))
 }
 
 // TestUnknownRelationFailsSafe

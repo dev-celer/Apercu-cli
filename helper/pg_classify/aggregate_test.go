@@ -257,7 +257,7 @@ func TestLevelGradingCreatedRelation(t *testing.T) {
 	}
 
 	// An existing table still waits for production's size and traffic to be graded.
-	for _, finding := range analysis.Statements[2].Findings {
+	for _, finding := range rulesOnly(analysis.Statements[2]).Findings {
 		assert.Equal(t, pg_contract.LevelUnset, finding.Level, "%s touches a table that was already there", finding.Code)
 	}
 }
