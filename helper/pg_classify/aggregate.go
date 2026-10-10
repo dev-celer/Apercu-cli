@@ -11,21 +11,41 @@ import (
 // Analyze is the migration pipeline's entry point. It parses every event, classifies the statements
 func Analyze(catalog *pg_catalog.Catalog, events []pg_contract.QueryEvent) pg_contract.MigrationAnalysis {
 	classifier := NewClassifier(catalog)
+	intake, perCycle := parseEvents(events)
 
 	analysis := pg_contract.MigrationAnalysis{Versions: catalog.VersionRange()}
-	for index, event := range events {
-		for _, parsed := range pg_parse.Parse(event.SQL) {
-			statement := classifier.Next(parsed)
-			statement.Cycle = event.Cycle
-			statement.Event = index
-			statement.Duration = event.Duration
-			levelGrading(catalog, statement.Findings)
-			analysis.Versions = migrationVersions(analysis.Versions, parsed, statement.Errors)
-			analysis.Statements = append(analysis.Statements, statement)
-		}
+	for _, source := range intake {
+		statement := classifier.NextInCycle(source.statement, perCycle[source.cycle] > 1)
+		statement.Cycle = source.cycle
+		statement.Event = source.event
+		statement.Duration = source.duration
+		levelGrading(catalog, statement.Findings)
+		analysis.Versions = migrationVersions(analysis.Versions, source.statement, statement.Errors)
+		analysis.Statements = append(analysis.Statements, statement)
 	}
 	analysis.Envelopes = envelopes(analysis.Statements)
 	return analysis
+}
+
+// source is one parsed statement with metadata information.
+type source struct {
+	statement pg_parse.Statement
+	event     int
+	cycle     int
+	duration  time.Duration
+}
+
+// parseEvents parse the statement and count the number of event per cycle.
+func parseEvents(events []pg_contract.QueryEvent) ([]source, map[int]int) {
+	var intake []source
+	perCycle := map[int]int{}
+	for index, event := range events {
+		for _, parsed := range pg_parse.Parse(event.SQL) {
+			intake = append(intake, source{statement: parsed, event: index, cycle: event.Cycle, duration: event.Duration})
+			perCycle[event.Cycle]++
+		}
+	}
+	return intake, perCycle
 }
 
 // levelGrading set the finding level for a relation.

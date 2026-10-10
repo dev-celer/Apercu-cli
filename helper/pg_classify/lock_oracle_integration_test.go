@@ -515,6 +515,10 @@ func replayLocks(t *testing.T, db *sql.DB, catalog *pg_catalog.Catalog, script l
 	require.Len(t, statements, 1)
 	analysis := NewClassifier(catalog).Next(statements[0])
 
+	inBlock := filterTxnBlockErrors(NewClassifier(catalog).NextInCycle(statements[0], true))
+	assert.Equalf(t, script.outsideTransaction, len(inBlock) == 1,
+		"V-01 %v on %q, the corpus says outsideTransaction=%v", inBlock, script.sql, script.outsideTransaction)
+
 	conn, err := db.Conn(ctx)
 	require.NoError(t, err)
 	defer func() { _ = conn.Close() }()

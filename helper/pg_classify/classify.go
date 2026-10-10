@@ -25,8 +25,14 @@ func (c *Classifier) Analyze(statements []pg_parse.Statement) []pg_contract.Stat
 	return out
 }
 
-// Next classifies one statement and advances the session past it.
+// Next classifies one statement that had its protocol cycle to itself, and advances the session past it.
 func (c *Classifier) Next(statement pg_parse.Statement) pg_contract.StatementAnalysis {
+	return c.NextInCycle(statement, false)
+}
+
+// NextInCycle classifies one statement and advances the session past it. sharedCycle says the
+// protocol cycle the statement ran under carried other statements.
+func (c *Classifier) NextInCycle(statement pg_parse.Statement, sharedCycle bool) pg_contract.StatementAnalysis {
 	context := c.session.Next(statement)
 
 	analysis := pg_contract.StatementAnalysis{
@@ -43,16 +49,19 @@ func (c *Classifier) Next(statement pg_parse.Statement) pg_contract.StatementAna
 		return analysis
 	}
 
+	ruled := c.scope(statement, context)
 	if classify := commandRules[statement.Command]; classify != nil {
-		findings, errors := classify(c.scope(statement, context))
+		findings, errors := classify(ruled)
 		analysis.Findings = findings
 		analysis.Errors = errors
 	}
 	c.session.Declare(statement, context)
 
-	gateErrors := versionGate(c.catalog.Version(), statement)
-	analysis.Errors = append(analysis.Errors, gateErrors...)
-	if len(gateErrors) > 0 {
+	// Server refusal checks
+	refusals := versionGate(c.catalog.Version(), statement)
+	refusals = append(refusals, txnBlockSafety(ruled, context.InTransaction || sharedCycle)...)
+	analysis.Errors = append(analysis.Errors, refusals...)
+	if len(refusals) > 0 {
 		analysis.Findings = nil
 	}
 
