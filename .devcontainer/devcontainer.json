@@ -1,0 +1,56 @@
+{
+  "name": "apercu-cli",
+
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".",
+    "args": {
+      "GO_IMAGE": "mcr.microsoft.com/devcontainers/go:2-1.27-trixie",
+      "CGO_LIBS": ""
+    }
+  },
+
+  "remoteUser": "vscode",
+  "init": true,
+  "runArgs": ["--label", "devbox.project=apercu-cli"],
+
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+      "moby": false
+    },
+    "ghcr.io/devcontainers/features/node:1": {},
+    "ghcr.io/anthropics/devcontainer-features/claude-code:1": {}
+  },
+
+  "mounts": [
+    "source=claude-code-config-${devcontainerId},target=/home/vscode/.claude,type=volume",
+    "source=go-mod-cache,target=/go/pkg/mod,type=volume",
+    "source=go-build-cache-${devcontainerId},target=/home/vscode/.cache/go-build,type=volume",
+    "source=jetbrains-cache-${devcontainerId},target=/home/vscode/.cache/JetBrains,type=volume",
+    "source=/var/lib/devbox/ssh-agent,target=/home/vscode/.ssh-agent,type=bind"
+  ],
+
+  "containerEnv": {
+    "CLAUDE_CONFIG_DIR": "/home/vscode/.claude",
+    "SSH_AUTH_SOCK": "/home/vscode/.ssh-agent/agent.sock",
+    "CGO_ENABLED": "1",
+    "GOMODCACHE": "/go/pkg/mod",
+    "GOCACHE": "/home/vscode/.cache/go-build"
+  },
+
+  "postCreateCommand": "if [ -f go.mod ]; then go mod download; fi",
+
+  "postStartCommand": "tmux has-session -t main 2>/dev/null || tmux new-session -d -s main -c ${containerWorkspaceFolder}",
+
+  "customizations": {
+    "jetbrains": {
+      "backend": "GoLand"
+    }
+  },
+
+  "hostRequirements": {
+    "cpus": 4,
+    "memory": "8gb",
+    "storage": "32gb"
+  }
+}
