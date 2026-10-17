@@ -84,8 +84,8 @@ func TestTxnBlockSafetyInAnImplicitTransaction(t *testing.T) {
 	t.Parallel()
 
 	shared := Analyze(testCatalog(t), cycle(0,
-		event("VACUUM orders", 10),
-		event("ANALYZE orders", 5),
+		event("VACUUM orders"),
+		event("ANALYZE orders"),
 	))
 	require.Len(t, shared.Statements, 2)
 	require.Len(t, filterV01(shared.Statements[0]), 1)
@@ -93,8 +93,8 @@ func TestTxnBlockSafetyInAnImplicitTransaction(t *testing.T) {
 	assert.Empty(t, filterV01(shared.Statements[1]), "ANALYZE is safe in a block")
 
 	separate := Analyze(testCatalog(t), apart(
-		event("VACUUM orders", 10),
-		event("ANALYZE orders", 5),
+		event("VACUUM orders"),
+		event("ANALYZE orders"),
 	))
 	require.Len(t, separate.Statements, 2)
 	assert.Empty(t, filterV01(separate.Statements[0]), "a message of its own is what the server accepts")
@@ -104,8 +104,8 @@ func TestTxnBlockSafetyInAnImplicitTransaction(t *testing.T) {
 func TestTxnBlockSafetyIgnorePosition(t *testing.T) {
 	t.Parallel()
 
-	first := Analyze(testCatalog(t), cycle(0, event("VACUUM orders", 10), event("ANALYZE orders", 5)))
-	last := Analyze(testCatalog(t), cycle(0, event("ANALYZE orders", 5), event("VACUUM orders", 10)))
+	first := Analyze(testCatalog(t), cycle(0, event("VACUUM orders"), event("ANALYZE orders")))
+	last := Analyze(testCatalog(t), cycle(0, event("ANALYZE orders"), event("VACUUM orders")))
 
 	require.Len(t, filterV01(first.Statements[0]), 1)
 	require.Len(t, filterV01(last.Statements[1]), 1)
@@ -134,10 +134,10 @@ func TestTxnBlockRefusalOpensNoEnvelope(t *testing.T) {
 	t.Parallel()
 
 	analysis := Analyze(testCatalog(t), apart(
-		event("BEGIN", 1),
-		event("VACUUM orders", 100),
-		event("ANALYZE orders", 5),
-		event("COMMIT", 1),
+		event("BEGIN"),
+		event("VACUUM orders"),
+		event("ANALYZE orders"),
+		event("COMMIT"),
 	))
 
 	require.Len(t, analysis.Statements, 4)
@@ -375,30 +375,30 @@ func TestUnboundedQueueCovered(t *testing.T) {
 
 	t.Run("only the statement that raised the lock can wait for it", func(t *testing.T) {
 		analysis := Analyze(testCatalog(t), apart(
-			event("BEGIN", 1), event(lockAll, 1), event(addColumn, 1), event(createIndex, 1), event("COMMIT", 1),
+			event("BEGIN"), event(lockAll), event(addColumn), event(createIndex), event("COMMIT"),
 		))
 		assert.Equal(t, []bool{false, true, false, false, false}, fires(analysis))
 	})
 
 	t.Run("a lock upgrade waits again", func(t *testing.T) {
 		analysis := Analyze(testCatalog(t), apart(
-			event("BEGIN", 1), event(createIndex, 1), event(addColumn, 1), event("COMMIT", 1),
+			event("BEGIN"), event(createIndex), event(addColumn), event("COMMIT"),
 		))
 		assert.Equal(t, []bool{false, true, true, false}, fires(analysis))
 	})
 
 	t.Run("an implicit transaction holds its locks the same way", func(t *testing.T) {
-		analysis := Analyze(testCatalog(t), cycle(0, event(addColumn, 1), event(createIndex, 1)))
+		analysis := Analyze(testCatalog(t), cycle(0, event(addColumn), event(createIndex)))
 		assert.Equal(t, []bool{true, false}, fires(analysis))
 	})
 
 	t.Run("separate transactions each wait", func(t *testing.T) {
-		analysis := Analyze(testCatalog(t), apart(event(addColumn, 1), event(createIndex, 1)))
+		analysis := Analyze(testCatalog(t), apart(event(addColumn), event(createIndex)))
 		assert.Equal(t, []bool{true, true}, fires(analysis))
 	})
 
 	t.Run("only the relations already held are dropped", func(t *testing.T) {
-		analysis := Analyze(testCatalog(t), apart(event("BEGIN", 1), event(lockAll, 1), event(addFK, 1), event("COMMIT", 1)))
+		analysis := Analyze(testCatalog(t), apart(event("BEGIN"), event(lockAll), event(addFK), event("COMMIT")))
 		assert.Equal(t, []string{"apercu_snapshot_test.users"}, filterV02Relation(analysis.Statements[2]))
 	})
 }
@@ -408,12 +408,12 @@ func TestUnboundedQueueLeavesLocks(t *testing.T) {
 
 	script := func() []pg_contract.QueryEvent {
 		return apart(
-			event("BEGIN", 1),
-			event("UPDATE orders SET status = 'done'", 10),
-			event("ALTER TABLE orders ADD COLUMN z int", 100),
-			event("CREATE INDEX users_email_idx ON users (email)", 20),
-			event("COMMIT", 1),
-			event("ALTER TABLE events ADD COLUMN y int", 50),
+			event("BEGIN"),
+			event("UPDATE orders SET status = 'done'"),
+			event("ALTER TABLE orders ADD COLUMN z int"),
+			event("CREATE INDEX users_email_idx ON users (email)"),
+			event("COMMIT"),
+			event("ALTER TABLE events ADD COLUMN y int"),
 		)
 	}
 	unbounded := Analyze(testCatalog(t), script())

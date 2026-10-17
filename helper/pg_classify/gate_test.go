@@ -62,7 +62,7 @@ func TestVersionGatingDisabledWhenNoKnownVersion(t *testing.T) {
 	catalog := testCatalog(t)
 	require.Equal(t, pg_contract.VersionUnknown, catalog.Version(), "the fixture has no prod snapshot")
 
-	analysis := Analyze(catalog, apart(event("ALTER TABLE orders ADD CONSTRAINT c CHECK (total > 0) NOT ENFORCED", 1)))
+	analysis := Analyze(catalog, apart(event("ALTER TABLE orders ADD CONSTRAINT c CHECK (total > 0) NOT ENFORCED")))
 	require.Len(t, analysis.Statements, 1)
 	assert.Empty(t, analysis.Statements[0].Errors)
 	assert.NotEmpty(t, analysis.Statements[0].Findings, "the statement is read as the newest server reads it")
@@ -85,13 +85,13 @@ func TestVersionGatingIgnoreNotVersionDependent(t *testing.T) {
 func TestMigrationVersion(t *testing.T) {
 	t.Parallel()
 
-	plain := Analyze(testCatalog(t), apart(event("ALTER TABLE orders ADD COLUMN z int", 1)))
+	plain := Analyze(testCatalog(t), apart(event("ALTER TABLE orders ADD COLUMN z int")))
 	assert.Equal(t, pg_contract.Between(pg_contract.MinSupportedVersion, pg_contract.MaxSupportedVersion), plain.Versions,
 		"nothing version-bound, so every supported server runs it")
 
 	mixed := Analyze(testCatalog(t), apart(
-		event("ALTER TABLE orders ALTER COLUMN status SET STORAGE DEFAULT", 1),
-		event("VACUUM ONLY orders", 1),
+		event("ALTER TABLE orders ALTER COLUMN status SET STORAGE DEFAULT"),
+		event("VACUUM ONLY orders"),
 	))
 	assert.Equal(t, pg_contract.Exactly(pg_contract.Version18), mixed.Versions, "the highest floor wins")
 	assert.False(t, mixed.Versions.IsEmpty())
@@ -101,8 +101,8 @@ func TestMigrationVersionImpossible(t *testing.T) {
 	t.Parallel()
 
 	analysis := Analyze(testCatalog(t), apart(
-		event("VACUUM ONLY orders", 1),
-		event("ALTER TABLE events SET UNLOGGED", 1),
+		event("VACUUM ONLY orders"),
+		event("ALTER TABLE events SET UNLOGGED"),
 	))
 
 	require.Len(t, analysis.Statements, 2)

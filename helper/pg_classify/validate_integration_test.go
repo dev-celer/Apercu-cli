@@ -165,7 +165,7 @@ func implicitTxnBlock(t *testing.T, db *sql.DB, catalog *pg_catalog.Catalog) {
 	refused, serverMessage := refusedInTxnBlock(execErr)
 	require.Truef(t, refused, "the server accepted a VACUUM sharing a message (said: %v)", execErr)
 
-	shared := Analyze(catalog, cycle(0, event("VACUUM orders", 1), event("ANALYZE orders", 1)))
+	shared := Analyze(catalog, cycle(0, event("VACUUM orders"), event("ANALYZE orders")))
 	require.Len(t, shared.Statements, 2)
 	predicted := filterTxnBlockErrors(shared.Statements[0])
 	require.Lenf(t, predicted, 1, "V-01 %v on a VACUUM sharing a cycle", predicted)
@@ -174,7 +174,7 @@ func implicitTxnBlock(t *testing.T, db *sql.DB, catalog *pg_catalog.Catalog) {
 	assert.Empty(t, filterTxnBlockErrors(shared.Statements[1]), "the ANALYZE is safe in a block")
 
 	// The same VACUUM with the message to itself is what the server accepted above.
-	alone := Analyze(catalog, apart(event("VACUUM orders", 1)))
+	alone := Analyze(catalog, apart(event("VACUUM orders")))
 	require.Len(t, alone.Statements, 1)
 	assert.Empty(t, filterTxnBlockErrors(alone.Statements[0]))
 	assert.NotEmpty(t, alone.Statements[0].Findings, "and it takes its lock")
@@ -328,7 +328,7 @@ func timeoutScope(t *testing.T, db *sql.DB, catalog *pg_catalog.Catalog, script 
 
 	events := make([]pg_contract.QueryEvent, 0, len(script.messages))
 	for _, message := range script.messages {
-		events = append(events, event(message, 1))
+		events = append(events, event(message))
 	}
 	analysis := Analyze(catalog, apart(events...))
 	last := analysis.Statements[len(analysis.Statements)-1]
@@ -359,7 +359,7 @@ func coveredNeverWaits(t *testing.T, db *sql.DB, catalog *pg_catalog.Catalog) {
 	ctx := context.Background()
 	const lockAll = "LOCK TABLE orders IN ACCESS EXCLUSIVE MODE"
 
-	analysis := Analyze(catalog, apart(event("BEGIN", 1), event(lockAll, 1), event(v02AddColumn, 1)))
+	analysis := Analyze(catalog, apart(event("BEGIN"), event(lockAll), event(v02AddColumn)))
 	require.Len(t, analysis.Statements, 3)
 	assert.NotNil(t, filterV02(analysis.Statements[1]), "the LOCK can queue")
 	assert.Nil(t, filterV02(analysis.Statements[2]), "the ALTER holds its lock already")

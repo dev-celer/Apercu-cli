@@ -8,13 +8,12 @@ import (
 )
 
 type QueryEvent struct {
-	SQL          string        `json:"sql"`
-	StartedAt    time.Time     `json:"started_at"`
-	Cycle        int           `json:"cycle"`
-	Duration     time.Duration `json:"duration"`
-	CommandTag   string        `json:"command_tag"`
-	RowsAffected int64         `json:"rows_affected"`
-	Error        string        `json:"error,omitempty"`
+	SQL          string    `json:"sql"`
+	StartedAt    time.Time `json:"started_at"`
+	Cycle        int       `json:"cycle"`
+	CommandTag   string    `json:"command_tag"`
+	RowsAffected int64     `json:"rows_affected"`
+	Error        string    `json:"error,omitempty"`
 }
 
 type QueryEventAnalysis struct {

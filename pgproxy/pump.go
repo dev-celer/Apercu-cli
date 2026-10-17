@@ -2,7 +2,6 @@ package main
 
 import (
 	"apercu-cli/helper/pg_contract"
-	"apercu-cli/helper/pg_parse"
 	"fmt"
 	"os"
 	"strconv"
@@ -19,21 +18,10 @@ type connState struct {
 	portals       map[string]string
 	// pending is a queue of event the client has asked the server to handle.
 	pending []*pendingEvent
-	// boundary is when the server finished the statement before this one.
-	boundary time.Time
 	// cycle counts protocol cycles, it acts as an incremental identifier per event
 	cycle int
 	// awaiting is a queue of cycles still awaiting a ReadyForQuery from the server.
-	awaiting []awaitingCycle
-	// now is the clock, so a test can drive the state machine without waiting on one.
-	now func() time.Time
-}
-
-// awaitingCycle is a cycle the server still owes a ReadyForQuery for.
-type awaitingCycle struct {
-	id int
-	// rewritten marks a cycle the proxy rewrote from simple protocol to extended protocol.
-	rewritten bool
+	awaiting []int
 }
 
 // pendingEvent is one event the client asked the server to run: a simple Query message, which
@@ -44,13 +32,10 @@ type pendingEvent struct {
 	cycle int
 	// portal is the name an Execute ran, empty for a simple Query.
 	portal string
-	// elapsed is the server time already passed on this statement, which is only ever non-zero for
-	// a portal the server has stopped and resumed.
-	elapsed time.Duration
 	// suspended records that the server answered this statement's Execute with PortalSuspended: it
 	// returned part of its rows and left the portal open.
 	suspended bool
-	// simple marks SQL that arrived as simple protocol message that the proxy did not rewrite.
+	// simple marks SQL that arrived as a Query message.
 	simple bool
 	tag    string
 	err    string
@@ -60,12 +45,11 @@ func newConnState() *connState {
 	return &connState{
 		preparedStmts: make(map[string]string),
 		portals:       make(map[string]string),
-		now:           time.Now,
 	}
 }
 
 // flush publishes the queued events the closing function filter.
-func (s *connState) flush(at time.Time, closing func(*pendingEvent) bool) []pg_contract.QueryEvent {
+func (s *connState) flush(closing func(*pendingEvent) bool) []pg_contract.QueryEvent {
 	events := make([]pg_contract.QueryEvent, 0, len(s.pending))
 	kept := s.pending[:0]
 
@@ -78,24 +62,18 @@ func (s *connState) flush(at time.Time, closing func(*pendingEvent) bool) []pg_c
 			continue
 		}
 
-		events = append(events, pending.event(s.ran(pending, at)))
+		events = append(events, pending.event())
 	}
 
-	s.boundary = at
 	s.pending = kept
 	return events
 }
 
 // openCycle records that the client has finished a cycle and the server owes a ReadyForQuery for it.
 // For simple protocol, called on a Query command, for extended protocol called on a Sync command.
-func (s *connState) openCycle(rewritten bool) {
-	s.awaiting = append(s.awaiting, awaitingCycle{id: s.cycle, rewritten: rewritten})
+func (s *connState) openCycle() {
+	s.awaiting = append(s.awaiting, s.cycle)
 	s.cycle++
-}
-
-// answeringRewrite reports whether the cycle the server is working through was rewritten
-func (s *connState) answeringRewrite() bool {
-	return len(s.awaiting) > 0 && s.awaiting[0].rewritten
 }
 
 // head return the first element in the pending event queue.
@@ -126,20 +104,6 @@ func (s *connState) resume(portal string) *pendingEvent {
 	return nil
 }
 
-// ran is how long the server spent on the statement.
-func (s *connState) ran(pending *pendingEvent, at time.Time) time.Duration {
-	return pending.elapsed + s.stretch(pending, at)
-}
-
-// stretch is how long the server has been on this statement, in this current execution.
-func (s *connState) stretch(pending *pendingEvent, at time.Time) time.Duration {
-	from := pending.start
-	if s.boundary.After(from) {
-		from = s.boundary
-	}
-	return at.Sub(from)
-}
-
 // reportable is used on a statement whose cycle completed.
 // it answers if it ran at any point, and so, if it should be reported or not.
 func (p *pendingEvent) reportable() bool {
@@ -147,12 +111,11 @@ func (p *pendingEvent) reportable() bool {
 }
 
 // event return the output event that the proxy should emit.
-func (p *pendingEvent) event(duration time.Duration) pg_contract.QueryEvent {
+func (p *pendingEvent) event() pg_contract.QueryEvent {
 	ev := pg_contract.QueryEvent{
 		SQL:          p.sql,
 		StartedAt:    p.start,
 		Cycle:        p.cycle,
-		Duration:     duration,
 		CommandTag:   p.tag,
 		Error:        p.err,
 		RowsAffected: parseRowsAffected(p.tag),
@@ -190,9 +153,9 @@ func pumpClientToUpstream(backend *pgproto3.Backend, upstream *Upstream, state *
 			return fmt.Errorf("receive from client: %v", err)
 		}
 
-		for _, out := range observeClient(msg, state) {
-			upstream.Frontend.Send(out)
-		}
+		observeClient(msg, state)
+
+		upstream.Frontend.Send(msg)
 		if err := upstream.Frontend.Flush(); err != nil {
 			return fmt.Errorf("send to upstream: %v", err)
 		}
@@ -214,9 +177,7 @@ func pumpUpstreamToClient(backend *pgproto3.Backend, upstream *Upstream, state *
 			return fmt.Errorf("sync auth type: %v", err)
 		}
 
-		if !observeUpstream(msg, state) {
-			continue
-		}
+		observeUpstream(msg, state)
 
 		backend.Send(msg)
 		if err := backend.Flush(); err != nil {
@@ -247,29 +208,20 @@ func syncAuthType(backend *pgproto3.Backend, msg pgproto3.BackendMessage) error 
 	return nil
 }
 
-// observeClient advances the state machine and answers with what the proxy should send upstream.
-// Either the original messages or rewritten messages.
-func observeClient(msg pgproto3.FrontendMessage, state *connState) []pgproto3.FrontendMessage {
+// observeClient advances the state machine with a message the client sent.
+func observeClient(msg pgproto3.FrontendMessage, state *connState) {
 	state.mu.Lock()
 	defer state.mu.Unlock()
 
-	started := state.now()
+	started := time.Now()
 
 	switch m := msg.(type) {
 	case *pgproto3.Query:
-		if rewritten := rewriteQuery(m.String); rewritten != nil {
-			for _, statement := range pg_parse.Split(m.String) {
-				state.pending = append(state.pending, &pendingEvent{
-					sql: statement, start: started, cycle: state.cycle,
-				})
-			}
-			state.openCycle(true)
-			return rewritten
-		}
+		// A simple Query is a whole cycle: the server answers it with one ReadyForQuery.
 		state.pending = append(state.pending, &pendingEvent{
 			sql: m.String, start: started, simple: true, cycle: state.cycle,
 		})
-		state.openCycle(false)
+		state.openCycle()
 	case *pgproto3.Parse:
 		state.preparedStmts[m.Name] = m.Query
 	case *pgproto3.Bind:
@@ -280,17 +232,14 @@ func observeClient(msg pgproto3.FrontendMessage, state *connState) []pgproto3.Fr
 		// Resuming a suspended portal continues the statement, nothing to enqueue.
 		if pending := state.resume(m.Portal); pending != nil {
 			pending.suspended = false
-			return forward(msg)
+			return
 		}
 		state.pending = append(state.pending, &pendingEvent{
 			sql: state.portals[m.Portal], start: started, portal: m.Portal, cycle: state.cycle,
 		})
-		// Append a flush after the execute message to prevent the server from batch sending responses,
-		// which would render per statement timing useless.
-		return []pgproto3.FrontendMessage{msg, &pgproto3.Flush{}}
 	case *pgproto3.Sync:
 		// Sync ends the extended protocol cycle and is what the server answers with a ReadyForQuery.
-		state.openCycle(false)
+		state.openCycle()
 	case *pgproto3.Close:
 		switch m.ObjectType {
 		case 'S':
@@ -299,23 +248,13 @@ func observeClient(msg pgproto3.FrontendMessage, state *connState) []pgproto3.Fr
 			delete(state.portals, m.Name)
 		}
 	}
-	return forward(msg)
 }
 
-func forward(msg pgproto3.FrontendMessage) []pgproto3.FrontendMessage {
-	return []pgproto3.FrontendMessage{msg}
-}
-
-// observeUpstream publishes whatever the server just finished and answers whether the client should receive this message.
-func observeUpstream(msg pgproto3.BackendMessage, state *connState) bool {
-	state.mu.Lock()
-	hide := state.answeringRewrite() && rewriteNoise(msg)
-	state.mu.Unlock()
-
+// observeUpstream publishes whatever the server just finished.
+func observeUpstream(msg pgproto3.BackendMessage, state *connState) {
 	for _, ev := range state.observeUpstream(msg) {
 		handleEvent(ev)
 	}
-	return !hide
 }
 
 // observeUpstream advances the state machine and answers with whatever the server just finished.
@@ -323,33 +262,25 @@ func (s *connState) observeUpstream(msg pgproto3.BackendMessage) []pg_contract.Q
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	at := s.now()
-
 	switch m := msg.(type) {
 	case *pgproto3.CommandComplete:
 		pending, index := s.completing()
 		if pending == nil {
 			return nil
 		}
-		stretch := s.stretch(pending, at)
-		s.boundary = at
 		pending.tag = string(m.CommandTag)
 
 		if !pending.simple {
 			// in extended protocol, one Execute is one statement, so it is finished and reportable on its own.
 			s.pending = append(s.pending[:index], s.pending[index+1:]...)
-			return []pg_contract.QueryEvent{pending.event(pending.elapsed + stretch)}
+			return []pg_contract.QueryEvent{pending.event()}
 		}
-		// For simple query that wasn't rewritten, only append the time passed to the event.
-		pending.elapsed += stretch
+		// A simple Query gets a CommandComplete for each of its statements, so it waits for its ReadyForQuery.
 
 	case *pgproto3.PortalSuspended:
 		// An Execute carrying a row limit returns its batch and leaves the portal open.
 		if pending, _ := s.completing(); pending != nil {
-			// The server stops working on the portal here, so we add the elapsed timing.
-			pending.elapsed = s.ran(pending, at)
 			pending.suspended = true
-			s.boundary = at
 		}
 
 	case *pgproto3.ErrorResponse:
@@ -363,13 +294,13 @@ func (s *connState) observeUpstream(msg pgproto3.BackendMessage) []pg_contract.Q
 			// The server also reports ready at the end of authentication, with no cycle behind it.
 			// If anything is queued anyway then the client sent something this state machine did not
 			// model, and holding those statements back would leak them: publish and start clean.
-			return s.flush(at, func(*pendingEvent) bool { return true })
+			return s.flush(func(*pendingEvent) bool { return true })
 		}
-		cycle := s.awaiting[0].id
+		cycle := s.awaiting[0]
 		s.awaiting = s.awaiting[1:]
 
 		txOpen := m.TxStatus == 'T'
-		return s.flush(at, func(pending *pendingEvent) bool {
+		return s.flush(func(pending *pendingEvent) bool {
 			if pending.suspended {
 				// If the transaction is still opened, that mean that the portal still has things to do,
 				// we should wait before publishing the event.

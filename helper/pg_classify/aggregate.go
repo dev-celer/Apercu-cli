@@ -2,7 +2,6 @@ package pg_classify
 
 import (
 	"slices"
-	"time"
 
 	"apercu-cli/helper/pg_catalog"
 	"apercu-cli/helper/pg_contract"
@@ -18,8 +17,6 @@ func Analyze(catalog *pg_catalog.Catalog, events []pg_contract.QueryEvent) pg_co
 	for _, source := range intake {
 		statement := classifier.NextInCycle(source.statement, perCycle[source.cycle] > 1)
 		statement.Cycle = source.cycle
-		statement.Event = source.event
-		statement.Duration = source.duration
 		levelGrading(catalog, statement.Findings)
 		analysis.Versions = migrationVersions(analysis.Versions, source.statement, statement.Errors)
 		analysis.Statements = append(analysis.Statements, statement)
@@ -60,18 +57,16 @@ func pruneCoveredUnboundedQueueRisk(statements []pg_contract.StatementAnalysis, 
 // source is one parsed statement with metadata information.
 type source struct {
 	statement pg_parse.Statement
-	event     int
 	cycle     int
-	duration  time.Duration
 }
 
 // parseEvents parse the statement and count the number of event per cycle.
 func parseEvents(events []pg_contract.QueryEvent) ([]source, map[int]int) {
 	var intake []source
 	perCycle := map[int]int{}
-	for index, event := range events {
+	for _, event := range events {
 		for _, parsed := range pg_parse.Parse(event.SQL) {
-			intake = append(intake, source{statement: parsed, event: index, cycle: event.Cycle, duration: event.Duration})
+			intake = append(intake, source{statement: parsed, cycle: event.Cycle})
 			perCycle[event.Cycle]++
 		}
 	}
@@ -131,16 +126,8 @@ func sameTransaction(previous, next pg_contract.StatementAnalysis) bool {
 }
 
 // groupEnvelopes opens an envelope for every lock a statement takes in its transaction group. The
-// window runs to the end of the group, since that is where the locks are released.
+// envelope runs to the end of the group, since that is where the locks are released.
 func groupEnvelopes(group []pg_contract.StatementAnalysis, offset int) []pg_contract.LockEnvelope {
-	held := make([]time.Duration, len(group)+1)
-	for i := len(group) - 1; i >= 0; i-- {
-		held[i] = held[i+1]
-		if i == len(group)-1 || group[i].Event != group[i+1].Event {
-			held[i] += group[i].Duration
-		}
-	}
-
 	running := map[pg_contract.Relation]pg_contract.Lock{}
 	var out []pg_contract.LockEnvelope
 	for i, statement := range group {
@@ -148,13 +135,12 @@ func groupEnvelopes(group []pg_contract.StatementAnalysis, offset int) []pg_cont
 			already := running[locked.Relation]
 			running[locked.Relation] = pg_contract.MaxLock(already, locked.Lock)
 			out = append(out, pg_contract.LockEnvelope{
-				Relation:       locked.Relation,
-				Lock:           locked.Lock,
-				TxnGroup:       statement.TxnGroup,
-				OpenedBy:       offset + i,
-				BlockingWindow: held[i],
-				Statements:     len(group) - i,
-				Covered:        locked.Lock <= already,
+				Relation:         locked.Relation,
+				Lock:             locked.Lock,
+				TxnGroup:         statement.TxnGroup,
+				OpenedBy:         offset + i,
+				StatementsWindow: len(group) - i,
+				Covered:          locked.Lock <= already,
 			})
 		}
 	}

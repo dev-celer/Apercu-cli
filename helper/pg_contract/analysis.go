@@ -5,7 +5,6 @@ import (
 	"apercu-cli/helper/warning_interface"
 	"fmt"
 	"sort"
-	"time"
 )
 
 // TxnGroup numbers the transaction a statement belongs to.
@@ -18,12 +17,7 @@ type StatementAnalysis struct {
 	// InTransaction mark the statement in an explicit transaction
 	InTransaction bool `json:"in_transaction" yaml:"in_transaction"`
 	// Cycle is the protocol cycle the statement ran under.
-	Cycle int `json:"cycle" yaml:"cycle"`
-	// Event is the position, in the proxy's event list, of the event this statement came from.
-	// Statements sharing one are statements the proxy could not time apart.
-	Event int `json:"event" yaml:"event"`
-	// Duration is how long the statement's event ran.
-	Duration    time.Duration               `json:"duration" yaml:"duration"`
+	Cycle       int                         `json:"cycle" yaml:"cycle"`
 	Command     Command                     `json:"command" yaml:"command"`
 	Subcommands []string                    `json:"subcommands,omitempty" yaml:"subcommands,omitempty"`
 	Findings    []Finding                   `json:"findings,omitempty" yaml:"findings,omitempty"`
@@ -102,11 +96,9 @@ type LockEnvelope struct {
 	TxnGroup TxnGroup `json:"txn_group" yaml:"txn_group"`
 	// OpenedBy is the position, in the migration's statement list, of the statement that took this lock.
 	OpenedBy int `json:"opened_by" yaml:"opened_by"`
-	// BlockingWindow is the total window in which the lock remain held.
-	// From the point the statement took it until the transaction is closed.
-	BlockingWindow time.Duration `json:"blocking_window" yaml:"blocking_window"`
-	// Statements is how many statements the window covers, the raising one included.
-	Statements int `json:"statements" yaml:"statements"`
+	// StatementsWindow is how many statements the lock remains held over, from the statement that took it until the
+	// transaction is closed, the raising one included.
+	StatementsWindow int `json:"statements_window" yaml:"statements_window"`
 	// Covered says the transaction already held this lock, or a stronger one for this relation.
 	Covered bool `json:"covered" yaml:"covered"`
 }
@@ -116,7 +108,7 @@ func (e LockEnvelope) String() string {
 	if e.Covered {
 		covered = ", covered"
 	}
-	return fmt.Sprintf("%s %s for %s over %d statement(s)%s", e.Relation, e.Lock.Short(), e.BlockingWindow, e.Statements, covered)
+	return fmt.Sprintf("%s %s over %d statement(s)%s", e.Relation, e.Lock.Short(), e.StatementsWindow, covered)
 }
 
 // EffectiveEnvelopes keeps the envelopes that raised what a transaction was blocking, dropping the ones a lock already held covers.
@@ -130,18 +122,6 @@ func EffectiveEnvelopes(envelopes []LockEnvelope) []LockEnvelope {
 	return out
 }
 
-// Elapsed is how long a run of statements took.
-func Elapsed(statements []StatementAnalysis) time.Duration {
-	var total time.Duration
-	for i, statement := range statements {
-		if i > 0 && statement.Event == statements[i-1].Event {
-			continue
-		}
-		total += statement.Duration
-	}
-	return total
-}
-
 // MigrationAnalysis is the parser's record for a whole migration.
 type MigrationAnalysis struct {
 	Statements []StatementAnalysis `json:"statements" yaml:"statements"`
@@ -150,9 +130,6 @@ type MigrationAnalysis struct {
 	// Fixed if the version is known from prod else, narrowed from features used.
 	Versions VersionRange `json:"versions" yaml:"versions"`
 }
-
-// Elapsed is how long the migration ran.
-func (m MigrationAnalysis) Elapsed() time.Duration { return Elapsed(m.Statements) }
 
 // Errors is every error the migration produced, in statement order. They are reported and never
 // block approval, so the roll-up that presents them needs them flattened.
