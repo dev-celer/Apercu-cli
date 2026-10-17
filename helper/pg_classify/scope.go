@@ -11,10 +11,11 @@ type scopes struct {
 	// session is the settings written by the current transaction, if any.
 	session map[string]string
 
-	// frames is the savepoint stack. It is empty outside an explicit transaction.
-	// frames[0] is the transaction itself and each SAVEPOINT pushes another.
+	// frames is the savepoint stack. It is empty between transactions.
+	// frames[0] is the transaction itself, explicit or implicit, and each SAVEPOINT pushes another.
 	frames []frame
-	inTx   bool
+	// inTx says the transaction is an explicit block, opened by a BEGIN.
+	inTx bool
 }
 
 type frame struct {
@@ -72,11 +73,8 @@ func (s *scopes) remember(committed bool, key string) {
 	top.undo = append(top.undo, undo{committed: committed, key: key, value: value, had: had})
 }
 
-// set writes a parameter.
+// set writes a parameter. A LOCAL write lasts until the end of the transaction, explicit or implicit.
 func (s *scopes) set(local bool, key, value string) {
-	if local && !s.inTx {
-		return
-	}
 	s.remember(false, key)
 	s.current[key] = value
 	if !local {
@@ -87,9 +85,6 @@ func (s *scopes) set(local bool, key, value string) {
 
 // reset drops a parameter back to the baseline.
 func (s *scopes) reset(local bool, key string) {
-	if local && !s.inTx {
-		return
-	}
 	s.remember(false, key)
 	delete(s.current, key)
 	if !local {
@@ -105,12 +100,27 @@ func (s *scopes) resetAll() {
 	}
 }
 
+// open starts the implicit transaction a statement runs in when none is open.
+func (s *scopes) open() {
+	if len(s.frames) == 0 {
+		s.frames = []frame{{}}
+	}
+}
+
+// endImplicit commits the implicit transaction at the end of its cycle. An explicit block outlives it.
+func (s *scopes) endImplicit() {
+	if len(s.frames) > 0 && !s.inTx {
+		s.commit()
+	}
+}
+
+// begin makes the open transaction an explicit block. An implicit one becomes the block, with what it already wrote.
 func (s *scopes) begin() {
 	if s.inTx {
 		return
 	}
+	s.open()
 	s.inTx = true
-	s.frames = []frame{{}}
 }
 
 // unwind puts back everything the frames from index i upwards changed.

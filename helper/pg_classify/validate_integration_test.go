@@ -205,7 +205,6 @@ var queueThresholdScripts = []string{
 type timeoutScopeScript struct {
 	name     string
 	messages []string
-	gap      string
 }
 
 const v02AddColumn = "ALTER TABLE " + oracleSchema + ".orders ADD COLUMN v02 int"
@@ -214,7 +213,7 @@ var timeoutScopeScripts = []timeoutScopeScript{
 	{name: "no timeout at all", messages: []string{v02AddColumn}},
 	{name: "a session timeout", messages: []string{"SET lock_timeout = '200ms'", v02AddColumn}},
 	{name: "a timeout of zero is disabled", messages: []string{"SET lock_timeout = 0", v02AddColumn}},
-	{name: "SET LOCAL outside a block applies nothing", messages: []string{"SET LOCAL lock_timeout = '200ms'", v02AddColumn}},
+	{name: "SET LOCAL in a message of its own applies nothing", messages: []string{"SET LOCAL lock_timeout = '200ms'", v02AddColumn}},
 	{name: "SET LOCAL inside the block", messages: []string{"BEGIN", "SET LOCAL lock_timeout = '200ms'", v02AddColumn}},
 	{name: "SET LOCAL ends with its block", messages: []string{"BEGIN", "SET LOCAL lock_timeout = '200ms'", "COMMIT", v02AddColumn}},
 	{name: "a session SET survives the COMMIT", messages: []string{"BEGIN", "SET lock_timeout = '200ms'", "COMMIT", v02AddColumn}},
@@ -231,11 +230,7 @@ var timeoutScopeScripts = []timeoutScopeScript{
 	},
 	{name: "NOWAIT fails instead of queueing", messages: []string{"BEGIN", "LOCK TABLE orders IN ACCESS EXCLUSIVE MODE NOWAIT"}},
 	{name: "a COMMIT part-way through a message ends SET LOCAL", messages: []string{"SET LOCAL lock_timeout = '200ms'; COMMIT; " + v02AddColumn}},
-	{
-		name:     "SET LOCAL bounds the rest of its own message",
-		messages: []string{"SET LOCAL lock_timeout = '200ms'; " + v02AddColumn},
-		gap:      "C-04 does not model the implicit transaction of a shared cycle yet, the server bounds this wait",
-	},
+	{name: "SET LOCAL bounds the rest of its own message", messages: []string{"SET LOCAL lock_timeout = '200ms'; " + v02AddColumn}},
 }
 
 func TestUnboundedQueueOracle(t *testing.T) {
@@ -321,9 +316,6 @@ func queueBehind(t *testing.T, db *sql.DB, sql, table string) (readerBlocked, wr
 // timeoutScope assert that a lock_timeout is behaving has expected by the classifier.
 func timeoutScope(t *testing.T, db *sql.DB, catalog *pg_catalog.Catalog, script timeoutScopeScript) {
 	t.Helper()
-	if script.gap != "" {
-		t.Skip(script.gap)
-	}
 	ctx := context.Background()
 
 	events := make([]pg_contract.QueryEvent, 0, len(script.messages))

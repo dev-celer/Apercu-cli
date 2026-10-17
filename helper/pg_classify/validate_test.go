@@ -292,7 +292,7 @@ func TestUnboundedQueueTimeoutInScope(t *testing.T) {
 		{name: "a session timeout", script: "SET lock_timeout = '5s'; " + alter, fires: []bool{false}},
 		{name: "a timeout of zero is disabled", script: "SET lock_timeout = 0; " + alter, fires: []bool{true}, reason: "lock_timeout is disabled"},
 		{name: "a value the server rejects", script: "SET lock_timeout = 'soon'; " + alter, fires: []bool{true}, reason: "lock_timeout 'soon' is not a value the server accepts"},
-		{name: "SET LOCAL outside a block applies nothing", script: "SET LOCAL lock_timeout = '5s'; " + alter, fires: []bool{true}},
+		{name: "SET LOCAL in a message of its own applies nothing", script: "SET LOCAL lock_timeout = '5s'; " + alter, fires: []bool{true}},
 		{
 			name:   "SET LOCAL ends with its block",
 			script: "BEGIN; SET LOCAL lock_timeout = '5s'; " + alter + "; COMMIT; " + alter,
@@ -330,6 +330,83 @@ func TestUnboundedQueueTimeoutInScope(t *testing.T) {
 			assert.Equal(t, testCase.fires, verdicts)
 		})
 	}
+}
+
+// TestUnboundedQueueSetLocalInImplicitTransaction: the statements of one protocol cycle share an
+// implicit transaction, and a SET LOCAL lasts until that transaction ends.
+func TestUnboundedQueueSetLocalInImplicitTransaction(t *testing.T) {
+	t.Parallel()
+
+	const (
+		alter    = "ALTER TABLE orders ADD COLUMN z int"
+		setLocal = "SET LOCAL lock_timeout = '5s'"
+	)
+	cases := []struct {
+		name   string
+		events []pg_contract.QueryEvent
+		fires  []bool
+	}{
+		{name: "a multi-statement Query", events: apart(event(setLocal + "; " + alter)), fires: []bool{false}},
+		{name: "a pipeline", events: cycle(0, event(setLocal), event(alter)), fires: []bool{false}},
+		{name: "it ends with the Query", events: apart(event(setLocal+"; "+alter), event(alter)), fires: []bool{false, true}},
+		{
+			name:   "and with the pipeline",
+			events: slices.Concat(cycle(0, event(setLocal), event(alter)), cycle(1, event(alter))),
+			fires:  []bool{false, true},
+		},
+		{
+			name:   "SET LOCAL to zero overrides a session timeout until the end of the message",
+			events: apart(event("SET lock_timeout = '5s'"), event("SET LOCAL lock_timeout = 0; "+alter), event(alter)),
+			fires:  []bool{true, false},
+		},
+		{
+			// BEGIN turns the implicit transaction into the block, with what it already wrote.
+			name:   "BEGIN carries it into the block it opens",
+			events: apart(event(setLocal+"; BEGIN; "+alter), event("COMMIT"), event(alter)),
+			fires:  []bool{false, true},
+		},
+		{
+			name:   "a ROLLBACK in the message undoes a session SET too",
+			events: apart(event("SET lock_timeout = '5s'; ROLLBACK; " + alter)),
+			fires:  []bool{true},
+		},
+		{name: "a message of its own applies nothing", events: apart(event(setLocal), event(alter)), fires: []bool{true}},
+		{
+			name:   "nor does a SET LOCAL closing its message",
+			events: slices.Concat(cycle(0, event("SELECT 1"), event(setLocal)), cycle(1, event(alter))),
+			fires:  []bool{true},
+		},
+		{name: "a COMMIT in the message ends it", events: apart(event(setLocal + "; COMMIT; " + alter)), fires: []bool{true}},
+		{
+			name:   "an explicit block outlives its messages",
+			events: apart(event("BEGIN"), event(setLocal), event(alter), event("COMMIT"), event(alter)),
+			fires:  []bool{false, true},
+		},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			var verdicts []bool
+			for _, statement := range Analyze(testCatalog(t), testCase.events).Statements {
+				if statement.Command == "ALTER TABLE" {
+					verdicts = append(verdicts, filterV02(statement) != nil)
+				}
+			}
+			assert.Equal(t, testCase.fires, verdicts)
+		})
+	}
+}
+
+func TestUnboundedQueueSetLocalSearchPath(t *testing.T) {
+	t.Parallel()
+
+	analysis := Analyze(testCatalog(t), apart(
+		event("SET LOCAL search_path = public; ALTER TABLE users ADD COLUMN x int"),
+		event("ALTER TABLE users ADD COLUMN y int"),
+	))
+	require.Len(t, analysis.Statements, 3)
+	assert.Equal(t, []string{"public.users"}, filterV02Relation(analysis.Statements[1]), "resolved through the SET LOCAL")
+	assert.Equal(t, []string{"apercu_snapshot_test.users"}, filterV02Relation(analysis.Statements[2]), "back on the baseline after the message")
 }
 
 func TestUnboundedQueueNowait(t *testing.T) {

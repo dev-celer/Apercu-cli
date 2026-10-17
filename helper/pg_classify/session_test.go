@@ -24,13 +24,33 @@ func testCatalog(t *testing.T) *pg_catalog.Catalog {
 	return catalog
 }
 
-// run walks a migration the way the classifier will: one proxy event, split into statements, each one handed to the session in order.
+// run walks a script statement by statement, each one handed to the session as if the client had sent it in a message of its own.
 func run(t *testing.T, catalog *pg_catalog.Catalog, script string) ([]pg_parse.Statement, []Context) {
 	t.Helper()
 
 	statements := pg_parse.Parse(script)
 	require.NotEmpty(t, statements)
 	return statements, NewSession(catalog).Walk(statements)
+}
+
+// runCycles walks a migration sent as several client messages. Each script is one protocol cycle, a multi-statement Query or a pipeline.
+func runCycles(t *testing.T, catalog *pg_catalog.Catalog, cycles ...string) ([]pg_parse.Statement, []Context) {
+	t.Helper()
+
+	session := NewSession(catalog)
+	var statements []pg_parse.Statement
+	var contexts []Context
+	for cycle, script := range cycles {
+		parsed := pg_parse.Parse(script)
+		require.NotEmpty(t, parsed)
+		for _, statement := range parsed {
+			context := session.NextInCycle(statement, cycle)
+			session.Declare(statement, context)
+			statements = append(statements, statement)
+			contexts = append(contexts, context)
+		}
+	}
+	return statements, contexts
 }
 
 // groups is the per-statement group id.
@@ -230,7 +250,7 @@ func TestSettingScopes(t *testing.T) {
 			want:   []time.Duration{0, 5 * time.Second, 5 * time.Second},
 		},
 		{
-			name:   "SET LOCAL outside of a transaction does nothing",
+			name:   "SET LOCAL in a message of its own does nothing",
 			script: "SET LOCAL lock_timeout = '5s'; SELECT 1",
 			want:   []time.Duration{0, 0},
 		},
@@ -315,6 +335,107 @@ func TestSavepointUnwindsSettings(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestSetLocalInImplicitTransaction validate that a SET LOCAL lasts until the end of the implicit transaction its cycle runs in.
+func TestSetLocalInImplicitTransaction(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		cycles []string
+		want   []time.Duration
+	}{
+		{
+			name:   "a cycle of several statements is one implicit transaction",
+			cycles: []string{"SET LOCAL lock_timeout = '5s'; SELECT 1", "SELECT 1"},
+			want:   []time.Duration{0, 5 * time.Second, 0},
+		},
+		{
+			name:   "leaving it falls back to the session value",
+			cycles: []string{"SET lock_timeout = '9s'", "SET LOCAL lock_timeout = '5s'; SELECT 1", "SELECT 1"},
+			want:   []time.Duration{0, 9 * time.Second, 5 * time.Second, 9 * time.Second},
+		},
+		{
+			name:   "a LOCAL reset holds until the end of the cycle as well",
+			cycles: []string{"SET lock_timeout = '9s'", "SET LOCAL lock_timeout TO DEFAULT; SELECT 1", "SELECT 1"},
+			want:   []time.Duration{0, 9 * time.Second, 0, 9 * time.Second},
+		},
+		{
+			name:   "a cycle of its own applies nothing",
+			cycles: []string{"SET LOCAL lock_timeout = '5s'", "SELECT 1"},
+			want:   []time.Duration{0, 0},
+		},
+		{
+			name:   "nor does a SET LOCAL closing its cycle",
+			cycles: []string{"SELECT 1; SET LOCAL lock_timeout = '5s'", "SELECT 1"},
+			want:   []time.Duration{0, 0, 0},
+		},
+		{
+			name:   "a COMMIT ends the implicit transaction",
+			cycles: []string{"SET LOCAL lock_timeout = '5s'; COMMIT; SELECT 1"},
+			want:   []time.Duration{0, 5 * time.Second, 0},
+		},
+		{
+			name:   "and so does a ROLLBACK",
+			cycles: []string{"SET LOCAL lock_timeout = '5s'; ROLLBACK; SELECT 1"},
+			want:   []time.Duration{0, 5 * time.Second, 0},
+		},
+		{
+			// The implicit transaction is still a transaction, its ROLLBACK undoes the session-level writes as well.
+			name:   "a ROLLBACK undoes a session SET of the implicit transaction",
+			cycles: []string{"SET lock_timeout = '5s'; ROLLBACK; SELECT 1", "SELECT 1"},
+			want:   []time.Duration{0, 5 * time.Second, 0, 0},
+		},
+		{
+			name:   "while a COMMIT keeps it",
+			cycles: []string{"SET lock_timeout = '5s'; COMMIT; SELECT 1", "SELECT 1"},
+			want:   []time.Duration{0, 5 * time.Second, 5 * time.Second, 5 * time.Second},
+		},
+		{
+			// BEGIN turns the implicit transaction into the block, with what it already wrote.
+			name:   "BEGIN carries it into the block",
+			cycles: []string{"SET LOCAL lock_timeout = '5s'; BEGIN; SELECT 1", "SELECT 1; COMMIT", "SELECT 1"},
+			want:   []time.Duration{0, 5 * time.Second, 5 * time.Second, 5 * time.Second, 5 * time.Second, 0},
+		},
+		{
+			name:   "an explicit block outlives the cycles",
+			cycles: []string{"BEGIN; SET LOCAL lock_timeout = '5s'", "SELECT 1; COMMIT", "SELECT 1"},
+			want:   []time.Duration{0, 0, 5 * time.Second, 5 * time.Second, 0},
+		},
+		{
+			// The block started with the implicit transaction, so its ROLLBACK reaches the writes made before the BEGIN.
+			name:   "a ROLLBACK of the block undoes what the cycle wrote before its BEGIN",
+			cycles: []string{"SET lock_timeout = '5s'; BEGIN; ROLLBACK; SELECT 1", "SELECT 1"},
+			want:   []time.Duration{0, 5 * time.Second, 5 * time.Second, 0, 0},
+		},
+		{
+			name:   "the statements after a COMMIT run in an implicit transaction of their own",
+			cycles: []string{"SET LOCAL lock_timeout = '5s'; COMMIT; SET LOCAL lock_timeout = '9s'; SELECT 1", "SELECT 1"},
+			want:   []time.Duration{0, 5 * time.Second, 0, 9 * time.Second, 0},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			statements, contexts := runCycles(t, nil, tc.cycles...)
+			require.Len(t, contexts, len(tc.want))
+			for i, want := range tc.want {
+				assert.Equalf(t, want, contexts[i].LockTimeout.Duration, "statement %d: %s", i, statements[i].RawSQL)
+			}
+		})
+	}
+}
+
+func TestSetLocalSearchPathInImplicitTransaction(t *testing.T) {
+	t.Parallel()
+
+	_, contexts := runCycles(t, testCatalog(t), "SET LOCAL search_path = public; SELECT 1", "SELECT 1")
+	require.Len(t, contexts, 3)
+	assert.Equal(t, []string{"public"}, contexts[1].SearchPath)
+	assert.Equal(t, []string{"apercu_snapshot_test"}, contexts[2].SearchPath)
 }
 
 // TestSearchPathMovesWithTheFile validate unqualified name resolution based on search_path.

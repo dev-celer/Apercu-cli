@@ -15,7 +15,7 @@ func Analyze(catalog *pg_catalog.Catalog, events []pg_contract.QueryEvent) pg_co
 
 	analysis := pg_contract.MigrationAnalysis{Versions: catalog.VersionRange()}
 	for _, source := range intake {
-		statement := classifier.NextInCycle(source.statement, perCycle[source.cycle] > 1)
+		statement := classifier.NextInCycle(source.statement, source.cycle, perCycle[source.cycle] > 1)
 		statement.Cycle = source.cycle
 		levelGrading(catalog, statement.Findings)
 		analysis.Versions = migrationVersions(analysis.Versions, source.statement, statement.Errors)

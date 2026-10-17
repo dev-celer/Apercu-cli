@@ -27,14 +27,17 @@ func (c *Classifier) Analyze(statements []pg_parse.Statement) []pg_contract.Stat
 
 // Next classifies one statement that had its protocol cycle to itself, and advances the session past it.
 func (c *Classifier) Next(statement pg_parse.Statement) pg_contract.StatementAnalysis {
-	return c.NextInCycle(statement, false)
+	return c.classify(statement, c.session.Next(statement), false)
 }
 
-// NextInCycle classifies one statement and advances the session past it. sharedCycle says the
-// protocol cycle the statement ran under carried other statements.
-func (c *Classifier) NextInCycle(statement pg_parse.Statement, sharedCycle bool) pg_contract.StatementAnalysis {
-	context := c.session.Next(statement)
+// NextInCycle classifies one statement of the given protocol cycle and advances the session past it.
+// sharedCycle says the cycle carried other statements.
+func (c *Classifier) NextInCycle(statement pg_parse.Statement, cycle int, sharedCycle bool) pg_contract.StatementAnalysis {
+	return c.classify(statement, c.session.NextInCycle(statement, cycle), sharedCycle)
+}
 
+// classify produces the record of one statement running under the context the session handed out.
+func (c *Classifier) classify(statement pg_parse.Statement, context Context, sharedCycle bool) pg_contract.StatementAnalysis {
 	analysis := pg_contract.StatementAnalysis{
 		RawSQL:        statement.RawSQL,
 		TxnGroup:      pg_contract.TxnGroup(context.Group),

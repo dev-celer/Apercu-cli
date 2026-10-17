@@ -43,6 +43,9 @@ type Session struct {
 	catalog *pg_catalog.Catalog
 	scopes  *scopes
 	group   int
+	// cycle is the protocol cycle of the statement before. inCycle says that cycle may still have statements to come.
+	cycle   int
+	inCycle bool
 }
 
 // NewSession starts a session from the settings baseline.
@@ -62,9 +65,33 @@ func NewSession(catalog *pg_catalog.Catalog) *Session {
 	return &Session{catalog: catalog, scopes: newScopes(baseline)}
 }
 
-// Next advances the session by one statement and returns the context that statement runs under.
+// Next advances the session by one statement that had its protocol cycle to itself, and returns the context that statement runs under.
 // The caller has to follow it with Declare once the statement has been classified.
 func (s *Session) Next(statement pg_parse.Statement) Context {
+	s.endCycle()
+	return s.step(statement)
+}
+
+// NextInCycle is Next for a statement that ran in the given protocol cycle. The statements of one
+// cycle share an implicit transaction: one multi-statement Query, or one pipeline closed by a Sync.
+func (s *Session) NextInCycle(statement pg_parse.Statement, cycle int) Context {
+	if !s.inCycle || cycle != s.cycle {
+		s.endCycle()
+	}
+	s.cycle, s.inCycle = cycle, true
+	return s.step(statement)
+}
+
+// endCycle closes the implicit transaction of the cycle before. An explicit block outlives it.
+func (s *Session) endCycle() {
+	s.inCycle = false
+	s.scopes.endImplicit()
+}
+
+// step runs one statement. Every statement runs in a transaction: the explicit block when one is
+// open, the implicit transaction of its cycle otherwise.
+func (s *Session) step(statement pg_parse.Statement) Context {
+	s.scopes.open()
 	s.openGroup(statement)
 	context := s.context()
 
