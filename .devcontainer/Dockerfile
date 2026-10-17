@@ -23,9 +23,10 @@ RUN mkdir -p \
       /home/vscode/.cache/go-build \
       /home/vscode/.cache/JetBrains \
       /home/vscode/.shell-history \
+      /home/vscode/.tmp \
       /go/pkg/mod \
       /go/pkg/sumdb \
- && chown -R vscode:vscode /home/vscode/.claude /home/vscode/.cache /home/vscode/.shell-history /go/pkg
+ && chown -R vscode:vscode /home/vscode/.claude /home/vscode/.cache /home/vscode/.tmp /home/vscode/.shell-history /go/pkg
 
 USER vscode
 RUN OMZ=/home/vscode/.oh-my-zsh \

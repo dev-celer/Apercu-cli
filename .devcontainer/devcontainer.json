@@ -27,10 +27,13 @@
     "source=go-mod-cache,target=/go/pkg/mod,type=volume",
     "source=go-build-cache-${devcontainerId},target=/home/vscode/.cache/go-build,type=volume",
     "source=jetbrains-cache-${devcontainerId},target=/home/vscode/.cache/JetBrains,type=volume",
-    "source=/var/lib/devbox/ssh-agent,target=/home/vscode/.ssh-agent,type=bind"
+    "source=/var/lib/devbox/ssh-agent,target=/home/vscode/.ssh-agent,type=bind",
+    "source=tmp-${devcontainerId},target=/home/vscode/.tmp,type=volume"
   ],
 
   "containerEnv": {
+    "LANG": "C.UTF-8",
+    "TMPDIR": "/home/vscode/.tmp",
     "CLAUDE_CONFIG_DIR": "/home/vscode/.claude",
     "SSH_AUTH_SOCK": "/home/vscode/.ssh-agent/agent.sock",
     "CGO_ENABLED": "1",
@@ -40,7 +43,7 @@
 
   "postCreateCommand": "if [ -f go.mod ]; then go mod download; fi",
 
-  "postStartCommand": "tmux has-session -t main 2>/dev/null || tmux new-session -d -s main -c ${containerWorkspaceFolder}",
+  "postStartCommand": "find /home/vscode/.tmp -mindepth 1 -mtime +30 -delete 2>/dev/null; tmux has-session -t main 2>/dev/null || tmux -u new-session -d -s main -c ${containerWorkspaceFolder}",
 
   "customizations": {
     "jetbrains": {
