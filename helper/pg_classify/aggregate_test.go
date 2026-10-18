@@ -2,6 +2,7 @@ package pg_classify
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"apercu-cli/helper"
@@ -190,6 +191,43 @@ func TestImplicitExtendedProtocol(t *testing.T) {
 	assert.Equal(t, 2, orders.StatementsWindow, "stops at the end of its own message")
 
 	assert.Empty(t, analysis.EnvelopesOn(relationName("users")), "the last message is one statement on its own")
+}
+
+// TestImplicitTransactionEndsPartWay is a COMMIT or a ROLLBACK inside a message: it ends the implicit transaction there,
+// releasing its locks, and the statements after it run in another one.
+func TestImplicitTransactionEndsPartWay(t *testing.T) {
+	t.Parallel()
+
+	for _, end := range []string{"COMMIT", "ROLLBACK"} {
+		statements := []string{"ALTER TABLE orders ADD COLUMN z int", end, "ALTER TABLE users ADD COLUMN z int", "ANALYZE users"}
+		pipeline := make([]pg_contract.QueryEvent, 0, len(statements))
+		for _, sql := range statements {
+			pipeline = append(pipeline, event(sql))
+		}
+
+		cases := []struct {
+			name   string
+			events []pg_contract.QueryEvent
+		}{
+			{name: end + " in a multi-statement query", events: apart(event(strings.Join(statements, "; ")))},
+			{name: end + " in a pipeline", events: cycle(0, pipeline...)},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+
+				analysis := Analyze(testCatalog(t), tc.events)
+				require.Len(t, analysis.Statements, 4)
+
+				orders := envelopeOn(t, analysis, "orders", pg_contract.LockAccessExclusive)
+				assert.Equal(t, 2, orders.StatementsWindow, "the ALTER and the %s", end)
+
+				users := envelopeOn(t, analysis, "users", pg_contract.LockAccessExclusive)
+				assert.Equal(t, 2, users.OpenedBy)
+				assert.Equal(t, 2, users.StatementsWindow, "the ALTER and the ANALYZE")
+			})
+		}
+	}
 }
 
 func TestEnvelopeEnd(t *testing.T) {

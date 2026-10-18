@@ -121,8 +121,19 @@ func sameTransaction(previous, next pg_contract.StatementAnalysis) bool {
 		// Handle explicit transaction block, BEGIN ... COMMIT.
 		return previous.TxnGroup == next.TxnGroup
 	}
+	if endsTransaction[previous.Command] {
+		// A COMMIT or ROLLBACK part-way through a message ends its implicit transaction, the statements after it start another one.
+		return false
+	}
 	// Handle the implicit transaction: one simple Query message or one extended protocol pipeline.
 	return previous.Cycle == next.Cycle
+}
+
+// endsTransaction are the commands that close the transaction they run in, as applyTransaction treats them.
+var endsTransaction = map[pg_contract.Command]bool{
+	"COMMIT":              true,
+	"ROLLBACK":            true,
+	"PREPARE TRANSACTION": true,
 }
 
 // groupEnvelopes opens an envelope for every lock a statement takes in its transaction group. The

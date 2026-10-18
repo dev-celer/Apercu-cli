@@ -474,6 +474,16 @@ func TestUnboundedQueueCovered(t *testing.T) {
 		assert.Equal(t, []bool{true, true}, fires(analysis))
 	})
 
+	t.Run("a COMMIT or ROLLBACK part-way through a message releases the locks, so the next statement waits again", func(t *testing.T) {
+		for _, end := range []string{"COMMIT", "ROLLBACK"} {
+			query := Analyze(testCatalog(t), apart(event(addColumn+"; "+end+"; "+createIndex)))
+			assert.Equal(t, []bool{true, false, true}, fires(query), "%s in a multi-statement query", end)
+
+			pipeline := Analyze(testCatalog(t), cycle(0, event(addColumn), event(end), event(createIndex)))
+			assert.Equal(t, []bool{true, false, true}, fires(pipeline), "%s in a pipeline", end)
+		}
+	})
+
 	t.Run("only the relations already held are dropped", func(t *testing.T) {
 		analysis := Analyze(testCatalog(t), apart(event("BEGIN"), event(lockAll), event(addFK), event("COMMIT")))
 		assert.Equal(t, []string{"apercu_snapshot_test.users"}, filterV02Relation(analysis.Statements[2]))

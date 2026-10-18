@@ -306,7 +306,10 @@ func replayCycles(t *testing.T, url string, script []cycleSpec) {
 		statements := pg_parse.Parse(spec.sql)
 		require.NotEmpty(t, statements)
 
-		entering := append([]observedSettings{observeConn(t, conn)}, sendCycle(t, conn, spec, statements)...)
+		entering := []observedSettings{observeConn(t, conn)}
+		for _, result := range sendCycle(t, conn, spec, statements, observeQuery) {
+			entering = append(entering, settingsOf(t, result))
+		}
 		for i, statement := range statements {
 			got := session.NextInCycle(statement, cycle)
 			assertContext(t, catalog, entering[i], got, fmt.Sprintf("entering %q in cycle %d", statement.RawSQL, cycle))
@@ -314,17 +317,17 @@ func replayCycles(t *testing.T, url string, script []cycleSpec) {
 	}
 }
 
-// sendCycle runs one cycle with an observeQuery in front of every statement but the first, and answers with what each
-// of those statements was entering. The first one is observed before the cycle, in a message of its own: injecting a
-// query into a single-statement cycle would turn it into an implicit transaction, the very thing under test.
-func sendCycle(t *testing.T, conn *pgconn.PgConn, spec cycleSpec, statements []pg_parse.Statement) []observedSettings {
+// sendCycle runs one cycle with the observe query in front of every statement but the first, and answers with what that
+// query read entering each of those statements. The first one is observed before the cycle, in a message of its own:
+// injecting a query into a single-statement cycle would turn it into an implicit transaction, the very thing under test.
+func sendCycle(t *testing.T, conn *pgconn.PgConn, spec cycleSpec, statements []pg_parse.Statement, observe string) []*pgconn.Result {
 	t.Helper()
 
 	var sent []string
 	var observed []bool
 	for i, statement := range statements {
 		if i > 0 {
-			sent = append(sent, observeQuery)
+			sent = append(sent, observe)
 			observed = append(observed, true)
 		}
 		sent = append(sent, statement.RawSQL)
@@ -342,11 +345,11 @@ func sendCycle(t *testing.T, conn *pgconn.PgConn, spec cycleSpec, statements []p
 	}
 	require.Len(t, results, len(sent))
 
-	var entering []observedSettings
+	var entering []*pgconn.Result
 	for i, result := range results {
 		require.NoErrorf(t, result.Err, "the server refused %q", sent[i])
 		if observed[i] {
-			entering = append(entering, settingsOf(t, result))
+			entering = append(entering, result)
 		}
 	}
 	return entering
