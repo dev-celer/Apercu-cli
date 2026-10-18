@@ -605,6 +605,7 @@ func readLocks(t *testing.T, db *sql.DB, pid int) map[helper.FullRelationName]lo
 	defer func() { _ = rows.Close() }()
 
 	held := map[helper.FullRelationName]lockedRelation{}
+	modes := map[helper.FullRelationName]pg_contract.LockSet{}
 	for rows.Next() {
 		var schema, name, kind, mode string
 		require.NoError(t, rows.Scan(&schema, &name, &kind, &mode))
@@ -612,12 +613,20 @@ func readLocks(t *testing.T, db *sql.DB, pid int) map[helper.FullRelationName]lo
 		require.Truef(t, known, "pg_locks reported an unknown mode %q", mode)
 
 		relation := helper.FullRelationName{Schema: schema, Table: name}
+		modes[relation] = modes[relation].With(lock)
 		if previous, seen := held[relation]; seen {
 			lock = pg_contract.MaxLock(lock, previous.lock)
 		}
 		held[relation] = lockedRelation{name: relation, kind: kind, lock: lock}
 	}
 	require.NoError(t, rows.Err())
+
+	// The classifier keeps one lock per relation and statement, the strongest. That loses nothing only while the
+	// strongest mode the statement took blocks everything the others do.
+	for relation, locked := range held {
+		assert.Equalf(t, modes[relation].Conflicts(), pg_contract.LockSetOf(locked.lock).Conflicts(),
+			"%s is held at %v, which blocks more than its strongest mode %s", relation, modes[relation], locked.lock.Short())
+	}
 	return held
 }
 

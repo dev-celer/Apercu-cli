@@ -99,7 +99,7 @@ type LockEnvelope struct {
 	// StatementsWindow is how many statements the lock remains held over, from the statement that took it until the
 	// transaction is closed, the raising one included.
 	StatementsWindow int `json:"statements_window" yaml:"statements_window"`
-	// Covered says the transaction already held this lock, or a stronger one for this relation.
+	// Covered says the transaction already block everything this lock block, postgres will grant this lock without waiting.
 	Covered bool `json:"covered" yaml:"covered"`
 }
 

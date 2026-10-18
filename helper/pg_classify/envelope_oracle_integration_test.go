@@ -23,6 +23,8 @@ const (
 	envelopeOrders = "ALTER TABLE " + oracleSchema + ".orders ADD COLUMN IF NOT EXISTS envelope int"
 	envelopeUsers  = "ALTER TABLE " + oracleSchema + ".users ADD COLUMN IF NOT EXISTS envelope int"
 	envelopeTouch  = "UPDATE " + oracleSchema + ".orders SET status = status WHERE false"
+	envelopeShare  = "LOCK TABLE " + oracleSchema + ".orders IN SHARE MODE"
+	envelopeSRE    = "LOCK TABLE " + oracleSchema + ".orders IN SHARE ROW EXCLUSIVE MODE"
 )
 
 // ownLocksQuery reads the relation locks the connection running it holds. Sent inside a message, it reports what the
@@ -55,6 +57,10 @@ var envelopeScripts = [][]cycleSpec{
 	{simple("BEGIN"), simple(envelopeOrders), pipe("SELECT 1; COMMIT; " + envelopeUsers + "; SELECT 1")},
 	// A statement alone in its message releases its locks when it ends.
 	{simple(envelopeOrders), simple(envelopeUsers), simple("SELECT 1")},
+	// The server holds every mode a transaction takes, not the strongest one: SHARE then a write holds both. There is
+	// no pipeline here, LOCK TABLE refuses one: it runs as an implicit transaction, not as a block.
+	{simple(envelopeShare + "; " + envelopeTouch + "; " + envelopeSRE + "; SELECT 1"), simple("SELECT 1")},
+	{simple("BEGIN"), simple(envelopeShare), simple(envelopeTouch), simple(envelopeSRE), simple("COMMIT")},
 }
 
 // TestLockEnvelopesMatchTheServer is the envelope oracle. It replays every script in envelopeScripts on 15, 16, 17 and
@@ -118,7 +124,7 @@ func replayEnvelopes(t *testing.T, url string, catalog *pg_catalog.Catalog, scri
 		require.NoError(t, err)
 		require.Len(t, first, 1)
 
-		entering := []map[helper.FullRelationName]pg_contract.Lock{ownLocks(t, first[0])}
+		entering := []map[helper.FullRelationName]pg_contract.LockSet{ownLocks(t, first[0])}
 		for _, result := range sendCycle(t, conn, script[cycle], statements, ownLocksQuery) {
 			entering = append(entering, ownLocks(t, result))
 		}
@@ -131,13 +137,13 @@ func replayEnvelopes(t *testing.T, url string, catalog *pg_catalog.Catalog, scri
 	require.Equal(t, len(analysis.Statements), position)
 }
 
-// ownLocks reads one ownLocksQuery result: the strongest lock held on each table of the oracle schema. Indexes are
-// left out, they are locked with their table and no envelope names them.
-func ownLocks(t *testing.T, result *pgconn.Result) map[helper.FullRelationName]pg_contract.Lock {
+// ownLocks reads one ownLocksQuery result: every mode held on each table of the oracle schema. Indexes are left out,
+// they are locked with their table and no envelope names them.
+func ownLocks(t *testing.T, result *pgconn.Result) map[helper.FullRelationName]pg_contract.LockSet {
 	t.Helper()
 
 	require.NoError(t, result.Err)
-	held := map[helper.FullRelationName]pg_contract.Lock{}
+	held := map[helper.FullRelationName]pg_contract.LockSet{}
 	for _, row := range result.Rows {
 		kind := pg_contract.RelationKindFromRelkind(string(row[1]))
 		if !kind.IsTable() && kind != pg_contract.RelationKindMaterializedView {
@@ -147,18 +153,18 @@ func ownLocks(t *testing.T, result *pgconn.Result) map[helper.FullRelationName]p
 		require.Truef(t, known, "pg_locks reported an unknown mode %q", row[2])
 
 		name := helper.FullRelationName{Schema: oracleSchema, Table: string(row[0])}
-		held[name] = pg_contract.MaxLock(held[name], lock)
+		held[name] = held[name].With(lock)
 	}
 	return held
 }
 
-// heldEntering is what the envelopes say the transaction holds when the statement at this position starts: the
-// strongest lock of every envelope opened before it whose window still reaches it.
-func heldEntering(envelopes []pg_contract.LockEnvelope, position int) map[helper.FullRelationName]pg_contract.Lock {
-	held := map[helper.FullRelationName]pg_contract.Lock{}
+// heldEntering is what the envelopes say the transaction holds when the statement at this position starts: the lock
+// of every envelope opened before it whose window still reaches it.
+func heldEntering(envelopes []pg_contract.LockEnvelope, position int) map[helper.FullRelationName]pg_contract.LockSet {
+	held := map[helper.FullRelationName]pg_contract.LockSet{}
 	for _, envelope := range envelopes {
 		if envelope.OpenedBy < position && position < envelope.OpenedBy+envelope.StatementsWindow {
-			held[envelope.Relation.Name] = pg_contract.MaxLock(held[envelope.Relation.Name], envelope.Lock)
+			held[envelope.Relation.Name] = held[envelope.Relation.Name].With(envelope.Lock)
 		}
 	}
 	return held

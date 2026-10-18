@@ -464,6 +464,22 @@ func TestUnboundedQueueCovered(t *testing.T) {
 		assert.Equal(t, []bool{false, true, true, false}, fires(analysis))
 	})
 
+	t.Run("locks held together cover one neither covers alone", func(t *testing.T) {
+		const (
+			update        = "UPDATE orders SET status = 'done'"
+			createTrigger = "CREATE TRIGGER orders_audit AFTER UPDATE ON orders FOR EACH ROW EXECUTE FUNCTION bump()"
+		)
+		together := Analyze(testCatalog(t), apart(
+			event("BEGIN"), event(createIndex), event(update), event(createTrigger), event("COMMIT"),
+		))
+		assert.Equal(t, []bool{false, true, false, false, false}, fires(together), "SHARE and ROW EXCLUSIVE cover SHARE ROW EXCLUSIVE")
+
+		alone := Analyze(testCatalog(t), apart(
+			event("BEGIN"), event(createIndex), event(createTrigger), event("COMMIT"),
+		))
+		assert.Equal(t, []bool{false, true, true, false}, fires(alone), "SHARE alone does not")
+	})
+
 	t.Run("an implicit transaction holds its locks the same way", func(t *testing.T) {
 		analysis := Analyze(testCatalog(t), cycle(0, event(addColumn), event(createIndex)))
 		assert.Equal(t, []bool{true, false}, fires(analysis))

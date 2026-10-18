@@ -147,6 +147,62 @@ func TestCoveredEqualLocks(t *testing.T) {
 	assert.Equal(t, 2, covered[0].StatementsWindow)
 }
 
+// TestShareDoesNotCoverLowerOrdinals validate that a SHARE lock does not cover RE and SUE.
+func TestShareDoesNotCoverLowerOrdinals(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		sql  string
+		lock pg_contract.Lock
+	}{
+		{sql: "UPDATE orders SET status = 'done'", lock: pg_contract.LockRowExclusive},
+		{sql: "ANALYZE orders", lock: pg_contract.LockShareUpdateExclusive},
+	}
+	for _, test := range tests {
+		t.Run(test.lock.String(), func(t *testing.T) {
+			t.Parallel()
+
+			analysis := Analyze(testCatalog(t), apart(
+				event("BEGIN"),
+				event("CREATE INDEX orders_total_idx ON orders (total)"),
+				event(test.sql),
+				event("COMMIT"),
+			))
+
+			assert.Empty(t, coveredOn(analysis, "orders"), "SHARE does not cover %s", test.lock.Short())
+			envelopeOn(t, analysis, "orders", pg_contract.LockShare)
+			raised := envelopeOn(t, analysis, "orders", test.lock)
+			assert.Equal(t, 2, raised.OpenedBy)
+			assert.Equal(t, 2, raised.StatementsWindow)
+		})
+	}
+}
+
+// TestLocksHeldTogetherCover is the other side of it: SHARE and ROW EXCLUSIVE held together block every mode SHARE ROW
+// EXCLUSIVE does, though neither one does alone, so the trigger created after them adds nothing.
+func TestLocksHeldTogetherCover(t *testing.T) {
+	t.Parallel()
+
+	analysis := Analyze(testCatalog(t), apart(
+		event("BEGIN"),
+		event("CREATE INDEX orders_total_idx ON orders (total)"),
+		event("UPDATE orders SET status = 'done'"),
+		event("CREATE TRIGGER orders_audit AFTER UPDATE ON orders FOR EACH ROW EXECUTE FUNCTION bump()"),
+		event("COMMIT"),
+	))
+
+	covered := coveredOn(analysis, "orders")
+	require.Len(t, covered, 1)
+	assert.Equal(t, pg_contract.LockShareRowExclusive, covered[0].Lock)
+	assert.Equal(t, 3, covered[0].OpenedBy)
+	assert.Equal(t, 2, covered[0].StatementsWindow)
+
+	effective := pg_contract.EffectiveEnvelopes(analysis.EnvelopesOn(relationName("orders")))
+	require.Len(t, effective, 2)
+	assert.Equal(t, pg_contract.LockShare, effective[0].Lock)
+	assert.Equal(t, pg_contract.LockRowExclusive, effective[1].Lock)
+}
+
 func TestNoEnvelope(t *testing.T) {
 	t.Parallel()
 

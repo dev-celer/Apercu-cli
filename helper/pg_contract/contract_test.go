@@ -4,6 +4,7 @@ import (
 	"apercu-cli/helper"
 	"apercu-cli/helper/warning_interface"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -138,6 +139,98 @@ func TestMaxLock(t *testing.T) {
 	assert.Equal(t, LockAccessShare, MaxLock(LockAccessShare))
 	assert.Equal(t, LockAccessExclusive, MaxLock(LockShare, LockAccessExclusive, LockRowShare))
 	assert.Equal(t, LockShare, MaxLock(LockNone, LockShare, LockShareUpdateExclusive))
+}
+
+// lockModes is every real lock mode, by ordinal.
+var lockModes = []Lock{
+	LockAccessShare, LockRowShare, LockRowExclusive, LockShareUpdateExclusive,
+	LockShare, LockShareRowExclusive, LockExclusive, LockAccessExclusive,
+}
+
+func TestLockConflictMatrix(t *testing.T) {
+	t.Parallel()
+
+	// PostgreSQL's documentation, table 13.2 "Conflicting Lock Modes": the row is the mode requested, the column
+	// the mode another transaction holds, X where the request has to wait.
+	table := map[Lock]string{
+		//                         AS RS RE SUE SH SRE EXCL AEL
+		LockAccessShare:          ".  .  .  .   .  .   .    X",
+		LockRowShare:             ".  .  .  .   .  .   X    X",
+		LockRowExclusive:         ".  .  .  .   X  X   X    X",
+		LockShareUpdateExclusive: ".  .  .  X   X  X   X    X",
+		LockShare:                ".  .  X  X   .  X   X    X",
+		LockShareRowExclusive:    ".  .  X  X   X  X   X    X",
+		LockExclusive:            ".  X  X  X   X  X   X    X",
+		LockAccessExclusive:      "X  X  X  X   X  X   X    X",
+	}
+
+	for _, requested := range lockModes {
+		marks := strings.Fields(table[requested])
+		require.Len(t, marks, len(lockModes), "%s", requested)
+		for i, held := range lockModes {
+			assert.Equalf(t, marks[i] == "X", requested.ConflictsWith(held), "%s requested while %s is held", requested.Short(), held.Short())
+			assert.Equalf(t, requested.ConflictsWith(held), held.ConflictsWith(requested), "%s and %s", requested.Short(), held.Short())
+		}
+	}
+
+	var selfConflicting []Lock
+	for _, lock := range lockModes {
+		if lock.ConflictsWith(lock) {
+			selfConflicting = append(selfConflicting, lock)
+		}
+		assert.False(t, lock.ConflictsWith(LockNone), "%s", lock)
+		assert.False(t, LockNone.ConflictsWith(lock), "%s", lock)
+	}
+	assert.Equal(t, []Lock{LockShareUpdateExclusive, LockShareRowExclusive, LockExclusive, LockAccessExclusive}, selfConflicting)
+	assert.Zero(t, Lock(9).Conflicts())
+}
+
+func TestLockSet(t *testing.T) {
+	t.Parallel()
+
+	set := LockSetOf(LockShare, LockNone, LockRowExclusive, LockShare, Lock(9))
+	assert.Equal(t, []Lock{LockRowExclusive, LockShare}, set.Locks(), "LockNone and unknown modes are left out")
+	assert.True(t, set.Has(LockShare))
+	assert.False(t, set.Has(LockShareRowExclusive))
+	assert.False(t, set.Has(LockNone))
+	assert.Equal(t, "{RE,SH}", set.String())
+	assert.Equal(t, "{}", LockSet(0).String())
+	assert.Equal(t, set, LockSetOf(LockRowExclusive).With(LockShare).With(LockNone))
+
+	assert.Equal(t, LockShareRowExclusive.Conflicts(), set.Conflicts(), "SHARE and ROW EXCLUSIVE together block what SHARE ROW EXCLUSIVE does")
+	assert.Zero(t, LockSet(0).Conflicts())
+}
+
+func TestLockSetCovers(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		held    LockSet
+		taken   Lock
+		covered bool
+	}{
+		{name: "nothing held covers nothing", held: LockSetOf(), taken: LockAccessShare, covered: false},
+		{name: "the same mode again", held: LockSetOf(LockRowExclusive), taken: LockRowExclusive, covered: true},
+		{name: "ACCESS EXCLUSIVE covers every mode", held: LockSetOf(LockAccessExclusive), taken: LockExclusive, covered: true},
+		{name: "SHARE UPDATE EXCLUSIVE covers ROW EXCLUSIVE", held: LockSetOf(LockShareUpdateExclusive), taken: LockRowExclusive, covered: true},
+		{name: "ROW EXCLUSIVE does not cover SHARE UPDATE EXCLUSIVE", held: LockSetOf(LockRowExclusive), taken: LockShareUpdateExclusive, covered: false},
+		{name: "SHARE covers ROW SHARE", held: LockSetOf(LockShare), taken: LockRowShare, covered: true},
+		{name: "SHARE does not cover ROW EXCLUSIVE, which blocks SHARE", held: LockSetOf(LockShare), taken: LockRowExclusive, covered: false},
+		{name: "SHARE does not cover SHARE UPDATE EXCLUSIVE, which blocks SHARE", held: LockSetOf(LockShare), taken: LockShareUpdateExclusive, covered: false},
+		{name: "ROW EXCLUSIVE and SHARE UPDATE EXCLUSIVE do not cover SHARE", held: LockSetOf(LockRowExclusive, LockShareUpdateExclusive), taken: LockShare, covered: false},
+		{name: "SHARE and ROW EXCLUSIVE cover SHARE ROW EXCLUSIVE", held: LockSetOf(LockShare, LockRowExclusive), taken: LockShareRowExclusive, covered: true},
+		{name: "SHARE and SHARE UPDATE EXCLUSIVE cover SHARE ROW EXCLUSIVE", held: LockSetOf(LockShare, LockShareUpdateExclusive), taken: LockShareRowExclusive, covered: true},
+		{name: "SHARE and ROW EXCLUSIVE do not cover EXCLUSIVE", held: LockSetOf(LockShare, LockRowExclusive), taken: LockExclusive, covered: false},
+		{name: "LockNone is always covered", held: LockSetOf(), taken: LockNone, covered: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, test.covered, test.held.Covers(test.taken), "%v then %s", test.held, test.taken.Short())
+		})
+	}
 }
 
 func TestOpKind(t *testing.T) {

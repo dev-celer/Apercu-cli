@@ -138,20 +138,21 @@ var endsTransaction = map[pg_contract.Command]bool{
 
 // groupEnvelopes opens an envelope for every lock a statement takes in its transaction group. The
 // envelope runs to the end of the group, since that is where the locks are released.
+// The group holds every mode it took on a relation, not the strongest one, so coverage goes through the conflict matrix.
 func groupEnvelopes(group []pg_contract.StatementAnalysis, offset int) []pg_contract.LockEnvelope {
-	running := map[pg_contract.Relation]pg_contract.Lock{}
+	running := map[pg_contract.Relation]pg_contract.LockSet{}
 	var out []pg_contract.LockEnvelope
 	for i, statement := range group {
 		for _, locked := range statement.LockedRelations() {
 			already := running[locked.Relation]
-			running[locked.Relation] = pg_contract.MaxLock(already, locked.Lock)
+			running[locked.Relation] = already.With(locked.Lock)
 			out = append(out, pg_contract.LockEnvelope{
 				Relation:         locked.Relation,
 				Lock:             locked.Lock,
 				TxnGroup:         statement.TxnGroup,
 				OpenedBy:         offset + i,
 				StatementsWindow: len(group) - i,
-				Covered:          locked.Lock <= already,
+				Covered:          already.Covers(locked.Lock),
 			})
 		}
 	}

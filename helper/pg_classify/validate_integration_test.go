@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"apercu-cli/helper"
 	"apercu-cli/helper/pg_catalog"
 	"apercu-cli/helper/pg_contract"
 	"apercu-cli/helper/pg_parse"
@@ -253,7 +254,9 @@ func TestUnboundedQueueOracle(t *testing.T) {
 				for _, script := range timeoutScopeScripts {
 					t.Run("scope/"+script.name, func(t *testing.T) { timeoutScope(t, db, catalog, script) })
 				}
-				t.Run("a covered lock never waits", func(t *testing.T) { coveredNeverWaits(t, db, catalog) })
+				for _, script := range coverScripts {
+					t.Run("covered/"+script.name, func(t *testing.T) { coveredWaits(t, db, catalog, script) })
+				}
 			})
 		}(version)
 	}
@@ -346,35 +349,102 @@ func timeoutScope(t *testing.T, db *sql.DB, catalog *pg_catalog.Catalog, script 
 	assert.Equalf(t, !bounded, flagged, "the server bounded the wait of %q: %v, V-02 fired: %v", last.RawSQL, bounded, flagged)
 }
 
-func coveredNeverWaits(t *testing.T, db *sql.DB, catalog *pg_catalog.Catalog) {
+// coverScript is a statement taken after others in one transaction, with the sessions around it set up so that it
+// waits if what the transaction holds does not cover its lock.
+type coverScript struct {
+	name string
+	// held runs first in the block.
+	held []string
+	// queued is a request another session leaves waiting behind what the block holds.
+	queued string
+	// shared is a lock another session holds alongside the block.
+	shared string
+	// then is the statement checked, on orders.
+	then string
+}
+
+var coverScripts = []coverScript{
+	{
+		name:   "a covered lock never waits, even behind a queued request",
+		held:   []string{"LOCK TABLE orders IN ACCESS EXCLUSIVE MODE"},
+		queued: "LOCK TABLE orders IN SHARE UPDATE EXCLUSIVE MODE",
+		then:   v02AddColumn,
+	},
+	{
+		name:   "locks held together cover one neither covers alone",
+		held:   []string{"LOCK TABLE orders IN SHARE MODE", "UPDATE orders SET status = status WHERE false"},
+		queued: "LOCK TABLE orders IN ROW EXCLUSIVE MODE",
+		then:   "CREATE TRIGGER v02_cover BEFORE UPDATE ON orders FOR EACH ROW EXECUTE FUNCTION bump()",
+	},
+	{
+		name:   "SHARE does not cover a write, which waits for another SHARE",
+		held:   []string{"LOCK TABLE orders IN SHARE MODE"},
+		shared: "LOCK TABLE orders IN SHARE MODE",
+		then:   "UPDATE orders SET status = status WHERE false",
+	},
+	{
+		name:   "SHARE does not cover SHARE UPDATE EXCLUSIVE, which waits for another SHARE",
+		held:   []string{"LOCK TABLE orders IN SHARE MODE"},
+		shared: "LOCK TABLE orders IN SHARE MODE",
+		then:   "ANALYZE orders",
+	},
+}
+
+// coveredWaits runs a coverScript and checks that the statement waits exactly where its envelope is not covered, and
+// that V-02 is silent on the covered ones.
+func coveredWaits(t *testing.T, db *sql.DB, catalog *pg_catalog.Catalog, script coverScript) {
 	t.Helper()
 	ctx := context.Background()
-	const lockAll = "LOCK TABLE orders IN ACCESS EXCLUSIVE MODE"
 
-	analysis := Analyze(catalog, apart(event("BEGIN"), event(lockAll), event(v02AddColumn)))
-	require.Len(t, analysis.Statements, 3)
-	assert.NotNil(t, filterV02(analysis.Statements[1]), "the LOCK can queue")
-	assert.Nil(t, filterV02(analysis.Statements[2]), "the ALTER holds its lock already")
+	events := []pg_contract.QueryEvent{event("BEGIN")}
+	for _, sql := range script.held {
+		events = append(events, event(sql))
+	}
+	analysis := Analyze(catalog, apart(append(events, event(script.then))...))
+	last := len(analysis.Statements) - 1
+	var envelope *pg_contract.LockEnvelope
+	for _, opened := range analysis.EnvelopesOn(helper.FullRelationName{Schema: oracleSchema, Table: "orders"}) {
+		if opened.OpenedBy == last {
+			envelope = &opened
+		}
+	}
+	require.NotNilf(t, envelope, "%q opened no envelope on orders, %v", script.then, analysis.Envelopes)
+	if envelope.Covered {
+		assert.Nil(t, filterV02(analysis.Statements[last]), "a covered lock never queues")
+	}
 
 	conn := oracleConn(t, db)
 	defer func() { _, _ = conn.ExecContext(ctx, "ROLLBACK") }()
-	for _, sql := range []string{"BEGIN", lockAll} {
+	for _, sql := range append([]string{"BEGIN"}, script.held...) {
 		_, err := conn.ExecContext(ctx, sql)
-		require.NoError(t, err)
+		require.NoErrorf(t, err, "%s", sql)
 	}
 
-	holder := oracleConn(t, db)
-	_, err := holder.ExecContext(ctx, "BEGIN")
-	require.NoError(t, err)
-	defer func() { _, _ = holder.ExecContext(ctx, "ROLLBACK") }()
-	waiting := start(t, holder, "LOCK TABLE orders IN SHARE UPDATE EXCLUSIVE MODE")
-	defer waiting.stop(t, db)
-	require.True(t, waiting.queued(t, db), "the holder queues behind the transaction's lock")
+	if script.shared != "" {
+		other := oracleConn(t, db)
+		for _, sql := range []string{"BEGIN", script.shared} {
+			_, err := other.ExecContext(ctx, sql)
+			require.NoErrorf(t, err, "%s", sql)
+		}
+		defer func() { _, _ = other.ExecContext(ctx, "ROLLBACK") }()
+	}
+	if script.queued != "" {
+		holder := oracleConn(t, db)
+		_, err := holder.ExecContext(ctx, "BEGIN")
+		require.NoError(t, err)
+		defer func() { _, _ = holder.ExecContext(ctx, "ROLLBACK") }()
+		waiting := start(t, holder, script.queued)
+		defer waiting.stop(t, db)
+		require.Truef(t, waiting.queued(t, db), "%q queues behind the transaction's locks", script.queued)
+	}
 
-	alter := start(t, conn, v02AddColumn)
-	defer alter.stop(t, db)
-	require.True(t, alter.finish(queueHeldFor), "the ALTER waited for a lock its own transaction holds")
-	assert.NoError(t, alter.err)
+	statement := start(t, conn, script.then)
+	defer statement.stop(t, db)
+	waited := statement.queued(t, db)
+	if !waited {
+		require.NoErrorf(t, statement.err, "%s", script.then)
+	}
+	assert.Equalf(t, !envelope.Covered, waited, "%q waited=%v, its envelope says covered=%v", script.then, waited, envelope.Covered)
 }
 
 // oracleConn give a new cleaned up connection, ready to be used for tests.

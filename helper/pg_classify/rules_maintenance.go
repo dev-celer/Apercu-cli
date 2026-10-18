@@ -167,7 +167,7 @@ func ruleLock(s scope) effect {
 		}
 	}
 
-	e := newEffect(s, "R-MT-LOCK", fmt.Sprintf("the lock is taken explicitly at %s and held until the transaction ends, so it sets the floor for every statement that follows it in the same block", mode))
+	e := newEffect(s, "R-MT-LOCK", fmt.Sprintf("the lock is taken explicitly at %s and held until the transaction ends, so a statement after it in the same block never waits for a lock it covers", mode))
 	e.lock = mode
 	if s.statement.Flags.Nowait {
 		e.message += "; NOWAIT makes the statement fail rather than queue if the lock is not free"
