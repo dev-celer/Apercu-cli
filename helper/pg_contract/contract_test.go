@@ -692,7 +692,7 @@ func TestMigrationAnalysis(t *testing.T) {
 				Errors: []Error{{Code: "V-01", Message: "first"}}},
 			{RawSQL: "ALTER TABLE users ADD COLUMN z int", TxnGroup: 1},
 			{RawSQL: "COMMIT", TxnGroup: 1,
-				Errors: []Error{{Code: "V-05", Message: "second"}}},
+				Errors: []Error{{Code: "V-04", Message: "second"}}},
 		},
 		Envelopes: []LockEnvelope{
 			{Relation: Relation{Name: orders, Kind: RelationKindTable}, Lock: LockAccessExclusive,
@@ -734,7 +734,7 @@ func TestMigrationAnalysisSerialization(t *testing.T) {
 			TxnGroup: 1,
 			Command:  "VACUUM",
 			Findings: []Finding{{
-				Code: "V-07", Severity: SeverityWarn, Level: LevelHigh,
+				Code: "V-06", Severity: SeverityWarn, Level: LevelHigh,
 				Message: "a full rewrite under ACCESS EXCLUSIVE",
 			}},
 		}},

@@ -44,7 +44,7 @@ func TestVersionGating(t *testing.T) {
 			t.Parallel()
 
 			below := single(t, testCatalogOn(t, test.floor-1), test.sql)
-			gate := errorOf(t, below, "V-05")
+			gate := errorOf(t, below, "V-04")
 			assert.Contains(t, gate.Message, test.construct)
 			assert.Contains(t, gate.Message, "requires PostgreSQL "+test.floor.String())
 			assert.Empty(t, below.Findings, "a statement the server refuses takes no lock")
@@ -79,7 +79,7 @@ func TestVersionGatingIgnoreNotVersionDependent(t *testing.T) {
 	floored := pg_parse.Statement{Features: []pg_parse.Feature{{Name: "MADE UP", Since: pg_contract.Version18}}}
 	errors = versionGate(pg_contract.Version15, floored)
 	require.Len(t, errors, 1)
-	assert.Equal(t, pg_contract.Code("V-05"), errors[0].Code)
+	assert.Equal(t, pg_contract.Code("V-04"), errors[0].Code)
 }
 
 func TestMigrationVersion(t *testing.T) {
