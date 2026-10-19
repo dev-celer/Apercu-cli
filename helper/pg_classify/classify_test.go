@@ -67,7 +67,7 @@ func findingOf(t *testing.T, analysis pg_contract.StatementAnalysis, code pg_con
 // rulesOnly is the analysis with the validation findings taken out, leaving what the rules said.
 func rulesOnly(analysis pg_contract.StatementAnalysis) pg_contract.StatementAnalysis {
 	analysis.Findings = slices.DeleteFunc(slices.Clone(analysis.Findings), func(finding pg_contract.Finding) bool {
-		return finding.Code == queueRiskCode
+		return finding.Code == queueRiskCode || finding.Code == maintenanceStatementCode
 	})
 	return analysis
 }

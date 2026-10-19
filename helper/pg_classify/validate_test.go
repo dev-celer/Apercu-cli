@@ -3,6 +3,7 @@ package pg_classify
 import (
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"apercu-cli/helper/pg_catalog"
@@ -165,15 +166,7 @@ func filterV02(analysis pg_contract.StatementAnalysis) *pg_contract.Finding {
 }
 
 func filterV02Relation(analysis pg_contract.StatementAnalysis) []string {
-	finding := filterV02(analysis)
-	if finding == nil {
-		return nil
-	}
-	names := make([]string, 0, len(finding.Targets))
-	for _, target := range finding.Targets {
-		names = append(names, target.Relation.Name.String())
-	}
-	return names
+	return targetNames(filterV02(analysis))
 }
 
 func getCatalog(t *testing.T, value string) *pg_catalog.Catalog {
@@ -533,6 +526,130 @@ func TestUnboundedQueueLeavesLocks(t *testing.T) {
 	for _, i := range []int{2, 3, 5} {
 		finding := filterV02(unbounded.Statements[i])
 		require.NotNilf(t, finding, "%q", unbounded.Statements[i].RawSQL)
+		assert.Equal(t, pg_contract.LevelHigh, finding.Level, "the level survives the grading pass")
+	}
+}
+
+func filterV06(analysis pg_contract.StatementAnalysis) *pg_contract.Finding {
+	for i, finding := range analysis.Findings {
+		if finding.Code == maintenanceStatementCode {
+			return &analysis.Findings[i]
+		}
+	}
+	return nil
+}
+
+func targetNames(finding *pg_contract.Finding) []string {
+	if finding == nil {
+		return nil
+	}
+	names := make([]string, 0, len(finding.Targets))
+	for _, target := range finding.Targets {
+		names = append(names, target.Relation.Name.String())
+	}
+	return names
+}
+
+func TestMaintenanceStatements(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		sql     string
+		rule    pg_contract.Code
+		subject string
+	}{
+		{"VACUUM FULL orders", "R-MT-VACUUMFULL", "VACUUM FULL"},
+		{"VACUUM (FULL, ANALYZE) orders", "R-MT-VACUUMFULL", "VACUUM FULL"},
+		{"VACUUM (FULL 1) orders", "R-MT-VACUUMFULL", "VACUUM FULL"},
+		{"VACUUM FULL", "R-MT-VACUUMFULL", "VACUUM FULL"},
+		{"VACUUM FULL events", "R-MT-VACUUMFULL", "VACUUM FULL"},
+		{"CLUSTER orders USING orders_pkey", "R-MT-CLUSTER", "CLUSTER"},
+		{"CLUSTER events USING events_at_idx", "R-MT-CLUSTER", "CLUSTER"},
+		{"CLUSTER", "R-MT-CLUSTER", "CLUSTER"},
+		{"VACUUM orders", "", ""},
+		{"VACUUM (FULL false) orders", "", ""},
+		{"VACUUM (FULL 0) orders", "", ""},
+		{"ANALYZE orders", "", ""},
+		{"REINDEX TABLE orders", "", ""},
+		{"ALTER TABLE orders CLUSTER ON orders_pkey", "", ""},
+	}
+
+	catalog := testCatalog(t)
+	for _, testCase := range cases {
+		t.Run(testCase.sql, func(t *testing.T) {
+			analysis := single(t, catalog, testCase.sql)
+			finding := filterV06(analysis)
+			if testCase.rule == "" {
+				assert.Nil(t, finding)
+				return
+			}
+			require.NotNil(t, finding)
+			assert.Equal(t, pg_contract.SeverityWarn, finding.Severity)
+			assert.Equal(t, pg_contract.LevelHigh, finding.Level)
+			assert.True(t, strings.HasPrefix(finding.Message, testCase.subject+" rewrites"), finding.Message)
+
+			rule := findingOf(t, analysis, testCase.rule)
+			assert.ElementsMatch(t, targetNames(&rule), targetNames(finding), "V-06 names every relation %s rewrites", testCase.rule)
+			for _, target := range finding.Targets {
+				assert.Equal(t, pg_contract.OpKindNone, target.OpKind, "V-06 does no work of its own on %s", target.Relation)
+				assert.Equal(t, analysis.LockOn(target.Relation.Name), target.Lock, "V-06 reports the statement's lock on %s", target.Relation)
+			}
+		})
+	}
+}
+
+func TestMaintenanceStatementsRefused(t *testing.T) {
+	t.Parallel()
+
+	inBlock := analyze(t, testCatalog(t), "BEGIN; VACUUM FULL orders; COMMIT")
+	require.Len(t, filterV01(inBlock[1]), 1)
+	assert.Nil(t, filterV06(inBlock[1]), "a refused statement never rewrites anything")
+
+	implicit := Analyze(testCatalog(t), cycle(0, event("VACUUM FULL orders"), event("ANALYZE orders")))
+	require.Len(t, filterV01(implicit.Statements[0]), 1)
+	assert.Nil(t, filterV06(implicit.Statements[0]), "nor in an implicit transaction")
+
+	partitioned := analyze(t, testCatalog(t), "BEGIN; CLUSTER events USING events_at_idx; COMMIT")
+	require.Len(t, filterV01(partitioned[1]), 1)
+	assert.Nil(t, filterV06(partitioned[1]))
+
+	allowed := analyze(t, testCatalog(t), "BEGIN; CLUSTER orders USING orders_pkey; COMMIT")
+	assert.Empty(t, filterV01(allowed[1]))
+	assert.NotNil(t, filterV06(allowed[1]), "a plain table is clustered inside a block")
+}
+
+func TestMaintenanceStatementsTargets(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a table the migration created is empty", func(t *testing.T) {
+		analyses := analyze(t, testCatalog(t), "CREATE TABLE fresh (id bigint); "+
+			"CREATE INDEX fresh_id_idx ON fresh (id); "+
+			"CLUSTER fresh USING fresh_id_idx")
+		require.Len(t, analyses, 3)
+		findingOf(t, analyses[2], "R-MT-CLUSTER")
+		assert.Nil(t, filterV06(analyses[2]))
+	})
+
+	t.Run("only the tables that were already there are named", func(t *testing.T) {
+		analyses := analyze(t, testCatalog(t), "CREATE TABLE fresh (id bigint); VACUUM FULL fresh, orders")
+		require.Len(t, analyses, 2)
+		assert.Equal(t, []string{"apercu_snapshot_test.orders"}, targetNames(filterV06(analyses[1])))
+	})
+
+	t.Run("an unknown relation fails safe", func(t *testing.T) {
+		analysis := single(t, testCatalog(t), "VACUUM FULL no_such_table")
+		assert.Equal(t, []string{"apercu_snapshot_test.no_such_table"}, targetNames(filterV06(analysis)))
+	})
+}
+
+func TestMaintenanceStatementsLevelSurvivesGrading(t *testing.T) {
+	t.Parallel()
+
+	analysis := Analyze(testCatalog(t), apart(event("VACUUM FULL orders"), event("CLUSTER orders USING orders_pkey")))
+	require.Len(t, analysis.Statements, 2)
+	for _, statement := range analysis.Statements {
+		finding := filterV06(statement)
+		require.NotNilf(t, finding, "%q", statement.RawSQL)
 		assert.Equal(t, pg_contract.LevelHigh, finding.Level, "the level survives the grading pass")
 	}
 }

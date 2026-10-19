@@ -16,6 +16,8 @@ func TestMaintenanceCommands(t *testing.T) {
 		{name: "a vacuum reclaims in place beside readers and writers", sql: "VACUUM orders", code: "R-MT-VACUUM", lock: sue, op: scan},
 		{name: "VACUUM FULL is a full outage for the table", sql: "VACUUM FULL orders", code: "R-MT-VACUUMFULL", lock: ael, op: rw},
 		{name: "and the option spelling is the same statement", sql: "VACUUM (FULL, ANALYZE) orders", code: "R-MT-VACUUMFULL", lock: ael, op: rw},
+		{name: "a boolean option may be spelled as an integer", sql: "VACUUM (FULL 1) orders", code: "R-MT-VACUUMFULL", lock: ael, op: rw},
+		{name: "and zero turns it off", sql: "VACUUM (FULL 0) orders", code: "R-MT-VACUUM", lock: sue, op: scan},
 		{name: "naming no table works through the whole database", sql: "VACUUM", code: "R-MT-VACUUM", lock: sue, op: scan},
 
 		// R-MT-ANALYZE.

@@ -70,6 +70,7 @@ func (c *Classifier) classify(statement pg_parse.Statement, context Context, sha
 
 	collapseStatementLocks(analysis.Findings)
 	analysis.Findings = append(analysis.Findings, unboundedQueue(ruled, analysis.Findings)...)
+	analysis.Findings = append(analysis.Findings, maintenanceStatements(ruled, analysis.Findings)...)
 	return analysis
 }
 

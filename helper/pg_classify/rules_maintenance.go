@@ -199,7 +199,7 @@ func enabled(options []pg_parse.Option, name string) bool {
 		if !strings.EqualFold(option.Name, name) {
 			continue
 		}
-		return option.Value == "" || strings.EqualFold(option.Value, "true") || strings.EqualFold(option.Value, "on")
+		return option.Value == "" || option.Value == "1" || strings.EqualFold(option.Value, "true") || strings.EqualFold(option.Value, "on")
 	}
 	return false
 }
@@ -210,7 +210,7 @@ func disabled(options []pg_parse.Option, name string) bool {
 		if !strings.EqualFold(option.Name, name) {
 			continue
 		}
-		return strings.EqualFold(option.Value, "false") || strings.EqualFold(option.Value, "off")
+		return option.Value == "0" || strings.EqualFold(option.Value, "false") || strings.EqualFold(option.Value, "off")
 	}
 	return false
 }

@@ -14,6 +14,14 @@ const txnBlockCode pg_contract.Code = "V-01"
 // queueRiskCode is a statement that can wait for a lock blocking writers or readers with nothing to bound the wait.
 const queueRiskCode pg_contract.Code = "V-02"
 
+// maintenanceStatementCode is a VACUUM FULL or a CLUSTER, maintenance statement that should not be found inside a migration file.
+const maintenanceStatementCode pg_contract.Code = "V-06"
+
+var maintenanceStatementsList = map[pg_contract.Code]string{
+	"R-MT-VACUUMFULL": "VACUUM FULL",
+	"R-MT-CLUSTER":    "CLUSTER",
+}
+
 // txnUnsafeSubject convert the command name from a parsed statement to the same way the server names it when it refuses to run
 // inside a transaction block. return an empty string if it is safe to run inside transaction.
 func txnUnsafeSubject(s scope) string {
@@ -104,6 +112,45 @@ func unboundedQueue(s scope, findings []pg_contract.Finding) []pg_contract.Findi
 			"arriving after it queue behind it, and the readers too where the lock is ACCESS EXCLUSIVE", unboundedReason(s.context.LockTimeout)),
 		Targets: dedupeTargets(targets),
 	}}
+}
+
+// maintenanceStatements create a warn finding on a VACUUM FULL or a CLUSTER, naming every relation it rewrites.
+// it ignores a relation that was created during the migration.
+func maintenanceStatements(s scope, findings []pg_contract.Finding) []pg_contract.Finding {
+	var out []pg_contract.Finding
+	for _, finding := range findings {
+		subject, rewrites := maintenanceStatementsList[finding.Code]
+		if !rewrites {
+			continue
+		}
+
+		var targets []pg_contract.Target
+		for _, target := range finding.Targets {
+			if s.catalog.CreatedByMigration(target.Relation.Name) {
+				continue
+			}
+			targets = append(targets, pg_contract.Target{
+				Relation: target.Relation,
+				Lock:     target.Lock,
+				OpKind:   pg_contract.OpKindNone,
+				Role:     target.Role,
+			})
+		}
+		if len(targets) == 0 {
+			continue
+		}
+
+		out = append(out, pg_contract.Finding{
+			Code:     maintenanceStatementCode,
+			Severity: pg_contract.SeverityWarn,
+			Level:    pg_contract.LevelHigh,
+			Message: fmt.Sprintf("%s rewrites the table into a new file under ACCESS EXCLUSIVE: nothing reads or writes it until it finishes, "+
+				"the outage grows with the table's size, and it needs room for a second copy; it is maintenance rather than a schema change, "+
+				"so run it outside the migration", subject),
+			Targets: dedupeTargets(targets),
+		})
+	}
+	return out
 }
 
 func unboundedReason(timeout Timeout) string {
