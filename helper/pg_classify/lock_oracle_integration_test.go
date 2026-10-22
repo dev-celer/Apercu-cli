@@ -265,6 +265,9 @@ var lockScripts = []lockScript{
 	{sql: "ALTER TABLE legacy_child NO INHERIT legacy_parent"},
 	{sql: "ALTER TABLE orphan INHERIT legacy_parent"},
 	{sql: "ALTER TABLE orders RENAME TO orders_old"},
+	// V-07: ALTER TABLE renames an index under ACCESS EXCLUSIVE, where ALTER INDEX takes SHARE UPDATE EXCLUSIVE.
+	{sql: "ALTER TABLE orders_status_idx RENAME TO orders_status_idx2"},
+	{sql: "ALTER TABLE ixparted_only_idx RENAME TO ixparted_only_idx2"},
 	{sql: "ALTER TABLE orders SET SCHEMA public"},
 	{sql: "ALTER TABLE ts_table SET TABLESPACE pg_default"},
 

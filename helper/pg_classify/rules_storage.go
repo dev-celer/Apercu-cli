@@ -193,9 +193,6 @@ func ruleReplicaIdentity(s scope, sub pg_parse.Subcommand) effect {
 func ruleRenameRelation(s scope, sub pg_parse.Subcommand) effect {
 	e := newEffect(s, "R-AT-RENAME", fmt.Sprintf("the relation is renamed to %q in the catalog", sub.NewName))
 	e.recursion = parentOnly
-	if pg_contract.RelationKindFromRelkind(s.relation().Relation.Kind).IsIndex() {
-		e.message += "; the target is an index, and ALTER INDEX … RENAME does the same under SHARE UPDATE EXCLUSIVE"
-	}
 	return e
 }
 

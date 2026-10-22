@@ -22,6 +22,9 @@ var maintenanceStatementsList = map[pg_contract.Code]string{
 	"R-MT-CLUSTER":    "CLUSTER",
 }
 
+// indexRenameCode is an ALTER TABLE ... RENAME TO whose target is an index, which ALTER INDEX renames under a weaker lock.
+const indexRenameCode pg_contract.Code = "V-07"
+
 // txnUnsafeSubject convert the command name from a parsed statement to the same way the server names it when it refuses to run
 // inside a transaction block. return an empty string if it is safe to run inside transaction.
 func txnUnsafeSubject(s scope) string {
@@ -151,6 +154,50 @@ func maintenanceStatements(s scope, findings []pg_contract.Finding) []pg_contrac
 		})
 	}
 	return out
+}
+
+// indexRenamedAsTable create a warn finding on an ALTER TABLE ... RENAME TO that names an index.
+// it ignores an index that was created during the migration, and a relation whose kind is unknown.
+func indexRenamedAsTable(s scope, findings []pg_contract.Finding) []pg_contract.Finding {
+	var targets []pg_contract.Target
+	for _, finding := range findings {
+		if finding.Code != "R-AT-RENAME" {
+			continue
+		}
+		for _, target := range finding.Targets {
+			if !target.Relation.Kind.IsIndex() || s.catalog.CreatedByMigration(target.Relation.Name) {
+				continue
+			}
+			targets = append(targets, pg_contract.Target{
+				Relation: target.Relation,
+				Lock:     target.Lock,
+				OpKind:   pg_contract.OpKindNone,
+				Role:     target.Role,
+			})
+		}
+	}
+	if len(targets) == 0 {
+		return nil
+	}
+
+	table := "its table"
+	if resolved, ok := s.tableOfIndex(s.relation()); ok {
+		table = resolved.Name.String()
+	}
+	newName := ""
+	if len(s.statement.Subcommands) > 0 {
+		newName = s.statement.Subcommands[0].NewName
+	}
+	index := targets[0].Relation.Name
+
+	return []pg_contract.Finding{{
+		Code:     indexRenameCode,
+		Severity: pg_contract.SeverityWarn,
+		Message: fmt.Sprintf("ALTER TABLE renames index %s under ACCESS EXCLUSIVE; every query on %s opens its indexes when it is planned "+
+			"and every write updates them, so all of them wait behind it. ALTER INDEX %s RENAME TO %s does the same under "+
+			"SHARE UPDATE EXCLUSIVE, which blocks neither reads nor writes", index, table, index, newName),
+		Targets: dedupeTargets(targets),
+	}}
 }
 
 func unboundedReason(timeout Timeout) string {

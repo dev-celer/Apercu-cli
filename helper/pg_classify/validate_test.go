@@ -653,3 +653,82 @@ func TestMaintenanceStatementsLevelSurvivesGrading(t *testing.T) {
 		assert.Equal(t, pg_contract.LevelHigh, finding.Level, "the level survives the grading pass")
 	}
 }
+
+func filterV07(analysis pg_contract.StatementAnalysis) *pg_contract.Finding {
+	for i, finding := range analysis.Findings {
+		if finding.Code == indexRenameCode {
+			return &analysis.Findings[i]
+		}
+	}
+	return nil
+}
+
+func TestIndexRenamedAsTable(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		sql   string
+		index string
+		table string
+	}{
+		{"ALTER TABLE orders_open_idx RENAME TO i", "apercu_snapshot_test.orders_open_idx", "apercu_snapshot_test.orders"},
+		{"ALTER TABLE IF EXISTS orders_open_idx RENAME TO i", "apercu_snapshot_test.orders_open_idx", "apercu_snapshot_test.orders"},
+		{"ALTER TABLE apercu_snapshot_test.orders_open_idx RENAME TO i", "apercu_snapshot_test.orders_open_idx", "apercu_snapshot_test.orders"},
+		{"ALTER TABLE orders_pkey RENAME TO i", "apercu_snapshot_test.orders_pkey", "apercu_snapshot_test.orders"},
+		{"ALTER TABLE events_at_idx RENAME TO i", "apercu_snapshot_test.events_at_idx", "apercu_snapshot_test.events"},
+		{"ALTER TABLE orders RENAME TO orders_old", "", ""},
+		{"ALTER INDEX orders_open_idx RENAME TO i", "", ""},
+		{"ALTER TABLE orders RENAME COLUMN status TO state", "", ""},
+		{"ALTER TABLE order_totals RENAME TO t", "", ""},
+		{"ALTER TABLE active_users RENAME TO t", "", ""},
+		{"ALTER TABLE users_id_seq RENAME TO s", "", ""},
+		{"ALTER TABLE no_such_idx RENAME TO i", "", ""},
+	}
+
+	catalog := testCatalog(t)
+	for _, testCase := range cases {
+		t.Run(testCase.sql, func(t *testing.T) {
+			analysis := single(t, catalog, testCase.sql)
+			finding := filterV07(analysis)
+			if testCase.index == "" {
+				assert.Nil(t, finding)
+				return
+			}
+			require.NotNil(t, finding)
+			assert.Equal(t, pg_contract.SeverityWarn, finding.Severity)
+			assert.Equal(t, pg_contract.LevelUnset, finding.Level, "graded from the table's size and traffic, not fixed")
+			assert.Contains(t, finding.Message, "every query on "+testCase.table)
+			assert.Contains(t, finding.Message, "ALTER INDEX "+testCase.index+" RENAME TO i")
+
+			rule := findingOf(t, analysis, "R-AT-RENAME")
+			assert.Equal(t, targetNames(&rule), targetNames(finding), "V-07 names the index R-AT-RENAME locks")
+			assert.Equal(t, []string{testCase.index}, targetNames(finding))
+			for _, target := range finding.Targets {
+				assert.Equal(t, pg_contract.OpKindNone, target.OpKind, "V-07 does no work of its own on %s", target.Relation)
+				assert.Equal(t, pg_contract.LockAccessExclusive, target.Lock)
+				assert.Equal(t, analysis.LockOn(target.Relation.Name), target.Lock, "V-07 reports the statement's lock on %s", target.Relation)
+			}
+		})
+	}
+}
+
+func TestIndexRenamedAsTableCreatedByMigration(t *testing.T) {
+	t.Parallel()
+
+	analyses := analyze(t, testCatalog(t), "CREATE INDEX fresh_idx ON orders (status); ALTER TABLE fresh_idx RENAME TO f")
+	require.Len(t, analyses, 2)
+	rule := findingOf(t, analyses[1], "R-AT-RENAME")
+	require.Len(t, rule.Targets, 1)
+	require.True(t, rule.Targets[0].Relation.Kind.IsIndex(), "the shadow catalog knows it is an index")
+	assert.Nil(t, filterV07(analyses[1]), "an index the migration created is left out")
+}
+
+func TestIndexRenamedAsTableLevelLeftForGrading(t *testing.T) {
+	t.Parallel()
+
+	analysis := Analyze(testCatalog(t), apart(event("ALTER TABLE orders_open_idx RENAME TO i")))
+	require.Len(t, analysis.Statements, 1)
+	finding := filterV07(analysis.Statements[0])
+	require.NotNil(t, finding)
+	assert.Equal(t, pg_contract.LevelUnset, finding.Level)
+}
