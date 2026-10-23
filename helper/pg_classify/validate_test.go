@@ -732,3 +732,77 @@ func TestIndexRenamedAsTableLevelLeftForGrading(t *testing.T) {
 	require.NotNil(t, finding)
 	assert.Equal(t, pg_contract.LevelUnset, finding.Level)
 }
+
+func filterV08(analysis pg_contract.StatementAnalysis) *pg_contract.Finding {
+	for i, finding := range analysis.Findings {
+		if finding.Code == partitionOfCode {
+			return &analysis.Findings[i]
+		}
+	}
+	return nil
+}
+
+func TestPartitionCreatedInPlace(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		sql              string
+		parent           string
+		bound            string
+		defaultPartition string
+	}{
+		{"CREATE TABLE tb_part PARTITION OF events FOR VALUES FROM ('2027-01-01') TO ('2028-01-01')",
+			"apercu_snapshot_test.events", "FOR VALUES …", "apercu_snapshot_test.events_default"},
+		{"CREATE TABLE tb_part PARTITION OF apercu_snapshot_test.events FOR VALUES FROM ('2027-01-01') TO ('2028-01-01')",
+			"apercu_snapshot_test.events", "FOR VALUES …", "apercu_snapshot_test.events_default"},
+		{"CREATE TABLE tb_part PARTITION OF events DEFAULT",
+			"apercu_snapshot_test.events", "DEFAULT", "apercu_snapshot_test.events_default"},
+		{"CREATE TABLE tb_part PARTITION OF no_such_parent FOR VALUES FROM (1) TO (2)",
+			"apercu_snapshot_test.no_such_parent", "FOR VALUES …", ""},
+		{"CREATE TABLE tb_part (id bigint)", "", "", ""},
+		{"CREATE TABLE tb_part () INHERITS (legacy_parent)", "", "", ""},
+		{"ALTER TABLE events ATTACH PARTITION tb_part FOR VALUES FROM ('2027-01-01') TO ('2028-01-01')", "", "", ""},
+		{"CREATE TABLE tb_part PARTITION OF orders FOR VALUES FROM (1) TO (2)", "", "", ""},
+	}
+
+	catalog := testCatalog(t)
+	for _, testCase := range cases {
+		t.Run(testCase.sql, func(t *testing.T) {
+			analysis := single(t, catalog, testCase.sql)
+			finding := filterV08(analysis)
+			if testCase.parent == "" {
+				assert.Nil(t, finding)
+				return
+			}
+			require.NotNil(t, finding)
+			assert.Equal(t, pg_contract.SeverityWarn, finding.Severity)
+			assert.Equal(t, pg_contract.LevelUnset, finding.Level, "graded from the table's size and traffic, not fixed")
+			assert.Contains(t, finding.Message, "ALTER TABLE "+testCase.parent+" ATTACH PARTITION apercu_snapshot_test.tb_part "+testCase.bound)
+			if testCase.defaultPartition != "" {
+				assert.Contains(t, finding.Message, "the default partition "+testCase.defaultPartition)
+			} else {
+				assert.NotContains(t, finding.Message, "the default partition")
+			}
+
+			rule := findingOf(t, analysis, "R-TB-CREATE-PARTOF")
+			assert.Subset(t, targetNames(&rule), targetNames(finding), "V-08 names a relation R-TB-CREATE-PARTOF locks")
+			assert.Equal(t, []string{testCase.parent}, targetNames(finding), "the default partition is left out")
+			for _, target := range finding.Targets {
+				assert.Equal(t, pg_contract.OpKindNone, target.OpKind, "V-08 does no work of its own on %s", target.Relation)
+				assert.Equal(t, pg_contract.LockAccessExclusive, target.Lock)
+				assert.Equal(t, pg_contract.TargetRoleDirect, target.Role)
+				assert.Equal(t, analysis.LockOn(target.Relation.Name), target.Lock, "V-08 reports the statement's lock on %s", target.Relation)
+			}
+		})
+	}
+}
+
+func TestPartitionCreatedInPlaceCreatedByMigration(t *testing.T) {
+	t.Parallel()
+
+	analyses := analyze(t, testCatalog(t), "CREATE TABLE fresh_parted (id int) PARTITION BY RANGE (id); "+
+		"CREATE TABLE fresh_1 PARTITION OF fresh_parted FOR VALUES FROM (1) TO (10)")
+	require.Len(t, analyses, 2)
+	findingOf(t, analyses[1], "R-TB-CREATE-PARTOF")
+	assert.Nil(t, filterV08(analyses[1]), "a parent the migration created is left out")
+}

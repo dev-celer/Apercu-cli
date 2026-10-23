@@ -84,8 +84,7 @@ func ruleCreateInherits(s scope, sub pg_parse.Subcommand) effect {
 
 // ruleCreatePartitionOf is R-TB-CREATE-PARTOF.
 func ruleCreatePartitionOf(s scope, sub pg_parse.Subcommand) effect {
-	e := newEffect(s, "R-TB-CREATE-PARTOF",
-		fmt.Sprintf("%s is held at ACCESS EXCLUSIVE while the new partition is recorded — a stronger lock than the SHARE UPDATE EXCLUSIVE of CREATE TABLE followed by ATTACH PARTITION, which does the same thing", sub.Name)).onNone()
+	e := newEffect(s, "R-TB-CREATE-PARTOF", fmt.Sprintf("%s is held at ACCESS EXCLUSIVE while the new partition is recorded", sub.Name)).onNone()
 	e.recursion = parentOnly
 
 	for _, ref := range sub.Relations {

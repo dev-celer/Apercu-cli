@@ -329,6 +329,7 @@ var lockScripts = []lockScript{
 	{sql: "CREATE TABLE oracle_new (id bigint PRIMARY KEY, user_id bigint REFERENCES users (id))"},
 	{sql: "CREATE TABLE oracle_like (LIKE orders)"},
 	{sql: "CREATE TABLE oracle_inherits () INHERITS (spare)"},
+	// V-08: PARTITION OF holds the parent at ACCESS EXCLUSIVE, where ATTACH PARTITION (4.5) takes SHARE UPDATE EXCLUSIVE.
 	{sql: "CREATE TABLE oracle_partof PARTITION OF parted FOR VALUES FROM (200) TO (300)"},
 	{sql: "CREATE TABLE oracle_ctas AS SELECT id, status FROM orders"},
 	{sql: "DROP TABLE ticket_line"},

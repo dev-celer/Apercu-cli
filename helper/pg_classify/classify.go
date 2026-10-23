@@ -72,6 +72,7 @@ func (c *Classifier) classify(statement pg_parse.Statement, context Context, sha
 	analysis.Findings = append(analysis.Findings, unboundedQueue(ruled, analysis.Findings)...)
 	analysis.Findings = append(analysis.Findings, maintenanceStatements(ruled, analysis.Findings)...)
 	analysis.Findings = append(analysis.Findings, indexRenamedAsTable(ruled, analysis.Findings)...)
+	analysis.Findings = append(analysis.Findings, partitionCreatedInPlace(ruled, analysis.Findings)...)
 	return analysis
 }
 

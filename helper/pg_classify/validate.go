@@ -25,6 +25,9 @@ var maintenanceStatementsList = map[pg_contract.Code]string{
 // indexRenameCode is an ALTER TABLE ... RENAME TO whose target is an index, which ALTER INDEX renames under a weaker lock.
 const indexRenameCode pg_contract.Code = "V-07"
 
+// partitionOfCode is a CREATE TABLE ... PARTITION OF, which ATTACH PARTITION does under a weaker lock on the parent.
+const partitionOfCode pg_contract.Code = "V-08"
+
 // txnUnsafeSubject convert the command name from a parsed statement to the same way the server names it when it refuses to run
 // inside a transaction block. return an empty string if it is safe to run inside transaction.
 func txnUnsafeSubject(s scope) string {
@@ -197,6 +200,62 @@ func indexRenamedAsTable(s scope, findings []pg_contract.Finding) []pg_contract.
 			"and every write updates them, so all of them wait behind it. ALTER INDEX %s RENAME TO %s does the same under "+
 			"SHARE UPDATE EXCLUSIVE, which blocks neither reads nor writes", index, table, index, newName),
 		Targets: dedupeTargets(targets),
+	}}
+}
+
+// partitionCreatedInPlace create a warn finding on a CREATE TABLE ... PARTITION OF, naming the parent it holds at ACCESS EXCLUSIVE.
+// it ignores a parent that was created during the migration.
+func partitionCreatedInPlace(s scope, findings []pg_contract.Finding) []pg_contract.Finding {
+	var targets []pg_contract.Target
+	defaultPartition := ""
+	for _, finding := range findings {
+		if finding.Code != "R-TB-CREATE-PARTOF" {
+			continue
+		}
+		for _, target := range finding.Targets {
+			if target.Role == pg_contract.TargetRoleImplicit && defaultPartition == "" {
+				defaultPartition = target.Relation.Name.String()
+			}
+			if target.Role != pg_contract.TargetRoleDirect || s.catalog.CreatedByMigration(target.Relation.Name) {
+				continue
+			}
+			if kind := target.Relation.Kind; kind != pg_contract.RelationKindUnknown && !kind.IsPartitioned() {
+				continue
+			}
+			targets = append(targets, pg_contract.Target{
+				Relation: target.Relation,
+				Lock:     target.Lock,
+				OpKind:   pg_contract.OpKindNone,
+				Role:     target.Role,
+			})
+		}
+	}
+	if len(targets) == 0 {
+		return nil
+	}
+
+	bound := "FOR VALUES …"
+	for _, sub := range s.statement.Subcommands {
+		if sub.Kind == pg_parse.SubAttachPartition && sub.Value == "DEFAULT" {
+			bound = "DEFAULT"
+		}
+	}
+	partition := s.relation().Name
+	parent := targets[0].Relation.Name
+
+	message := fmt.Sprintf("CREATE TABLE … PARTITION OF holds %s at ACCESS EXCLUSIVE while the partition is added, so every query on it "+
+		"waits behind the statement. CREATE TABLE %s with the same columns, followed by ALTER TABLE %s ATTACH PARTITION %s %s, does the "+
+		"same under SHARE UPDATE EXCLUSIVE, which blocks neither reads nor writes; the new table is empty, so the scan ATTACH makes of it "+
+		"is instant", parent, partition, parent, partition, bound)
+	if defaultPartition != "" {
+		message += fmt.Sprintf("; the default partition %s is held at ACCESS EXCLUSIVE and scanned either way", defaultPartition)
+	}
+
+	return []pg_contract.Finding{{
+		Code:     partitionOfCode,
+		Severity: pg_contract.SeverityWarn,
+		Message:  message,
+		Targets:  dedupeTargets(targets),
 	}}
 }
 
