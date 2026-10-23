@@ -43,6 +43,7 @@ func TestObjectsHangingOffATable(t *testing.T) {
 		{name: "a subscription locks nothing here", sql: "CREATE SUBSCRIPTION sb CONNECTION 'host=x' PUBLICATION pb", code: "R-OB-SUB", noTargets: true},
 
 		{name: "an extension script cannot be read", sql: "CREATE EXTENSION IF NOT EXISTS pgcrypto", code: "R-OB-EXTENSION", noTargets: true},
+		{name: "nor can an extension's update script", sql: "ALTER EXTENSION plpgsql UPDATE", code: "R-OB-EXTENSION", noTargets: true},
 		{name: "a schema is a namespace", sql: "CREATE SCHEMA ob_schema", code: "R-OB-SCHEMA", noTargets: true},
 		{name: "and dropping one with CASCADE says so", sql: "DROP SCHEMA ob_schema CASCADE", code: "R-OB-SCHEMA", noTargets: true},
 	}

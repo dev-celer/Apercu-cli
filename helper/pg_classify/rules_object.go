@@ -147,9 +147,13 @@ func ruleSubscription(s scope) effect {
 	return e.onNone()
 }
 
-// ruleExtension is R-OB-EXTENSION.
+// ruleExtension is R-OB-EXTENSION, for CREATE EXTENSION and ALTER EXTENSION … UPDATE.
 func ruleExtension(s scope) effect {
-	e := newEffect(s, "R-OB-EXTENSION", "the extension's install script is opaque: it can create, alter and populate anything, so neither the locks it takes nor the work it does can be read from the statement")
+	script := "install"
+	if s.statement.Command == "ALTER EXTENSION" {
+		script = "update"
+	}
+	e := newEffect(s, "R-OB-EXTENSION", fmt.Sprintf("the extension's %s script is opaque: it can create, alter and populate anything, so neither the locks it takes nor the work it does can be read from the statement", script))
 	e.lock = pg_contract.LockNone
 	e.op = pg_contract.OpKindNone
 	e.recursion = parentOnly

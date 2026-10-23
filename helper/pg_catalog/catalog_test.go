@@ -766,3 +766,36 @@ func TestRelationContract(t *testing.T) {
 	assert.Equal(t, pg_contract.RelationKindPartitionedTable, contract.Kind)
 	assert.Equal(t, testSchema+".events", contract.Name.String())
 }
+
+func TestExtension(t *testing.T) {
+	t.Parallel()
+
+	eachVersion(t, func(t *testing.T, catalog *Catalog, _ int) {
+		plpgsql, ok := catalog.Extension("plpgsql")
+		require.True(t, ok, "every database ships plpgsql")
+		assert.Equal(t, "1.0", plpgsql.Version)
+
+		_, ok = catalog.Extension("no_such_extension")
+		assert.False(t, ok)
+	})
+}
+
+func TestExtensionPrefersProduction(t *testing.T) {
+	t.Parallel()
+
+	prod := loadFixture(t, 17, SourceProd)
+	prod.Extensions = []Extension{{Name: "pgcrypto", Version: "1.3"}}
+	catalog, err := NewCatalog(CatalogOptions{Pre: loadFixture(t, 17, SourcePreview), Prod: prod})
+	require.NoError(t, err)
+
+	pgcrypto, ok := catalog.Extension("pgcrypto")
+	require.True(t, ok, "production is what the migration runs against")
+	assert.Equal(t, "1.3", pgcrypto.Version)
+	_, ok = catalog.Extension("plpgsql")
+	assert.False(t, ok, "the preview's list is only the fallback")
+
+	fallback, err := NewCatalog(CatalogOptions{Pre: loadFixture(t, 17, SourcePreview)})
+	require.NoError(t, err)
+	_, ok = fallback.Extension("plpgsql")
+	assert.True(t, ok, "without production the preview's list stands")
+}

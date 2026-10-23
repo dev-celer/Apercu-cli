@@ -1131,6 +1131,23 @@
   sql: CREATE EXTENSION IF NOT EXISTS plpgsql
   command: CREATE EXTENSION
   flags: [if_not_exists]
+  subcommands:
+    - kind: UNKNOWN
+      name: plpgsql
+- rule: R-OB-EXTENSION-CASCADE
+  sql: CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public CASCADE
+  command: CREATE EXTENSION
+  flags: [if_not_exists, cascade]
+  subcommands:
+    - kind: UNKNOWN
+      name: pgcrypto
+- rule: R-OB-EXTENSION-UPDATE
+  sql: ALTER EXTENSION plpgsql UPDATE TO '1.0'
+  command: ALTER EXTENSION
+  subcommands:
+    - kind: UNKNOWN
+      name: plpgsql
+      value: "1.0"
 - rule: R-OB-SCHEMA
   sql: CREATE SCHEMA s
   command: CREATE SCHEMA

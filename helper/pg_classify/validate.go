@@ -2,6 +2,7 @@ package pg_classify
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"apercu-cli/helper/pg_contract"
@@ -27,6 +28,9 @@ const indexRenameCode pg_contract.Code = "V-07"
 
 // partitionOfCode is a CREATE TABLE ... PARTITION OF, which ATTACH PARTITION does under a weaker lock on the parent.
 const partitionOfCode pg_contract.Code = "V-08"
+
+// extensionScriptCode is a CREATE EXTENSION or an ALTER EXTENSION ... UPDATE, which runs a script the statement does not show.
+const extensionScriptCode pg_contract.Code = "V-09"
 
 // txnUnsafeSubject convert the command name from a parsed statement to the same way the server names it when it refuses to run
 // inside a transaction block. return an empty string if it is safe to run inside transaction.
@@ -256,6 +260,53 @@ func partitionCreatedInPlace(s scope, findings []pg_contract.Finding) []pg_contr
 		Severity: pg_contract.SeverityWarn,
 		Message:  message,
 		Targets:  dedupeTargets(targets),
+	}}
+}
+
+// extensionScript create a warn finding on a statement that runs an extension's install or update script.
+// it ignores a statement for which the server runs no script: IF NOT EXISTS on an installed extension, or an UPDATE TO the installed version.
+func extensionScript(s scope, findings []pg_contract.Finding) []pg_contract.Finding {
+	if !slices.ContainsFunc(findings, func(finding pg_contract.Finding) bool { return finding.Code == "R-OB-EXTENSION" }) {
+		return nil
+	}
+	if len(s.statement.Subcommands) == 0 {
+		return nil
+	}
+	sub := s.statement.Subcommands[0]
+	installed, isInstalled := s.catalog.Extension(sub.Name)
+
+	var message string
+	if s.statement.Command == "ALTER EXTENSION" {
+		if isInstalled && sub.Value != "" && installed.Version == sub.Value {
+			return nil
+		}
+		path := "to the default version"
+		if sub.Value != "" {
+			path = fmt.Sprintf("to version %s", sub.Value)
+		}
+		if isInstalled {
+			path = fmt.Sprintf("from version %s %s", installed.Version, path)
+		}
+		message = fmt.Sprintf("ALTER EXTENSION %s UPDATE runs the extension's update scripts %s, which the migration does not show: they can "+
+			"create, alter and fill objects under locks of their own, and none of them are reported here. Read the scripts before approving, "+
+			"or update the extension ahead of the migration", sub.Name, path)
+	} else {
+		if isInstalled && s.statement.Flags.IfNotExists {
+			return nil
+		}
+		message = fmt.Sprintf("CREATE EXTENSION %s runs the extension's install script, which the migration does not show: it can create, "+
+			"alter and fill objects under locks of its own, and none of them are reported here", sub.Name)
+		if s.statement.Flags.Cascade {
+			message += "; CASCADE also installs every extension it requires that is missing, each through its own script"
+		}
+		message += ". Read the script before approving, or install the extension ahead of the migration"
+	}
+
+	return []pg_contract.Finding{{
+		Code:     extensionScriptCode,
+		Severity: pg_contract.SeverityWarn,
+		Level:    pg_contract.LevelLow,
+		Message:  message,
 	}}
 }
 

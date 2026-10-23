@@ -34,6 +34,7 @@ type Catalog struct {
 	names      nameIndex
 	settings   map[string]Setting
 	tableStats map[helper.FullRelationName]TableStat // Table usage statistics from the production database.
+	extensions map[string]Extension                  // Installed extensions, from production when it was captured.
 }
 
 // CatalogOptions are the snapshots the lookups are built from. Only Pre is mandatory.
@@ -70,6 +71,7 @@ func NewCatalog(opts CatalogOptions) (*Catalog, error) {
 		createdByMigration: map[helper.FullRelationName]Relation{},
 		unresolved:         map[helper.FullRelationName]struct{}{},
 		settings:           map[string]Setting{},
+		extensions:         map[string]Extension{},
 		tableStats:         map[helper.FullRelationName]TableStat{},
 		previewSizes:       make(map[OID]int64, len(opts.Pre.Relations)),
 		prodSizes:          map[helper.FullRelationName]int64{},
@@ -90,6 +92,14 @@ func NewCatalog(opts CatalogOptions) (*Catalog, error) {
 
 	for _, setting := range opts.Pre.Settings {
 		c.settings[setting.Name] = setting
+	}
+
+	extensionSource := opts.Pre
+	if opts.Prod != nil {
+		extensionSource = opts.Prod
+	}
+	for _, extension := range extensionSource.Extensions {
+		c.extensions[extension.Name] = extension
 	}
 
 	c.relations.build(opts.Pre)
@@ -350,6 +360,12 @@ func (c *Catalog) VersionRange() pg_contract.VersionRange {
 func (c *Catalog) Setting(name string) (string, bool) {
 	setting, ok := c.settings[name]
 	return setting.Value, ok
+}
+
+// Extension is the installed extension of that name. Extensions belong to the database, not to a schema.
+func (c *Catalog) Extension(name string) (Extension, bool) {
+	extension, ok := c.extensions[name]
+	return extension, ok
 }
 
 // SearchPath is the session default search_path, split into schemas.

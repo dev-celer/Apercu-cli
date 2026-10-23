@@ -88,8 +88,12 @@ func normalizeNode(node *pg_query.Node, s Statement) Statement {
 	case *pg_query.Node_CreateExtensionStmt:
 		s.Command = "CREATE EXTENSION"
 		s.Flags.IfNotExists = n.CreateExtensionStmt.IfNotExists
+		_, s.Flags.Cascade = findOption(options(n.CreateExtensionStmt.Options), "cascade")
+		s.Subcommands = []Subcommand{{Kind: SubUnknown, Name: n.CreateExtensionStmt.Extname}}
 	case *pg_query.Node_AlterExtensionStmt:
 		s.Command = "ALTER EXTENSION"
+		version, _ := findOption(options(n.AlterExtensionStmt.Options), "new_version")
+		s.Subcommands = []Subcommand{{Kind: SubUnknown, Name: n.AlterExtensionStmt.Extname, Value: version}}
 	case *pg_query.Node_CreateSchemaStmt:
 		s.Command = "CREATE SCHEMA"
 		s.Flags.IfNotExists = n.CreateSchemaStmt.IfNotExists

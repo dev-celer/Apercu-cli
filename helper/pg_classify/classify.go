@@ -73,6 +73,7 @@ func (c *Classifier) classify(statement pg_parse.Statement, context Context, sha
 	analysis.Findings = append(analysis.Findings, maintenanceStatements(ruled, analysis.Findings)...)
 	analysis.Findings = append(analysis.Findings, indexRenamedAsTable(ruled, analysis.Findings)...)
 	analysis.Findings = append(analysis.Findings, partitionCreatedInPlace(ruled, analysis.Findings)...)
+	analysis.Findings = append(analysis.Findings, extensionScript(ruled, analysis.Findings)...)
 	return analysis
 }
 
@@ -145,6 +146,7 @@ var commandRules = map[pg_contract.Command]func(scope) ([]pg_contract.Finding, [
 	"CREATE SUBSCRIPTION": one(ruleSubscription),
 	"ALTER SUBSCRIPTION":  one(ruleSubscription),
 	"CREATE EXTENSION":    one(ruleExtension),
+	"ALTER EXTENSION":     one(ruleExtension),
 	"CREATE SCHEMA":       one(ruleSchema),
 	"DROP SCHEMA":         one(ruleSchema),
 

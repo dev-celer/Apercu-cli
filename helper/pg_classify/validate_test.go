@@ -806,3 +806,78 @@ func TestPartitionCreatedInPlaceCreatedByMigration(t *testing.T) {
 	findingOf(t, analyses[1], "R-TB-CREATE-PARTOF")
 	assert.Nil(t, filterV08(analyses[1]), "a parent the migration created is left out")
 }
+
+func filterV09(analysis pg_contract.StatementAnalysis) *pg_contract.Finding {
+	for i, finding := range analysis.Findings {
+		if finding.Code == extensionScriptCode {
+			return &analysis.Findings[i]
+		}
+	}
+	return nil
+}
+
+func TestExtensionScript(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		sql string
+		// message is what the finding has to say, empty when V-09 must stay silent.
+		message string
+	}{
+		{"CREATE EXTENSION pgcrypto", "CREATE EXTENSION pgcrypto runs the extension's install script"},
+		{"CREATE EXTENSION IF NOT EXISTS pgcrypto", "CREATE EXTENSION pgcrypto runs the extension's install script"},
+		{"CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public CASCADE", "CASCADE also installs every extension it requires"},
+		{"CREATE EXTENSION plpgsql", "CREATE EXTENSION plpgsql runs the extension's install script"},
+		{"ALTER EXTENSION plpgsql UPDATE", "update scripts from version 1.0 to the default version"},
+		{"ALTER EXTENSION plpgsql UPDATE TO '2.0'", "update scripts from version 1.0 to version 2.0"},
+		{"ALTER EXTENSION pgcrypto UPDATE TO '1.3'", "update scripts to version 1.3"},
+		{"CREATE EXTENSION IF NOT EXISTS plpgsql", ""},
+		{"ALTER EXTENSION plpgsql UPDATE TO '1.0'", ""},
+		{"ALTER EXTENSION plpgsql SET SCHEMA s", ""},
+		{"CREATE SCHEMA s", ""},
+	}
+
+	catalog := testCatalog(t)
+	for _, testCase := range cases {
+		t.Run(testCase.sql, func(t *testing.T) {
+			analysis := single(t, catalog, testCase.sql)
+			finding := filterV09(analysis)
+			if testCase.message == "" {
+				assert.Nil(t, finding)
+				return
+			}
+			require.NotNil(t, finding)
+			assert.Equal(t, pg_contract.SeverityWarn, finding.Severity)
+			assert.Equal(t, pg_contract.LevelLow, finding.Level, "an opaque script is LOW whatever it touches")
+			assert.Empty(t, finding.Targets, "the script names nothing the statement shows")
+			assert.Contains(t, finding.Message, testCase.message)
+			findingOf(t, analysis, "R-OB-EXTENSION")
+		})
+	}
+}
+
+func TestExtensionScriptSilentStillClassified(t *testing.T) {
+	t.Parallel()
+
+	analysis := single(t, testCatalog(t), "CREATE EXTENSION IF NOT EXISTS plpgsql")
+	findingOf(t, analysis, "R-OB-EXTENSION")
+	assert.Nil(t, filterV09(analysis), "the server runs no script for an extension already installed")
+}
+
+func TestExtensionScriptPrefersProduction(t *testing.T) {
+	t.Parallel()
+
+	pre, err := pg_catalog.LoadJSON(filepath.Join("..", "pg_catalog", "testdata", "snapshot_pg17_preview.json.gz"))
+	require.NoError(t, err)
+	prod := &pg_catalog.Snapshot{
+		Source:     pg_catalog.SourceProd,
+		PIT:        pg_catalog.PITPre,
+		Header:     pg_catalog.Header{Version: pg_contract.Version17, ServerVersionNum: 170000},
+		Extensions: []pg_catalog.Extension{{Name: "pgcrypto", Version: "1.3"}},
+	}
+	catalog, err := pg_catalog.NewCatalog(pg_catalog.CatalogOptions{Pre: pre, Prod: prod})
+	require.NoError(t, err)
+
+	assert.Nil(t, filterV09(single(t, catalog, "CREATE EXTENSION IF NOT EXISTS pgcrypto")), "production already has it")
+	assert.NotNil(t, filterV09(single(t, catalog, "CREATE EXTENSION IF NOT EXISTS plpgsql")), "the preview's plpgsql does not count")
+}
