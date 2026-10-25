@@ -13,150 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var txnBlockMembers = []struct {
-	sql     string
-	subject string
-}{
-	{"CREATE INDEX CONCURRENTLY idx ON orders (status)", "CREATE INDEX CONCURRENTLY"},
-	{"CREATE INDEX idx ON orders (status)", ""},
-	{"DROP INDEX CONCURRENTLY orders_status_idx", "DROP INDEX CONCURRENTLY"},
-	{"DROP INDEX orders_status_idx", ""},
-	{"REINDEX INDEX CONCURRENTLY orders_status_idx", "REINDEX CONCURRENTLY"},
-	{"REINDEX TABLE CONCURRENTLY orders", "REINDEX CONCURRENTLY"},
-	{"REINDEX SCHEMA public", "REINDEX SCHEMA"},
-	{"REINDEX DATABASE app", "REINDEX DATABASE"},
-	{"REINDEX SYSTEM app", "REINDEX SYSTEM"},
-	{"REINDEX TABLE events", "REINDEX TABLE"},
-	{"REINDEX INDEX events_at_idx", "REINDEX INDEX"},
-	{"REINDEX TABLE orders", ""},
-	{"REINDEX INDEX orders_status_idx", ""},
-	{"VACUUM", "VACUUM"},
-	{"VACUUM orders", "VACUUM"},
-	{"VACUUM FULL orders", "VACUUM"},
-	{"ANALYZE orders", ""},
-	{"CLUSTER", "CLUSTER"},
-	{"CLUSTER events", "CLUSTER"},
-	{"CLUSTER orders USING orders_status_idx", ""},
-	{"ALTER TABLE events DETACH PARTITION events_2026 CONCURRENTLY", "ALTER TABLE ... DETACH CONCURRENTLY"},
-	{"ALTER TABLE events DETACH PARTITION events_2026", ""},
-	{"CREATE DATABASE d", "CREATE DATABASE"},
-	{"DROP DATABASE d", "DROP DATABASE"},
-	{"CREATE TABLESPACE ts LOCATION '/tmp/ts'", "CREATE TABLESPACE"},
-	{"DROP TABLESPACE ts", "DROP TABLESPACE"},
-}
-
-func filterV01(analysis pg_contract.StatementAnalysis) []pg_contract.Error {
-	var out []pg_contract.Error
-	for _, err := range analysis.Errors {
-		if err.Code == "V-01" {
-			out = append(out, err)
-		}
-	}
-	return out
-}
-
-func TestTxnBlockSafetyInAnExplicitBlock(t *testing.T) {
-	t.Parallel()
-
-	for _, member := range txnBlockMembers {
-		t.Run(member.sql, func(t *testing.T) {
-			t.Parallel()
-
-			catalog := testCatalog(t)
-			statements := analyze(t, catalog, "BEGIN; "+member.sql+"; COMMIT")
-			require.Len(t, statements, 3)
-			inBlock := statements[1]
-
-			if member.subject == "" {
-				assert.Empty(t, filterV01(inBlock), "the server runs this one inside a block")
-				return
-			}
-			require.Len(t, filterV01(inBlock), 1)
-			assert.Equal(t, member.subject+" cannot run inside a transaction block", filterV01(inBlock)[0].Message)
-			assert.Empty(t, inBlock.Findings, "it fails before it reaches a relation, so it takes no lock")
-
-			alone := single(t, testCatalog(t), member.sql)
-			assert.Empty(t, filterV01(alone), "on its own it is what the server accepts")
-		})
-	}
-}
-
-func TestTxnBlockSafetyInAnImplicitTransaction(t *testing.T) {
-	t.Parallel()
-
-	shared := Analyze(testCatalog(t), cycle(0,
-		event("VACUUM orders"),
-		event("ANALYZE orders"),
-	))
-	require.Len(t, shared.Statements, 2)
-	require.Len(t, filterV01(shared.Statements[0]), 1)
-	assert.Equal(t, "VACUUM cannot run inside a transaction block", filterV01(shared.Statements[0])[0].Message)
-	assert.Empty(t, filterV01(shared.Statements[1]), "ANALYZE is safe in a block")
-
-	separate := Analyze(testCatalog(t), apart(
-		event("VACUUM orders"),
-		event("ANALYZE orders"),
-	))
-	require.Len(t, separate.Statements, 2)
-	assert.Empty(t, filterV01(separate.Statements[0]), "a message of its own is what the server accepts")
-	assert.Empty(t, filterV01(separate.Statements[1]))
-}
-
-func TestTxnBlockSafetyIgnorePosition(t *testing.T) {
-	t.Parallel()
-
-	first := Analyze(testCatalog(t), cycle(0, event("VACUUM orders"), event("ANALYZE orders")))
-	last := Analyze(testCatalog(t), cycle(0, event("ANALYZE orders"), event("VACUUM orders")))
-
-	require.Len(t, filterV01(first.Statements[0]), 1)
-	require.Len(t, filterV01(last.Statements[1]), 1)
-	assert.Equal(t, filterV01(first.Statements[0]), filterV01(last.Statements[1]))
-}
-
-// TestTxnBlockSafetyPartition assert that REINDEX and CLUSTER are refused on a partitioned relation only.
-func TestTxnBlockSafetyPartition(t *testing.T) {
-	t.Parallel()
-	unsafe := map[string]bool{
-		"REINDEX TABLE events":                   true,
-		"REINDEX INDEX events_at_idx":            true,
-		"CLUSTER events":                         true,
-		"REINDEX TABLE orders":                   false,
-		"REINDEX INDEX orders_status_idx":        false,
-		"CLUSTER orders USING orders_status_idx": false,
-	}
-	for sql, expected := range unsafe {
-		statements := analyze(t, testCatalog(t), "BEGIN; "+sql+"; COMMIT")
-		require.Len(t, statements, 3)
-		assert.Equalf(t, expected, len(filterV01(statements[1])) == 1, "%q: %v", sql, statements[1].Errors)
-	}
-}
-
-func TestTxnBlockRefusalOpensNoEnvelope(t *testing.T) {
-	t.Parallel()
-
-	analysis := Analyze(testCatalog(t), apart(
-		event("BEGIN"),
-		event("VACUUM orders"),
-		event("ANALYZE orders"),
-		event("COMMIT"),
-	))
-
-	require.Len(t, analysis.Statements, 4)
-	require.Len(t, filterV01(analysis.Statements[1]), 1)
-
-	envelopes := analysis.EnvelopesOn(relationName("orders"))
-	require.Lenf(t, envelopes, 1, "only the ANALYZE took a lock: %v", envelopes)
-	assert.Equal(t, pg_contract.LockShareUpdateExclusive, envelopes[0].Lock)
-	assert.Equal(t, 2, envelopes[0].OpenedBy)
-}
-
-func TestOutsideOfTransactionIsIgnored(t *testing.T) {
-	t.Parallel()
-
-	assert.Empty(t, filterV01(single(t, testCatalog(t), "VACUUM orders")))
-}
-
-func filterV02(analysis pg_contract.StatementAnalysis) *pg_contract.Finding {
+func filterV01(analysis pg_contract.StatementAnalysis) *pg_contract.Finding {
 	for i, finding := range analysis.Findings {
 		if finding.Code == queueRiskCode {
 			return &analysis.Findings[i]
@@ -165,8 +22,8 @@ func filterV02(analysis pg_contract.StatementAnalysis) *pg_contract.Finding {
 	return nil
 }
 
-func filterV02Relation(analysis pg_contract.StatementAnalysis) []string {
-	return targetNames(filterV02(analysis))
+func filterV01Relation(analysis pg_contract.StatementAnalysis) []string {
+	return targetNames(filterV01(analysis))
 }
 
 func getCatalog(t *testing.T, value string) *pg_catalog.Catalog {
@@ -219,9 +76,9 @@ func TestUnboundedQueueThreshold(t *testing.T) {
 					blocking = append(blocking, locked.Relation.Name.String())
 				}
 			}
-			assert.ElementsMatch(t, blocking, filterV02Relation(analysis), "V-02 names every relation locked at SHARE or above")
+			assert.ElementsMatch(t, blocking, filterV01Relation(analysis), "V-01 names every relation locked at SHARE or above")
 
-			finding := filterV02(analysis)
+			finding := filterV01(analysis)
 			if !testCase.fires {
 				assert.Nil(t, finding)
 				return
@@ -231,8 +88,8 @@ func TestUnboundedQueueThreshold(t *testing.T) {
 			assert.Equal(t, pg_contract.LevelHigh, finding.Level)
 			assert.Contains(t, finding.Message, "lock_timeout is disabled")
 			for _, target := range finding.Targets {
-				assert.Equal(t, pg_contract.OpKindNone, target.OpKind, "V-02 does no work of its own on %s", target.Relation)
-				assert.Equal(t, analysis.LockOn(target.Relation.Name), target.Lock, "V-02 reports the statement's lock on %s", target.Relation)
+				assert.Equal(t, pg_contract.OpKindNone, target.OpKind, "V-01 does no work of its own on %s", target.Relation)
+				assert.Equal(t, analysis.LockOn(target.Relation.Name), target.Lock, "V-01 reports the statement's lock on %s", target.Relation)
 			}
 		})
 	}
@@ -243,8 +100,8 @@ func TestUnboundedQueueTargets(t *testing.T) {
 
 	t.Run("the table a new foreign key references keeps its role", func(t *testing.T) {
 		analysis := single(t, testCatalog(t), "CREATE TABLE tb_fk (id bigint REFERENCES users (id))")
-		require.Equal(t, []string{"apercu_snapshot_test.users"}, filterV02Relation(analysis))
-		target := filterV02(analysis).Targets[0]
+		require.Equal(t, []string{"apercu_snapshot_test.users"}, filterV01Relation(analysis))
+		target := filterV01(analysis).Targets[0]
 		assert.Equal(t, pg_contract.LockShareRowExclusive, target.Lock)
 		assert.Equal(t, pg_contract.TargetRoleImplicit, target.Role)
 	})
@@ -253,7 +110,7 @@ func TestUnboundedQueueTargets(t *testing.T) {
 		analysis := single(t, testCatalog(t), "ALTER TABLE events ADD COLUMN z int")
 		assert.ElementsMatch(t, []string{
 			"apercu_snapshot_test.events", "apercu_snapshot_test.events_2025", "apercu_snapshot_test.events_default",
-		}, filterV02Relation(analysis))
+		}, filterV01Relation(analysis))
 	})
 
 	t.Run("a relation the migration created has nobody to queue behind", func(t *testing.T) {
@@ -261,13 +118,13 @@ func TestUnboundedQueueTargets(t *testing.T) {
 			"CREATE INDEX fresh_id_idx ON fresh (id); "+
 			"ALTER TABLE fresh ADD CONSTRAINT fresh_fk FOREIGN KEY (id) REFERENCES users (id)")
 		require.Len(t, analyses, 3)
-		assert.Nil(t, filterV02(analyses[1]))
-		assert.Equal(t, []string{"apercu_snapshot_test.users"}, filterV02Relation(analyses[2]), "only the table that was already there")
+		assert.Nil(t, filterV01(analyses[1]))
+		assert.Equal(t, []string{"apercu_snapshot_test.users"}, filterV01Relation(analyses[2]), "only the table that was already there")
 	})
 
 	t.Run("an unknown relation fails safe", func(t *testing.T) {
 		analysis := single(t, testCatalog(t), "ALTER TABLE no_such_table ADD COLUMN z int")
-		assert.Equal(t, []string{"apercu_snapshot_test.no_such_table"}, filterV02Relation(analysis))
+		assert.Equal(t, []string{"apercu_snapshot_test.no_such_table"}, filterV01Relation(analysis))
 	})
 }
 
@@ -314,7 +171,7 @@ func TestUnboundedQueueTimeoutInScope(t *testing.T) {
 				if analysis.Command != "ALTER TABLE" {
 					continue
 				}
-				finding := filterV02(analysis)
+				finding := filterV01(analysis)
 				verdicts = append(verdicts, finding != nil)
 				if finding != nil && testCase.reason != "" {
 					assert.Contains(t, finding.Message, testCase.reason)
@@ -382,7 +239,7 @@ func TestUnboundedQueueSetLocalInImplicitTransaction(t *testing.T) {
 			var verdicts []bool
 			for _, statement := range Analyze(testCatalog(t), testCase.events).Statements {
 				if statement.Command == "ALTER TABLE" {
-					verdicts = append(verdicts, filterV02(statement) != nil)
+					verdicts = append(verdicts, filterV01(statement) != nil)
 				}
 			}
 			assert.Equal(t, testCase.fires, verdicts)
@@ -398,32 +255,28 @@ func TestUnboundedQueueSetLocalSearchPath(t *testing.T) {
 		event("ALTER TABLE users ADD COLUMN y int"),
 	))
 	require.Len(t, analysis.Statements, 3)
-	assert.Equal(t, []string{"public.users"}, filterV02Relation(analysis.Statements[1]), "resolved through the SET LOCAL")
-	assert.Equal(t, []string{"apercu_snapshot_test.users"}, filterV02Relation(analysis.Statements[2]), "back on the baseline after the message")
+	assert.Equal(t, []string{"public.users"}, filterV01Relation(analysis.Statements[1]), "resolved through the SET LOCAL")
+	assert.Equal(t, []string{"apercu_snapshot_test.users"}, filterV01Relation(analysis.Statements[2]), "back on the baseline after the message")
 }
 
 func TestUnboundedQueueNowait(t *testing.T) {
 	t.Parallel()
 
 	catalog := testCatalog(t)
-	assert.NotNil(t, filterV02(single(t, catalog, "LOCK TABLE orders IN ACCESS EXCLUSIVE MODE")))
-	assert.Nil(t, filterV02(single(t, catalog, "LOCK TABLE orders IN ACCESS EXCLUSIVE MODE NOWAIT")))
-	assert.NotNil(t, filterV02(single(t, catalog, "ALTER TABLE ALL IN TABLESPACE pg_default SET TABLESPACE slow")))
-	assert.Nil(t, filterV02(single(t, catalog, "ALTER TABLE ALL IN TABLESPACE pg_default SET TABLESPACE slow NOWAIT")))
+	assert.NotNil(t, filterV01(single(t, catalog, "LOCK TABLE orders IN ACCESS EXCLUSIVE MODE")))
+	assert.Nil(t, filterV01(single(t, catalog, "LOCK TABLE orders IN ACCESS EXCLUSIVE MODE NOWAIT")))
+	assert.NotNil(t, filterV01(single(t, catalog, "ALTER TABLE ALL IN TABLESPACE pg_default SET TABLESPACE slow")))
+	assert.Nil(t, filterV01(single(t, catalog, "ALTER TABLE ALL IN TABLESPACE pg_default SET TABLESPACE slow NOWAIT")))
 }
 
 func TestUnboundedQueueRefused(t *testing.T) {
 	t.Parallel()
 
-	inBlock := analyze(t, testCatalog(t), "BEGIN; VACUUM FULL orders; COMMIT")
-	require.Len(t, filterV01(inBlock[1]), 1)
-	assert.Nil(t, filterV02(inBlock[1]))
-
 	const notEnforced = "ALTER TABLE orders ADD CONSTRAINT c CHECK (total > 0) NOT ENFORCED"
 	tooOld := single(t, testCatalogOn(t, pg_contract.Version17), notEnforced)
 	errorOf(t, tooOld, gateCode)
-	assert.Nil(t, filterV02(tooOld))
-	assert.NotNil(t, filterV02(single(t, testCatalogOn(t, pg_contract.Version18), notEnforced)), "the server that runs it queues for its lock")
+	assert.Nil(t, filterV01(tooOld))
+	assert.NotNil(t, filterV01(single(t, testCatalogOn(t, pg_contract.Version18), notEnforced)), "the server that runs it queues for its lock")
 }
 
 func TestUnboundedQueueCovered(t *testing.T) {
@@ -438,7 +291,7 @@ func TestUnboundedQueueCovered(t *testing.T) {
 	fires := func(analysis pg_contract.MigrationAnalysis) []bool {
 		out := make([]bool, 0, len(analysis.Statements))
 		for _, statement := range analysis.Statements {
-			out = append(out, filterV02(statement) != nil)
+			out = append(out, filterV01(statement) != nil)
 		}
 		return out
 	}
@@ -495,7 +348,7 @@ func TestUnboundedQueueCovered(t *testing.T) {
 
 	t.Run("only the relations already held are dropped", func(t *testing.T) {
 		analysis := Analyze(testCatalog(t), apart(event("BEGIN"), event(lockAll), event(addFK), event("COMMIT")))
-		assert.Equal(t, []string{"apercu_snapshot_test.users"}, filterV02Relation(analysis.Statements[2]))
+		assert.Equal(t, []string{"apercu_snapshot_test.users"}, filterV01Relation(analysis.Statements[2]))
 	})
 }
 
@@ -518,19 +371,19 @@ func TestUnboundedQueueLeavesLocks(t *testing.T) {
 	assert.Equal(t, bounded.Envelopes, unbounded.Envelopes)
 	require.Len(t, unbounded.Statements, len(bounded.Statements))
 	for i := range unbounded.Statements {
-		assert.Nil(t, filterV02(bounded.Statements[i]))
+		assert.Nil(t, filterV01(bounded.Statements[i]))
 		assert.Equal(t, bounded.Statements[i].LockedRelations(), unbounded.Statements[i].LockedRelations())
 		assert.Equal(t, bounded.Statements[i].MaxOpKind(), unbounded.Statements[i].MaxOpKind())
 	}
 
 	for _, i := range []int{2, 3, 5} {
-		finding := filterV02(unbounded.Statements[i])
+		finding := filterV01(unbounded.Statements[i])
 		require.NotNilf(t, finding, "%q", unbounded.Statements[i].RawSQL)
 		assert.Equal(t, pg_contract.LevelHigh, finding.Level, "the level survives the grading pass")
 	}
 }
 
-func filterV06(analysis pg_contract.StatementAnalysis) *pg_contract.Finding {
+func filterV04(analysis pg_contract.StatementAnalysis) *pg_contract.Finding {
 	for i, finding := range analysis.Findings {
 		if finding.Code == maintenanceStatementCode {
 			return &analysis.Findings[i]
@@ -578,7 +431,7 @@ func TestMaintenanceStatements(t *testing.T) {
 	for _, testCase := range cases {
 		t.Run(testCase.sql, func(t *testing.T) {
 			analysis := single(t, catalog, testCase.sql)
-			finding := filterV06(analysis)
+			finding := filterV04(analysis)
 			if testCase.rule == "" {
 				assert.Nil(t, finding)
 				return
@@ -589,10 +442,10 @@ func TestMaintenanceStatements(t *testing.T) {
 			assert.True(t, strings.HasPrefix(finding.Message, testCase.subject+" rewrites"), finding.Message)
 
 			rule := findingOf(t, analysis, testCase.rule)
-			assert.ElementsMatch(t, targetNames(&rule), targetNames(finding), "V-06 names every relation %s rewrites", testCase.rule)
+			assert.ElementsMatch(t, targetNames(&rule), targetNames(finding), "V-04 names every relation %s rewrites", testCase.rule)
 			for _, target := range finding.Targets {
-				assert.Equal(t, pg_contract.OpKindNone, target.OpKind, "V-06 does no work of its own on %s", target.Relation)
-				assert.Equal(t, analysis.LockOn(target.Relation.Name), target.Lock, "V-06 reports the statement's lock on %s", target.Relation)
+				assert.Equal(t, pg_contract.OpKindNone, target.OpKind, "V-04 does no work of its own on %s", target.Relation)
+				assert.Equal(t, analysis.LockOn(target.Relation.Name), target.Lock, "V-04 reports the statement's lock on %s", target.Relation)
 			}
 		})
 	}
@@ -601,21 +454,11 @@ func TestMaintenanceStatements(t *testing.T) {
 func TestMaintenanceStatementsRefused(t *testing.T) {
 	t.Parallel()
 
-	inBlock := analyze(t, testCatalog(t), "BEGIN; VACUUM FULL orders; COMMIT")
-	require.Len(t, filterV01(inBlock[1]), 1)
-	assert.Nil(t, filterV06(inBlock[1]), "a refused statement never rewrites anything")
-
-	implicit := Analyze(testCatalog(t), cycle(0, event("VACUUM FULL orders"), event("ANALYZE orders")))
-	require.Len(t, filterV01(implicit.Statements[0]), 1)
-	assert.Nil(t, filterV06(implicit.Statements[0]), "nor in an implicit transaction")
-
-	partitioned := analyze(t, testCatalog(t), "BEGIN; CLUSTER events USING events_at_idx; COMMIT")
-	require.Len(t, filterV01(partitioned[1]), 1)
-	assert.Nil(t, filterV06(partitioned[1]))
-
-	allowed := analyze(t, testCatalog(t), "BEGIN; CLUSTER orders USING orders_pkey; COMMIT")
-	assert.Empty(t, filterV01(allowed[1]))
-	assert.NotNil(t, filterV06(allowed[1]), "a plain table is clustered inside a block")
+	const vacuumOnly = "VACUUM (FULL) ONLY orders"
+	tooOld := single(t, testCatalogOn(t, pg_contract.Version17), vacuumOnly)
+	errorOf(t, tooOld, gateCode)
+	assert.Nil(t, filterV04(tooOld), "a refused statement never rewrites anything")
+	assert.NotNil(t, filterV04(single(t, testCatalogOn(t, pg_contract.Version18), vacuumOnly)), "the server that runs it rewrites the table")
 }
 
 func TestMaintenanceStatementsTargets(t *testing.T) {
@@ -627,18 +470,18 @@ func TestMaintenanceStatementsTargets(t *testing.T) {
 			"CLUSTER fresh USING fresh_id_idx")
 		require.Len(t, analyses, 3)
 		findingOf(t, analyses[2], "R-MT-CLUSTER")
-		assert.Nil(t, filterV06(analyses[2]))
+		assert.Nil(t, filterV04(analyses[2]))
 	})
 
 	t.Run("only the tables that were already there are named", func(t *testing.T) {
 		analyses := analyze(t, testCatalog(t), "CREATE TABLE fresh (id bigint); VACUUM FULL fresh, orders")
 		require.Len(t, analyses, 2)
-		assert.Equal(t, []string{"apercu_snapshot_test.orders"}, targetNames(filterV06(analyses[1])))
+		assert.Equal(t, []string{"apercu_snapshot_test.orders"}, targetNames(filterV04(analyses[1])))
 	})
 
 	t.Run("an unknown relation fails safe", func(t *testing.T) {
 		analysis := single(t, testCatalog(t), "VACUUM FULL no_such_table")
-		assert.Equal(t, []string{"apercu_snapshot_test.no_such_table"}, targetNames(filterV06(analysis)))
+		assert.Equal(t, []string{"apercu_snapshot_test.no_such_table"}, targetNames(filterV04(analysis)))
 	})
 }
 
@@ -648,13 +491,13 @@ func TestMaintenanceStatementsLevelSurvivesGrading(t *testing.T) {
 	analysis := Analyze(testCatalog(t), apart(event("VACUUM FULL orders"), event("CLUSTER orders USING orders_pkey")))
 	require.Len(t, analysis.Statements, 2)
 	for _, statement := range analysis.Statements {
-		finding := filterV06(statement)
+		finding := filterV04(statement)
 		require.NotNilf(t, finding, "%q", statement.RawSQL)
 		assert.Equal(t, pg_contract.LevelHigh, finding.Level, "the level survives the grading pass")
 	}
 }
 
-func filterV07(analysis pg_contract.StatementAnalysis) *pg_contract.Finding {
+func filterV05(analysis pg_contract.StatementAnalysis) *pg_contract.Finding {
 	for i, finding := range analysis.Findings {
 		if finding.Code == indexRenameCode {
 			return &analysis.Findings[i]
@@ -689,7 +532,7 @@ func TestIndexRenamedAsTable(t *testing.T) {
 	for _, testCase := range cases {
 		t.Run(testCase.sql, func(t *testing.T) {
 			analysis := single(t, catalog, testCase.sql)
-			finding := filterV07(analysis)
+			finding := filterV05(analysis)
 			if testCase.index == "" {
 				assert.Nil(t, finding)
 				return
@@ -701,12 +544,12 @@ func TestIndexRenamedAsTable(t *testing.T) {
 			assert.Contains(t, finding.Message, "ALTER INDEX "+testCase.index+" RENAME TO i")
 
 			rule := findingOf(t, analysis, "R-AT-RENAME")
-			assert.Equal(t, targetNames(&rule), targetNames(finding), "V-07 names the index R-AT-RENAME locks")
+			assert.Equal(t, targetNames(&rule), targetNames(finding), "V-05 names the index R-AT-RENAME locks")
 			assert.Equal(t, []string{testCase.index}, targetNames(finding))
 			for _, target := range finding.Targets {
-				assert.Equal(t, pg_contract.OpKindNone, target.OpKind, "V-07 does no work of its own on %s", target.Relation)
+				assert.Equal(t, pg_contract.OpKindNone, target.OpKind, "V-05 does no work of its own on %s", target.Relation)
 				assert.Equal(t, pg_contract.LockAccessExclusive, target.Lock)
-				assert.Equal(t, analysis.LockOn(target.Relation.Name), target.Lock, "V-07 reports the statement's lock on %s", target.Relation)
+				assert.Equal(t, analysis.LockOn(target.Relation.Name), target.Lock, "V-05 reports the statement's lock on %s", target.Relation)
 			}
 		})
 	}
@@ -720,7 +563,7 @@ func TestIndexRenamedAsTableCreatedByMigration(t *testing.T) {
 	rule := findingOf(t, analyses[1], "R-AT-RENAME")
 	require.Len(t, rule.Targets, 1)
 	require.True(t, rule.Targets[0].Relation.Kind.IsIndex(), "the shadow catalog knows it is an index")
-	assert.Nil(t, filterV07(analyses[1]), "an index the migration created is left out")
+	assert.Nil(t, filterV05(analyses[1]), "an index the migration created is left out")
 }
 
 func TestIndexRenamedAsTableLevelLeftForGrading(t *testing.T) {
@@ -728,12 +571,12 @@ func TestIndexRenamedAsTableLevelLeftForGrading(t *testing.T) {
 
 	analysis := Analyze(testCatalog(t), apart(event("ALTER TABLE orders_open_idx RENAME TO i")))
 	require.Len(t, analysis.Statements, 1)
-	finding := filterV07(analysis.Statements[0])
+	finding := filterV05(analysis.Statements[0])
 	require.NotNil(t, finding)
 	assert.Equal(t, pg_contract.LevelUnset, finding.Level)
 }
 
-func filterV08(analysis pg_contract.StatementAnalysis) *pg_contract.Finding {
+func filterV06(analysis pg_contract.StatementAnalysis) *pg_contract.Finding {
 	for i, finding := range analysis.Findings {
 		if finding.Code == partitionOfCode {
 			return &analysis.Findings[i]
@@ -769,7 +612,7 @@ func TestPartitionCreatedInPlace(t *testing.T) {
 	for _, testCase := range cases {
 		t.Run(testCase.sql, func(t *testing.T) {
 			analysis := single(t, catalog, testCase.sql)
-			finding := filterV08(analysis)
+			finding := filterV06(analysis)
 			if testCase.parent == "" {
 				assert.Nil(t, finding)
 				return
@@ -785,13 +628,13 @@ func TestPartitionCreatedInPlace(t *testing.T) {
 			}
 
 			rule := findingOf(t, analysis, "R-TB-CREATE-PARTOF")
-			assert.Subset(t, targetNames(&rule), targetNames(finding), "V-08 names a relation R-TB-CREATE-PARTOF locks")
+			assert.Subset(t, targetNames(&rule), targetNames(finding), "V-06 names a relation R-TB-CREATE-PARTOF locks")
 			assert.Equal(t, []string{testCase.parent}, targetNames(finding), "the default partition is left out")
 			for _, target := range finding.Targets {
-				assert.Equal(t, pg_contract.OpKindNone, target.OpKind, "V-08 does no work of its own on %s", target.Relation)
+				assert.Equal(t, pg_contract.OpKindNone, target.OpKind, "V-06 does no work of its own on %s", target.Relation)
 				assert.Equal(t, pg_contract.LockAccessExclusive, target.Lock)
 				assert.Equal(t, pg_contract.TargetRoleDirect, target.Role)
-				assert.Equal(t, analysis.LockOn(target.Relation.Name), target.Lock, "V-08 reports the statement's lock on %s", target.Relation)
+				assert.Equal(t, analysis.LockOn(target.Relation.Name), target.Lock, "V-06 reports the statement's lock on %s", target.Relation)
 			}
 		})
 	}
@@ -804,10 +647,10 @@ func TestPartitionCreatedInPlaceCreatedByMigration(t *testing.T) {
 		"CREATE TABLE fresh_1 PARTITION OF fresh_parted FOR VALUES FROM (1) TO (10)")
 	require.Len(t, analyses, 2)
 	findingOf(t, analyses[1], "R-TB-CREATE-PARTOF")
-	assert.Nil(t, filterV08(analyses[1]), "a parent the migration created is left out")
+	assert.Nil(t, filterV06(analyses[1]), "a parent the migration created is left out")
 }
 
-func filterV09(analysis pg_contract.StatementAnalysis) *pg_contract.Finding {
+func filterV07(analysis pg_contract.StatementAnalysis) *pg_contract.Finding {
 	for i, finding := range analysis.Findings {
 		if finding.Code == extensionScriptCode {
 			return &analysis.Findings[i]
@@ -821,7 +664,7 @@ func TestExtensionScript(t *testing.T) {
 
 	cases := []struct {
 		sql string
-		// message is what the finding has to say, empty when V-09 must stay silent.
+		// message is what the finding has to say, empty when V-07 must stay silent.
 		message string
 	}{
 		{"CREATE EXTENSION pgcrypto", "CREATE EXTENSION pgcrypto runs the extension's install script"},
@@ -841,7 +684,7 @@ func TestExtensionScript(t *testing.T) {
 	for _, testCase := range cases {
 		t.Run(testCase.sql, func(t *testing.T) {
 			analysis := single(t, catalog, testCase.sql)
-			finding := filterV09(analysis)
+			finding := filterV07(analysis)
 			if testCase.message == "" {
 				assert.Nil(t, finding)
 				return
@@ -861,7 +704,7 @@ func TestExtensionScriptSilentStillClassified(t *testing.T) {
 
 	analysis := single(t, testCatalog(t), "CREATE EXTENSION IF NOT EXISTS plpgsql")
 	findingOf(t, analysis, "R-OB-EXTENSION")
-	assert.Nil(t, filterV09(analysis), "the server runs no script for an extension already installed")
+	assert.Nil(t, filterV07(analysis), "the server runs no script for an extension already installed")
 }
 
 func TestExtensionScriptPrefersProduction(t *testing.T) {
@@ -878,6 +721,6 @@ func TestExtensionScriptPrefersProduction(t *testing.T) {
 	catalog, err := pg_catalog.NewCatalog(pg_catalog.CatalogOptions{Pre: pre, Prod: prod})
 	require.NoError(t, err)
 
-	assert.Nil(t, filterV09(single(t, catalog, "CREATE EXTENSION IF NOT EXISTS pgcrypto")), "production already has it")
-	assert.NotNil(t, filterV09(single(t, catalog, "CREATE EXTENSION IF NOT EXISTS plpgsql")), "the preview's plpgsql does not count")
+	assert.Nil(t, filterV07(single(t, catalog, "CREATE EXTENSION IF NOT EXISTS pgcrypto")), "production already has it")
+	assert.NotNil(t, filterV07(single(t, catalog, "CREATE EXTENSION IF NOT EXISTS plpgsql")), "the preview's plpgsql does not count")
 }

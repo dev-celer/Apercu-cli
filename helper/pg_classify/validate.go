@@ -9,14 +9,11 @@ import (
 	"apercu-cli/helper/pg_parse"
 )
 
-// txnBlockCode is a statement the server refuses to run inside a transaction block.
-const txnBlockCode pg_contract.Code = "V-01"
-
 // queueRiskCode is a statement that can wait for a lock blocking writers or readers with nothing to bound the wait.
-const queueRiskCode pg_contract.Code = "V-02"
+const queueRiskCode pg_contract.Code = "V-01"
 
 // maintenanceStatementCode is a VACUUM FULL or a CLUSTER, maintenance statement that should not be found inside a migration file.
-const maintenanceStatementCode pg_contract.Code = "V-06"
+const maintenanceStatementCode pg_contract.Code = "V-04"
 
 var maintenanceStatementsList = map[pg_contract.Code]string{
 	"R-MT-VACUUMFULL": "VACUUM FULL",
@@ -24,70 +21,13 @@ var maintenanceStatementsList = map[pg_contract.Code]string{
 }
 
 // indexRenameCode is an ALTER TABLE ... RENAME TO whose target is an index, which ALTER INDEX renames under a weaker lock.
-const indexRenameCode pg_contract.Code = "V-07"
+const indexRenameCode pg_contract.Code = "V-05"
 
 // partitionOfCode is a CREATE TABLE ... PARTITION OF, which ATTACH PARTITION does under a weaker lock on the parent.
-const partitionOfCode pg_contract.Code = "V-08"
+const partitionOfCode pg_contract.Code = "V-06"
 
 // extensionScriptCode is a CREATE EXTENSION or an ALTER EXTENSION ... UPDATE, which runs a script the statement does not show.
-const extensionScriptCode pg_contract.Code = "V-09"
-
-// txnUnsafeSubject convert the command name from a parsed statement to the same way the server names it when it refuses to run
-// inside a transaction block. return an empty string if it is safe to run inside transaction.
-func txnUnsafeSubject(s scope) string {
-	statement := s.statement
-	switch statement.Command {
-	case "CREATE INDEX", "DROP INDEX":
-		if statement.Flags.Concurrently {
-			return string(statement.Command) + " CONCURRENTLY"
-		}
-	case "REINDEX INDEX", "REINDEX TABLE":
-		if statement.Flags.Concurrently {
-			return "REINDEX CONCURRENTLY"
-		}
-		if s.partitioned() {
-			return string(statement.Command)
-		}
-	case "REINDEX SCHEMA", "REINDEX DATABASE", "REINDEX SYSTEM":
-		return string(statement.Command)
-	case "VACUUM":
-		return "VACUUM"
-	case "CLUSTER":
-		if len(statement.Relations) == 0 || s.partitioned() {
-			return "CLUSTER"
-		}
-	case "CREATEDB":
-		return "CREATE DATABASE"
-	case "DROPDB":
-		return "DROP DATABASE"
-	case "CREATE TABLE SPACE":
-		return "CREATE TABLESPACE"
-	case "DROP TABLE SPACE":
-		return "DROP TABLESPACE"
-	case "ALTER TABLE":
-		for _, sub := range statement.Subcommands {
-			if sub.Kind == pg_parse.SubDetachPartition && sub.Flags.Concurrently {
-				return "ALTER TABLE ... DETACH CONCURRENTLY"
-			}
-		}
-	}
-	return ""
-}
-
-// txnBlockSafety return errors for statement that cannot run inside transaction but are in one.
-func txnBlockSafety(s scope, inTransaction bool) []pg_contract.Error {
-	if !inTransaction {
-		return nil
-	}
-	subject := txnUnsafeSubject(s)
-	if subject == "" {
-		return nil
-	}
-	return []pg_contract.Error{{
-		Code:    txnBlockCode,
-		Message: fmt.Sprintf("%s cannot run inside a transaction block", subject),
-	}}
-}
+const extensionScriptCode pg_contract.Code = "V-07"
 
 // unboundedQueue create warn findings on a statement that take a blocking lock without lock_timeout set.
 // it ignores a relation that was created during the migration.

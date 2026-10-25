@@ -547,7 +547,7 @@ func TestFindingLevelIsOmittedWhenUndecided(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotContains(t, string(undecided), "level")
 
-	decided, err := json.Marshal(Finding{Code: "V-02", Severity: SeverityWarn, Message: "m", Level: LevelHigh})
+	decided, err := json.Marshal(Finding{Code: "V-01", Severity: SeverityWarn, Message: "m", Level: LevelHigh})
 	require.NoError(t, err)
 	assert.Contains(t, string(decided), `"level":"HIGH"`)
 }
@@ -689,10 +689,10 @@ func TestMigrationAnalysis(t *testing.T) {
 		Statements: []StatementAnalysis{
 			{RawSQL: "BEGIN", TxnGroup: 1},
 			{RawSQL: "ALTER TABLE orders ADD COLUMN z int", TxnGroup: 1,
-				Errors: []Error{{Code: "V-01", Message: "first"}}},
+				Errors: []Error{{Code: "V-02", Message: "first"}}},
 			{RawSQL: "ALTER TABLE users ADD COLUMN z int", TxnGroup: 1},
 			{RawSQL: "COMMIT", TxnGroup: 1,
-				Errors: []Error{{Code: "V-04", Message: "second"}}},
+				Errors: []Error{{Code: "V-02", Message: "second"}}},
 		},
 		Envelopes: []LockEnvelope{
 			{Relation: Relation{Name: orders, Kind: RelationKindTable}, Lock: LockAccessExclusive,
@@ -734,7 +734,7 @@ func TestMigrationAnalysisSerialization(t *testing.T) {
 			TxnGroup: 1,
 			Command:  "VACUUM",
 			Findings: []Finding{{
-				Code: "V-06", Severity: SeverityWarn, Level: LevelHigh,
+				Code: "V-04", Severity: SeverityWarn, Level: LevelHigh,
 				Message: "a full rewrite under ACCESS EXCLUSIVE",
 			}},
 		}},
@@ -773,8 +773,8 @@ func TestError(t *testing.T) {
 	}
 	assert.Equal(t, "G-03: CHECK ... NOT ENFORCED is not supported (valid on 18+)", versioned.Error())
 
-	plain := Error{Code: "V-01", Message: "CREATE INDEX CONCURRENTLY cannot run in a transaction block"}
-	assert.Equal(t, "V-01: CREATE INDEX CONCURRENTLY cannot run in a transaction block", plain.Error())
+	plain := Error{Code: "V-02", Message: "NOT ENFORCED requires PostgreSQL 18, production runs 16"}
+	assert.Equal(t, "V-02: NOT ENFORCED requires PostgreSQL 18, production runs 16", plain.Error())
 
 	analysis := StatementAnalysis{Errors: []Error{plain}}
 	assert.True(t, analysis.HasErrors())

@@ -27,17 +27,16 @@ func (c *Classifier) Analyze(statements []pg_parse.Statement) []pg_contract.Stat
 
 // Next classifies one statement that had its protocol cycle to itself, and advances the session past it.
 func (c *Classifier) Next(statement pg_parse.Statement) pg_contract.StatementAnalysis {
-	return c.classify(statement, c.session.Next(statement), false)
+	return c.classify(statement, c.session.Next(statement))
 }
 
 // NextInCycle classifies one statement of the given protocol cycle and advances the session past it.
-// sharedCycle says the cycle carried other statements.
-func (c *Classifier) NextInCycle(statement pg_parse.Statement, cycle int, sharedCycle bool) pg_contract.StatementAnalysis {
-	return c.classify(statement, c.session.NextInCycle(statement, cycle), sharedCycle)
+func (c *Classifier) NextInCycle(statement pg_parse.Statement, cycle int) pg_contract.StatementAnalysis {
+	return c.classify(statement, c.session.NextInCycle(statement, cycle))
 }
 
 // classify produces the record of one statement running under the context the session handed out.
-func (c *Classifier) classify(statement pg_parse.Statement, context Context, sharedCycle bool) pg_contract.StatementAnalysis {
+func (c *Classifier) classify(statement pg_parse.Statement, context Context) pg_contract.StatementAnalysis {
 	analysis := pg_contract.StatementAnalysis{
 		RawSQL:        statement.RawSQL,
 		TxnGroup:      pg_contract.TxnGroup(context.Group),
@@ -62,7 +61,6 @@ func (c *Classifier) classify(statement pg_parse.Statement, context Context, sha
 
 	// Server refusal checks
 	refusals := versionGate(c.catalog.Version(), statement)
-	refusals = append(refusals, txnBlockSafety(ruled, context.InTransaction || sharedCycle)...)
 	analysis.Errors = append(analysis.Errors, refusals...)
 	if len(refusals) > 0 {
 		analysis.Findings = nil

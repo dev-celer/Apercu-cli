@@ -265,7 +265,7 @@ var lockScripts = []lockScript{
 	{sql: "ALTER TABLE legacy_child NO INHERIT legacy_parent"},
 	{sql: "ALTER TABLE orphan INHERIT legacy_parent"},
 	{sql: "ALTER TABLE orders RENAME TO orders_old"},
-	// V-07: ALTER TABLE renames an index under ACCESS EXCLUSIVE, where ALTER INDEX takes SHARE UPDATE EXCLUSIVE.
+	// V-05: ALTER TABLE renames an index under ACCESS EXCLUSIVE, where ALTER INDEX takes SHARE UPDATE EXCLUSIVE.
 	{sql: "ALTER TABLE orders_status_idx RENAME TO orders_status_idx2"},
 	{sql: "ALTER TABLE ixparted_only_idx RENAME TO ixparted_only_idx2"},
 	{sql: "ALTER TABLE orders SET SCHEMA public"},
@@ -329,7 +329,7 @@ var lockScripts = []lockScript{
 	{sql: "CREATE TABLE oracle_new (id bigint PRIMARY KEY, user_id bigint REFERENCES users (id))"},
 	{sql: "CREATE TABLE oracle_like (LIKE orders)"},
 	{sql: "CREATE TABLE oracle_inherits () INHERITS (spare)"},
-	// V-08: PARTITION OF holds the parent at ACCESS EXCLUSIVE, where ATTACH PARTITION (4.5) takes SHARE UPDATE EXCLUSIVE.
+	// V-06: PARTITION OF holds the parent at ACCESS EXCLUSIVE, where ATTACH PARTITION (4.5) takes SHARE UPDATE EXCLUSIVE.
 	{sql: "CREATE TABLE oracle_partof PARTITION OF parted FOR VALUES FROM (200) TO (300)"},
 	{sql: "CREATE TABLE oracle_ctas AS SELECT id, status FROM orders"},
 	{sql: "DROP TABLE ticket_line"},
@@ -518,10 +518,6 @@ func replayLocks(t *testing.T, db *sql.DB, catalog *pg_catalog.Catalog, script l
 	statements := pg_parse.Parse(script.sql)
 	require.Len(t, statements, 1)
 	analysis := NewClassifier(catalog).Next(statements[0])
-
-	inBlock := filterTxnBlockErrors(NewClassifier(catalog).NextInCycle(statements[0], 0, true))
-	assert.Equalf(t, script.outsideTransaction, len(inBlock) == 1,
-		"V-01 %v on %q, the corpus says outsideTransaction=%v", inBlock, script.sql, script.outsideTransaction)
 
 	conn, err := db.Conn(ctx)
 	require.NoError(t, err)

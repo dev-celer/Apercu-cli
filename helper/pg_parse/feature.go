@@ -4,7 +4,7 @@ import "apercu-cli/helper/pg_contract"
 
 // FeatureName identifies one construct that does not exist on every supported server. §8 turns
 // the set a statement uses into a bound on the versions the migration can run on, which is what
-// V-04 reports when production sits below it.
+// V-02 reports when production sits below it.
 type FeatureName string
 
 const (

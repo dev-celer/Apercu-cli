@@ -11,11 +11,11 @@ import (
 // Analyze is the migration pipeline's entry point. It parses every event, classifies the statements
 func Analyze(catalog *pg_catalog.Catalog, events []pg_contract.QueryEvent) pg_contract.MigrationAnalysis {
 	classifier := NewClassifier(catalog)
-	intake, perCycle := parseEvents(events)
+	intake := parseEvents(events)
 
 	analysis := pg_contract.MigrationAnalysis{Versions: catalog.VersionRange()}
 	for _, source := range intake {
-		statement := classifier.NextInCycle(source.statement, source.cycle, perCycle[source.cycle] > 1)
+		statement := classifier.NextInCycle(source.statement, source.cycle)
 		statement.Cycle = source.cycle
 		levelGrading(catalog, statement.Findings)
 		analysis.Versions = migrationVersions(analysis.Versions, source.statement, statement.Errors)
@@ -60,17 +60,15 @@ type source struct {
 	cycle     int
 }
 
-// parseEvents parse the statement and count the number of event per cycle.
-func parseEvents(events []pg_contract.QueryEvent) ([]source, map[int]int) {
+// parseEvents parse every event into its statements, each one tagged with the cycle it ran under.
+func parseEvents(events []pg_contract.QueryEvent) []source {
 	var intake []source
-	perCycle := map[int]int{}
 	for _, event := range events {
 		for _, parsed := range pg_parse.Parse(event.SQL) {
 			intake = append(intake, source{statement: parsed, cycle: event.Cycle})
-			perCycle[event.Cycle]++
 		}
 	}
-	return intake, perCycle
+	return intake
 }
 
 // levelGrading set the finding level for a relation.

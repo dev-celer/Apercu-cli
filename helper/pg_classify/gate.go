@@ -7,8 +7,8 @@ import (
 	"apercu-cli/helper/pg_parse"
 )
 
-// gateCode is V-04, the statement is not supported in this server version.
-const gateCode pg_contract.Code = "V-04"
+// gateCode is V-02, the statement is not supported in this server version.
+const gateCode pg_contract.Code = "V-02"
 
 // versionGate checks that a statement is compatible with the production version, and emit errors if it isn't the case.
 func versionGate(version pg_contract.Version, statement pg_parse.Statement) []pg_contract.Error {
