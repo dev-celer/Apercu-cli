@@ -133,10 +133,7 @@ func ruleValidateConstraint(s scope, sub pg_parse.Subcommand) effect {
 	if !ok {
 		return e
 	}
-	switch {
-	case !constraint.Enforced:
-		return e.reject(fmt.Sprintf("constraint %q is NOT ENFORCED and cannot be validated", sub.Name), pg_contract.AnyVersion)
-	case constraint.Validated:
+	if constraint.Validated {
 		e.op = pg_contract.OpKindMetadata
 		e.message = fmt.Sprintf("constraint %q is already validated, so the statement is a no-op", sub.Name)
 	}

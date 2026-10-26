@@ -167,6 +167,9 @@ type lockScript struct {
 	// refusedOn lists the versions the server is expected to reject the statement on, which is
 	// what the classifier's REJECTED branch predicts. The two have to agree, version by version.
 	refusedOn []pg_contract.Version
+	// leftToServer marks a refusal the classifier does not predict: the server refuses the statement on
+	// every version and says so itself, so the classifier reads it as if it ran.
+	leftToServer bool
 	// outsideTransaction runs the statement with no BEGIN, for the ones that cannot sit in a
 	// block. No lock can be read back for those, so only the refusal is compared.
 	outsideTransaction bool
@@ -220,7 +223,7 @@ var lockScripts = []lockScript{
 	{sql: "ALTER TABLE computed ALTER COLUMN stored_total SET EXPRESSION AS (base * 4)", since: pg_contract.Version17},
 	{sql: "ALTER TABLE computed ALTER COLUMN virtual_total SET EXPRESSION AS (base * 5)", since: pg_contract.Version18},
 	{sql: "ALTER TABLE computed ALTER COLUMN stored_total DROP EXPRESSION"},
-	{sql: "ALTER TABLE computed ALTER COLUMN virtual_total DROP EXPRESSION", since: pg_contract.Version18, refusedOn: from18},
+	{sql: "ALTER TABLE computed ALTER COLUMN virtual_total DROP EXPRESSION", since: pg_contract.Version18, refusedOn: from18, leftToServer: true},
 
 	// 4.2 constraints.
 	{sql: "ALTER TABLE orders ADD CONSTRAINT c CHECK (total >= 0)"},
@@ -251,13 +254,15 @@ var lockScripts = []lockScript{
 	{sql: "ALTER TABLE orders SET (autovacuum_vacuum_scale_factor = 0.1)"},
 	{sql: "ALTER TABLE orders SET (fillfactor = 70, user_catalog_table = true)"},
 	{sql: "ALTER TABLE orders RESET (fillfactor)"},
-	{sql: "ALTER TABLE events SET (fillfactor = 70)", refusedOn: onEveryVersion},
+	{sql: "ALTER TABLE legacy_parent SET (fillfactor = 70)"},
+	{sql: "ALTER TABLE events SET (fillfactor = 70)", refusedOn: onEveryVersion, leftToServer: true},
 	{sql: "ALTER TABLE orders SET ACCESS METHOD heap"},
 	{sql: "ALTER TABLE orders SET UNLOGGED"},
 	{sql: "ALTER TABLE events SET UNLOGGED", refusedOn: from18},
 	{sql: "ALTER TABLE orders CLUSTER ON orders_pkey"},
 	{sql: "ALTER TABLE orders SET WITHOUT CLUSTER"},
-	{sql: "ALTER TABLE events CLUSTER ON events_pkey", refusedOn: onEveryVersion},
+	{sql: "ALTER TABLE legacy_parent SET WITHOUT CLUSTER"},
+	{sql: "ALTER TABLE events CLUSTER ON events_pkey", refusedOn: onEveryVersion, leftToServer: true},
 	{sql: "ALTER TABLE orders SET WITHOUT OIDS"},
 	{sql: "ALTER TABLE orders OWNER TO apercu_lock_oracle_owner"},
 	{sql: "ALTER TABLE orders REPLICA IDENTITY FULL"},
@@ -283,20 +288,20 @@ var lockScripts = []lockScript{
 	{sql: "ALTER TABLE events ATTACH PARTITION events_2026 FOR VALUES FROM ('2026-01-01') TO ('2027-01-01')"},
 	{sql: "ALTER TABLE parted ATTACH PARTITION parted_2 FOR VALUES FROM (100) TO (200)"},
 	{sql: "ALTER TABLE parted DETACH PARTITION parted_1"},
-	{sql: "ALTER TABLE ONLY events ADD CONSTRAINT c CHECK (id > 0)", refusedOn: onEveryVersion},
-	{sql: "ALTER TABLE ONLY events ADD COLUMN z int", refusedOn: onEveryVersion},
-	{sql: "ALTER TABLE ONLY events DROP COLUMN id", refusedOn: onEveryVersion},
+	{sql: "ALTER TABLE ONLY events ADD CONSTRAINT c CHECK (id > 0)", refusedOn: onEveryVersion, leftToServer: true},
+	{sql: "ALTER TABLE ONLY events ADD COLUMN z int", refusedOn: onEveryVersion, leftToServer: true},
+	{sql: "ALTER TABLE ONLY events DROP COLUMN id", refusedOn: onEveryVersion, leftToServer: true},
 	{sql: "ALTER TABLE ONLY events ALTER COLUMN id SET NOT NULL"},
-	{sql: "ALTER TABLE ONLY events ALTER COLUMN id TYPE int", refusedOn: onEveryVersion},
+	{sql: "ALTER TABLE ONLY events ALTER COLUMN id TYPE int", refusedOn: onEveryVersion, leftToServer: true},
 	{sql: "ALTER TABLE ONLY events ALTER COLUMN id DROP NOT NULL", refusedOn: upTo17},
 	{sql: "ALTER TABLE ONLY events DROP CONSTRAINT events_id_check", refusedOn: upTo17},
 	{sql: "ALTER TABLE events DROP CONSTRAINT events_id_check"},
 	{sql: "ALTER TABLE ONLY legacy_parent DROP CONSTRAINT legacy_id_check"},
-	{sql: "ALTER TABLE ONLY events RENAME COLUMN id TO ident", refusedOn: onEveryVersion},
+	{sql: "ALTER TABLE ONLY events RENAME COLUMN id TO ident", refusedOn: onEveryVersion, leftToServer: true},
 	{sql: "ALTER TABLE ONLY events ALTER COLUMN id SET DEFAULT 1"},
-	{sql: "ALTER TABLE ONLY legacy_parent ADD COLUMN z int", refusedOn: onEveryVersion},
+	{sql: "ALTER TABLE ONLY legacy_parent ADD COLUMN z int", refusedOn: onEveryVersion, leftToServer: true},
 	{sql: "ALTER TABLE ONLY legacy_parent DROP COLUMN id"},
-	{sql: "ALTER TABLE ONLY legacy_parent ADD CONSTRAINT c CHECK (id > 0)", refusedOn: onEveryVersion},
+	{sql: "ALTER TABLE ONLY legacy_parent ADD CONSTRAINT c CHECK (id > 0)", refusedOn: onEveryVersion, leftToServer: true},
 	{sql: "ALTER TABLE ONLY legacy_parent ALTER COLUMN id SET NOT NULL"},
 	{sql: "ALTER TABLE ONLY legacy_parent ALTER COLUMN id SET DEFAULT 1"},
 	{sql: "ALTER TABLE ONLY legacy_parent ALTER COLUMN id SET STORAGE PLAIN"},
@@ -305,7 +310,7 @@ var lockScripts = []lockScript{
 	{sql: "ALTER TABLE ONLY events ENABLE TRIGGER ALL"},
 	{sql: "ALTER TABLE ONLY events ALTER COLUMN id SET STATISTICS 100"},
 	{sql: "ALTER TABLE ONLY events OWNER TO apercu_lock_oracle_owner"},
-	{sql: "ALTER TABLE parted DETACH PARTITION parted_1 CONCURRENTLY", outsideTransaction: true, refusedOn: onEveryVersion},
+	{sql: "ALTER TABLE parted DETACH PARTITION parted_1 CONCURRENTLY", outsideTransaction: true, refusedOn: onEveryVersion, leftToServer: true},
 
 	// 5.1 index DDL.
 	{sql: "CREATE INDEX oracle_new_idx ON orders (code)"},
@@ -541,7 +546,7 @@ func replayLocks(t *testing.T, db *sql.DB, catalog *pg_catalog.Catalog, script l
 	assert.Equalf(t, script.refused(version), execErr != nil,
 		"the server %s %q, the script says it %s (server said: %v)",
 		accepted(execErr), script.sql, expected(script.refused(version)), execErr)
-	assert.Equalf(t, script.refused(version), analysis.HasErrors(),
+	assert.Equalf(t, script.refused(version) && !script.leftToServer, analysis.HasErrors(),
 		"the classifier %s %q, the server %s it", classifierVerdict(analysis), script.sql, accepted(execErr))
 	if execErr != nil || script.outsideTransaction {
 		return

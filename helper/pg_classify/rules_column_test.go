@@ -198,11 +198,11 @@ func TestGeneratedColumnClauses(t *testing.T) {
 		assert.Equal(t, pg_contract.OpKindMetadata, targetOf(t, finding, "apercu_snapshot_test.computed").OpKind)
 	})
 
-	t.Run("a virtual column has no expression to drop", func(t *testing.T) {
+	t.Run("a virtual column has no values to keep, so they would be written out", func(t *testing.T) {
 		analysis := single(t, catalog, "ALTER TABLE computed ALTER COLUMN virtual_total DROP EXPRESSION")
-		assert.Empty(t, analysis.Findings)
-		require.Len(t, analysis.Errors, 1)
-		assert.Contains(t, analysis.Errors[0].Message, "virtual generated columns")
+		require.Empty(t, analysis.Errors, "the server refuses it and says so itself")
+		finding := findingOf(t, analysis, "R-AT-DROPEXPR")
+		assert.Equal(t, pg_contract.OpKindRewrite, targetOf(t, finding, "apercu_snapshot_test.computed").OpKind)
 	})
 }
 

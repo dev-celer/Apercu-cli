@@ -267,7 +267,8 @@ func ruleSetExpression(s scope, sub pg_parse.Subcommand) effect {
 func ruleDropExpression(s scope, sub pg_parse.Subcommand) effect {
 	e := newEffect(s, "R-AT-DROPEXPR", "the column keeps the values it has and stops being generated")
 	if column, ok := s.column(sub.Name); ok && column.Generated == "v" {
-		return e.reject("DROP EXPRESSION is not supported for virtual generated columns", pg_contract.AnyVersion)
+		e.op = pg_contract.OpKindRewrite
+		e.message = "a virtual generated column stores nothing, so keeping its values means writing them into every row"
 	}
 	return e
 }

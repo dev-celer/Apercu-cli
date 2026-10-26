@@ -73,6 +73,36 @@ func TestStorageSubcommands(t *testing.T) {
 	}
 }
 
+// TestStorageMarksStopAtTheParent validate that storage parameters and a CLUSTER mark never recurse. The server
+// refuses both on a partitioned table and says so itself, so they are read there as if they ran.
+func TestStorageMarksStopAtTheParent(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		sql       string
+		code      pg_contract.Code
+		relations []string
+	}{
+		{name: "storage parameters on a partitioned table", sql: "ALTER TABLE events SET (fillfactor = 70)", code: "R-AT-RELOPT", relations: []string{"apercu_snapshot_test.events"}},
+		{name: "and on a classic inheritance parent", sql: "ALTER TABLE legacy_parent SET (fillfactor = 70)", code: "R-AT-RELOPT", relations: []string{"apercu_snapshot_test.legacy_parent"}},
+		{name: "a CLUSTER mark on a partitioned table", sql: "ALTER TABLE events CLUSTER ON events_at_idx", code: "R-AT-CLUSTERON", relations: []string{"apercu_snapshot_test.events", "apercu_snapshot_test.events_at_idx"}},
+		{name: "and its removal", sql: "ALTER TABLE events SET WITHOUT CLUSTER", code: "R-AT-CLUSTERON", relations: []string{"apercu_snapshot_test.events"}},
+	}
+
+	catalog := testCatalog(t)
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			analysis := single(t, catalog, testCase.sql)
+			require.Empty(t, analysis.Errors)
+			finding := findingOf(t, analysis, testCase.code)
+			assert.ElementsMatch(t, testCase.relations, targetNames(&finding))
+			assert.Equal(t, pg_contract.LockShareUpdateExclusive, targetOf(t, finding, testCase.relations[0]).Lock)
+			assert.Equal(t, pg_contract.OpKindMetadata, targetOf(t, finding, testCase.relations[0]).OpKind)
+		})
+	}
+}
+
 func TestOwnerCarriesTheIndexes(t *testing.T) {
 	t.Parallel()
 
@@ -118,14 +148,17 @@ func TestAttachPartitionScansBothSides(t *testing.T) {
 	assert.Contains(t, finding.Message, "IS NOT NULL", "the implied partition constraint includes it, and a CHECK that omits it does not skip the scan")
 }
 
-// TestDetachConcurrentlyIsRefusedWithADefaultPartition test R-AT-DETACH-CONC error case.
-func TestDetachConcurrentlyIsRefusedWithADefaultPartition(t *testing.T) {
+// TestDetachConcurrentlyWithADefaultPartition test R-AT-DETACH-CONC on a parent with a default partition. The server
+// refuses it and says so itself, so it is read as if it ran.
+func TestDetachConcurrentlyWithADefaultPartition(t *testing.T) {
 	t.Parallel()
 
 	analysis := single(t, testCatalog(t), "ALTER TABLE events DETACH PARTITION events_2025 CONCURRENTLY")
-	assert.Empty(t, analysis.Findings)
-	require.Len(t, analysis.Errors, 1)
-	assert.Contains(t, analysis.Errors[0].Message, "default partition")
+	require.Empty(t, analysis.Errors)
+	finding := findingOf(t, analysis, "R-AT-DETACH-CONC")
+	assert.Equal(t, pg_contract.LockShareUpdateExclusive, targetOf(t, finding, "apercu_snapshot_test.events").Lock)
+	assert.Equal(t, pg_contract.LockAccessExclusive, targetOf(t, finding, "apercu_snapshot_test.events_2025").Lock)
+	assert.Equal(t, pg_contract.LockAccessExclusive, targetOf(t, finding, "apercu_snapshot_test.events_default").Lock)
 }
 
 func TestMoveAllInTablespace(t *testing.T) {

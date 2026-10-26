@@ -75,36 +75,15 @@ func classifyAlterTable(s scope) ([]pg_contract.Finding, []pg_contract.Error) {
 	return classifyClauses(s, subcommandRules)
 }
 
-// onlyRefusals is what ALTER TABLE ONLY cannot do to a table that has children.
-var onlyRefusals = map[pg_parse.SubKind]string{
-	pg_parse.SubAddColumn:       "the column has to be added to the child tables too",
-	pg_parse.SubAlterColumnType: "the type of an inherited column has to be changed in the child tables too",
-	pg_parse.SubRenameColumn:    "an inherited column has to be renamed in the child tables too",
-	pg_parse.SubAddConstraint:   "the constraint has to be added to the child tables too, NOT VALID included",
-}
-
-// onlyRefusal is the REJECTED branch
+// onlyRefusal is the REJECTED branch of ALTER TABLE ONLY on a parent that has children.
 func (s scope) onlyRefusal(sub pg_parse.Subcommand) (string, pg_contract.VersionRange, bool) {
-	if !s.only() || len(s.descendants()) == 0 {
-		return "", pg_contract.AnyVersion, false
-	}
-	if reason, refused := onlyRefusals[sub.Kind]; refused {
-		return reason, pg_contract.AnyVersion, true
-	}
-	if !s.partitioned() {
-		// A classic inheritance parent accepts everything else on its own: dropping a column or a
-		// constraint from it simply stops the children inheriting it.
+	if !s.only() || !s.partitioned() || s.atLeast18() || len(s.descendants()) == 0 {
 		return "", pg_contract.AnyVersion, false
 	}
 
 	switch sub.Kind {
-	case pg_parse.SubDropColumn:
-		return "a column cannot be dropped from only the partitioned table while partitions exist", pg_contract.AnyVersion, true
 	case pg_parse.SubDropConstraint, pg_parse.SubDropNotNull:
 		// The same 42P16 both spellings raise, lifted in 18.
-		if s.atLeast18() {
-			return "", pg_contract.AnyVersion, false
-		}
 		return "PostgreSQL 15-17 cannot remove a constraint from only the partitioned table while partitions exist",
 			s.versionsWhen(pg_contract.AtLeast(pg_contract.Version18)), true
 	}

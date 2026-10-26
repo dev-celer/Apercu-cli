@@ -177,27 +177,6 @@ func TestRejectedClauses(t *testing.T) {
 		valid   string
 	}{
 		{
-			name:    "storage parameters on a partitioned table",
-			sql:     "ALTER TABLE events SET (fillfactor = 70)",
-			catalog: testCatalog,
-			message: "storage parameters cannot be specified",
-			valid:   "any",
-		},
-		{
-			name:    "clustering a partitioned table",
-			sql:     "ALTER TABLE events CLUSTER ON events_pkey",
-			catalog: testCatalog,
-			message: "cannot be marked for clustering",
-			valid:   "any",
-		},
-		{
-			name:    "adding a constraint to only the parent",
-			sql:     "ALTER TABLE ONLY events ADD CONSTRAINT c CHECK (id > 0)",
-			catalog: testCatalog,
-			message: "added to the child tables too",
-			valid:   "any",
-		},
-		{
 			name:    "changing the persistence of a partitioned table on 18",
 			sql:     "ALTER TABLE events SET UNLOGGED",
 			catalog: func(t *testing.T) *pg_catalog.Catalog { return testCatalogOn(t, pg_contract.Version18) },
@@ -249,12 +228,16 @@ func TestOnlyOnAParentWithChildren(t *testing.T) {
 		refused  bool
 		children []string
 	}{
-		{name: "a column cannot be added to only the parent", sql: "ALTER TABLE ONLY events ADD COLUMN z int", refused: true},
-		{name: "nor to only a classic inheritance parent", sql: "ALTER TABLE ONLY legacy_parent ADD COLUMN z int", refused: true},
-		{name: "a column's type cannot be changed on only the parent", sql: "ALTER TABLE ONLY events ALTER COLUMN id TYPE int", refused: true},
-		{name: "a column cannot be renamed on only the parent", sql: "ALTER TABLE ONLY events RENAME COLUMN id TO ident", refused: true},
-		{name: "a constraint cannot be added to only the parent", sql: "ALTER TABLE ONLY events ADD CONSTRAINT c CHECK (id > 0)", refused: true},
-		{name: "a column cannot be dropped from only a partitioned parent", sql: "ALTER TABLE ONLY events DROP COLUMN id", refused: true},
+		{name: "a column added to only the parent stays there", sql: "ALTER TABLE ONLY events ADD COLUMN z int"},
+		{name: "and so on a classic inheritance parent", sql: "ALTER TABLE ONLY legacy_parent ADD COLUMN z int"},
+		{name: "a type change on only the parent stays there", sql: "ALTER TABLE ONLY events ALTER COLUMN id TYPE int"},
+		{name: "a column renamed on only the parent stays there", sql: "ALTER TABLE ONLY events RENAME COLUMN id TO ident"},
+		{name: "a constraint added to only the parent stays there", sql: "ALTER TABLE ONLY events ADD CONSTRAINT c CHECK (id > 0)"},
+		{
+			name:     "a column dropped from only a partitioned parent still locks the partitions",
+			sql:      "ALTER TABLE ONLY events DROP COLUMN id",
+			children: []string{"apercu_snapshot_test.events_2025", "apercu_snapshot_test.events_default"},
+		},
 		{
 			name:     "but it can be from a classic inheritance parent, which still locks the children",
 			sql:      "ALTER TABLE ONLY legacy_parent DROP COLUMN id",
@@ -314,7 +297,7 @@ func TestOnlyOnAParentWithChildren(t *testing.T) {
 func TestRejectedClausesDoNotStopTheOthers(t *testing.T) {
 	t.Parallel()
 
-	analysis := single(t, testCatalog(t), "ALTER TABLE events SET (fillfactor = 70), ADD COLUMN z int")
+	analysis := single(t, testCatalog(t), "ALTER TABLE events SET UNLOGGED, ADD COLUMN z int")
 	assert.Len(t, analysis.Errors, 1)
 	assert.Equal(t, []pg_contract.Code{"R-AT-ADDCOL"}, codesOf(rulesOnly(analysis)))
 }

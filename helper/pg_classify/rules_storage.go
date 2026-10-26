@@ -67,6 +67,8 @@ func relOptionLock(option pg_parse.Option) pg_contract.Lock {
 func ruleRelOptions(s scope, sub pg_parse.Subcommand) effect {
 	e := newEffect(s, "R-AT-RELOPT", "")
 	e.lock = pg_contract.LockNone
+	// The server never recurses storage parameters into the partitions or the inheritance children.
+	e.recursion = parentOnly
 	names := make([]string, 0, len(sub.Options))
 	for _, option := range sub.Options {
 		e.lock = pg_contract.MaxLock(e.lock, relOptionLock(option))
@@ -80,9 +82,6 @@ func ruleRelOptions(s scope, sub pg_parse.Subcommand) effect {
 		e.message = "no storage parameter is named, so the statement takes the strongest lock anyway"
 	} else {
 		e.message = fmt.Sprintf("storage parameters %s are recorded on the relation", strings.Join(names, ", "))
-	}
-	if s.partitioned() {
-		return e.reject("storage parameters cannot be specified for a partitioned table, which has no storage", pg_contract.AnyVersion)
 	}
 	return e
 }
@@ -139,11 +138,10 @@ func ruleCluster(s scope, sub pg_parse.Subcommand) effect {
 	}
 	e := newEffect(s, "R-AT-CLUSTERON", fmt.Sprintf("%s is recorded as the index a later CLUSTER would use; no row moves now", marked))
 	e.lock = pg_contract.LockShareUpdateExclusive
+	// The mark is the named table's own; the server never recurses it.
+	e.recursion = parentOnly
 	if marked != "no index" {
 		e.extra = append(e.extra, s.indexTarget(marked, pg_contract.LockShareUpdateExclusive, pg_contract.OpKindMetadata))
-	}
-	if s.partitioned() {
-		return e.reject("a partitioned table cannot be marked for clustering", pg_contract.AnyVersion)
 	}
 	return e
 }

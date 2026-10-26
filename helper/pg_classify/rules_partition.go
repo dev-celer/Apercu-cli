@@ -68,12 +68,6 @@ func detachConcurrently(s scope, sub pg_parse.Subcommand) effect {
 	e.lock = pg_contract.LockShareUpdateExclusive
 	e.recursion = parentOnly
 	e.extra = append(e.extra, s.partitionTargets(sub, pg_contract.LockAccessExclusive)...)
-
-	if s.relation().Exists() {
-		if _, hasDefault := s.catalog.DefaultPartition(s.relation().Relation.OID); hasDefault {
-			return e.reject("DETACH PARTITION … CONCURRENTLY is refused while the partitioned table has a default partition", pg_contract.AnyVersion)
-		}
-	}
 	return e
 }
 
