@@ -30,6 +30,7 @@ type relationIndex struct {
 	viewDeps       map[OID][]ViewDep           // All ViewDep, keyed by the referenced relation OID
 	viewSources    map[OID][]ViewDep           // All ViewDep, keyed by the dependent relation OID
 	collations     map[OID]Collation           // All Collation, keyed by Collation OID
+	triggers       map[OID][]Trigger           // All user Trigger of a relation, keyed by relation OID
 }
 
 func (r *relationIndex) build(snapshot *Snapshot) {
@@ -48,6 +49,7 @@ func (r *relationIndex) build(snapshot *Snapshot) {
 	r.viewDeps = map[OID][]ViewDep{}
 	r.viewSources = map[OID][]ViewDep{}
 	r.collations = make(map[OID]Collation, len(snapshot.Collations))
+	r.triggers = map[OID][]Trigger{}
 
 	for _, index := range snapshot.Indexes {
 		r.indexes[index.IndexRelID] = index
@@ -87,6 +89,9 @@ func (r *relationIndex) build(snapshot *Snapshot) {
 	}
 	for _, collation := range snapshot.Collations {
 		r.collations[collation.OID] = collation
+	}
+	for _, trigger := range snapshot.Triggers {
+		r.triggers[trigger.RelID] = append(r.triggers[trigger.RelID], trigger)
 	}
 }
 
@@ -222,6 +227,34 @@ func (c *Catalog) DefaultPartition(relID OID) (OID, bool) {
 		}
 	}
 	return 0, false
+}
+
+// DeclareEdge records a parent-child link the migration draws: ATTACH, PARTITION OF, INHERIT.
+func (c *Catalog) DeclareEdge(edge InheritEdge) {
+	c.RemoveEdge(edge.Parent, edge.Child)
+	c.relations.children[edge.Parent] = append(c.relations.children[edge.Parent], edge)
+	c.relations.parents[edge.Child] = append(c.relations.parents[edge.Child], edge)
+}
+
+// RemoveEdge forgets a parent-child link the migration breaks: DETACH, NO INHERIT.
+func (c *Catalog) RemoveEdge(parent, child OID) {
+	c.relations.children[parent] = slices.DeleteFunc(c.relations.children[parent], func(edge InheritEdge) bool { return edge.Child == child })
+	c.relations.parents[child] = slices.DeleteFunc(c.relations.parents[child], func(edge InheritEdge) bool { return edge.Parent == parent })
+}
+
+// TriggerByName resolves a user trigger by its table and name.
+func (c *Catalog) TriggerByName(relID OID, name string) (Trigger, bool) {
+	for _, trigger := range c.relations.triggers[relID] {
+		if trigger.Name == name {
+			return trigger, true
+		}
+	}
+	return Trigger{}, false
+}
+
+// TriggersOf lists the user triggers of a relation.
+func (c *Catalog) TriggersOf(relID OID) []Trigger {
+	return c.relations.triggers[relID]
 }
 
 // PendingDetach lists the children of a partitioned table left pending by an interrupted DETACH CONCURRENTLY.

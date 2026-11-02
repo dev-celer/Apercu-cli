@@ -170,7 +170,7 @@ func constraintsQuery(serverVersionNum int) string {
 SELECT k.oid, k.conname, k.conrelid, k.confrelid, k.contype, k.convalidated,
        k.condeferrable, k.condeferred, k.conislocal, k.coninhcount, k.connoinherit,
        k.conkey, k.confkey, k.conindid, k.confupdtype, k.confdeltype, k.contypid,
-       pg_get_constraintdef(k.oid) AS def`
+       k.conparentid, pg_get_constraintdef(k.oid) AS def`
 	if serverVersionNum >= 180000 {
 		query += `, k.conperiod, k.conenforced`
 	}
@@ -194,7 +194,7 @@ func collectConstraints(ctx context.Context, tx *sql.Tx, snapshot *Snapshot) err
 			&c.OID, &c.Name, &c.RelID, &c.ForeignRelID, &c.Type, &c.Validated,
 			&c.Deferrable, &c.Deferred, &c.IsLocal, &c.InhCount, &c.NoInherit,
 			&key, &foreignKey, &c.IndexID, &c.FKUpdateType, &c.FKDeleteType, &c.TypeID,
-			&def,
+			&c.ParentID, &def,
 		}
 		if version >= 180000 {
 			targets = append(targets, &c.Period, &c.Enforced)
@@ -246,7 +246,7 @@ func collectIndexes(ctx context.Context, tx *sql.Tx, snapshot *Snapshot) error {
 const inheritsQuery = `
 SELECT h.inhparent, h.inhrelid, h.inhseqno, h.inhdetachpending,
        pg_get_expr(c.relpartbound, c.oid) = 'DEFAULT' AS is_default_partition,
-       p.relkind = 'p' AS parent_is_partitioned
+       p.relkind IN ('p', 'I') AS parent_is_partitioned
 FROM pg_inherits h
 JOIN pg_class c ON c.oid = h.inhrelid
 JOIN pg_class p ON p.oid = h.inhparent

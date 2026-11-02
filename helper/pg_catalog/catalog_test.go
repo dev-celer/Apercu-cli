@@ -252,11 +252,18 @@ func TestConstraintAndForeignKeyGraph(t *testing.T) {
 
 		// The reverse direction is what makes a DROP reach tables nothing named.
 		to := catalog.ForeignKeysTo(users)
-		require.Len(t, to, 2, "orders and profiles both point at users")
+		var originals []OID
 		for _, fk := range to {
 			assert.Equal(t, users, fk.ForeignRelID)
 			assert.NotEqual(t, users, fk.RelID)
+			if fk.ParentID == 0 {
+				originals = append(originals, fk.RelID)
+			}
 		}
+		assert.ElementsMatch(t, []OID{orders, findOID(t, catalog, "profiles"), findOID(t, catalog, "metrics")}, originals,
+			"orders, profiles and metrics point at users")
+		// metrics' key is copied onto each of its five partitions, every level included.
+		assert.Len(t, to, 8)
 		assert.Empty(t, catalog.ForeignKeysTo(orders))
 	})
 }
@@ -305,6 +312,77 @@ func TestPartitionTree(t *testing.T) {
 		require.Len(t, parents, 1)
 		assert.Equal(t, legacyParent, parents[0].Parent)
 		assert.False(t, parents[0].ParentIsPartitioned)
+
+		// Two levels: the partitioned default carries partitions of its own.
+		metrics := findOID(t, catalog, "metrics")
+		metricsDefault := findOID(t, catalog, "metrics_default")
+		assert.Len(t, catalog.PartitionDescendants(metrics), 5)
+		assert.Len(t, catalog.PartitionDescendants(metricsDefault), 3)
+
+		// An index tree mirrors the table tree, and its edges count as partition edges.
+		index := findOID(t, catalog, "metrics_at_idx")
+		leafIndexes := catalog.PartitionDescendants(index)
+		assert.Len(t, leafIndexes, 5)
+		for _, oid := range leafIndexes {
+			_, ok := catalog.TableOfIndex(oid)
+			assert.True(t, ok, "every index of the tree belongs to one partition")
+		}
+	})
+}
+
+// P-01 for an index tree: a partitioned index has no storage, its leaves do.
+func TestPartitionedIndexSizeSumsItsLeaves(t *testing.T) {
+	eachVersion(t, func(t *testing.T, catalog *Catalog, _ int) {
+		index := catalog.Resolve(name("metrics_at_idx"), nil)
+		require.True(t, index.Exists())
+		assert.Positive(t, index.PreviewBytes)
+	})
+}
+
+func TestTriggerLookup(t *testing.T) {
+	eachVersion(t, func(t *testing.T, catalog *Catalog, _ int) {
+		orders := findOID(t, catalog, "orders")
+
+		row, ok := catalog.TriggerByName(orders, "orders_bump")
+		require.True(t, ok)
+		assert.True(t, row.Row())
+
+		statement, ok := catalog.TriggerByName(orders, "orders_audit")
+		require.True(t, ok)
+		assert.False(t, statement.Row(), "a statement trigger is never cloned onto partitions")
+
+		_, ok = catalog.TriggerByName(orders, "missing")
+		assert.False(t, ok)
+		assert.Len(t, catalog.TriggersOf(orders), 2)
+	})
+}
+
+// The shadow catalog: a relation the migration declares can take part in the edges it draws.
+func TestDeclaredEdges(t *testing.T) {
+	eachVersion(t, func(t *testing.T, catalog *Catalog, _ int) {
+		events := findOID(t, catalog, "events")
+
+		catalog.Declare(name("events_2027"), "r")
+		declared := catalog.Resolve(name("events_2027"), nil)
+		require.NotZero(t, declared.Relation.OID, "a declared relation gets an OID of its own")
+		rel, ok := catalog.ByOID(declared.Relation.OID)
+		require.True(t, ok)
+		assert.Equal(t, "events_2027", rel.Name)
+
+		catalog.Declare(name("events_2028"), "r")
+		assert.NotEqual(t, declared.Relation.OID, catalog.Resolve(name("events_2028"), nil).Relation.OID)
+
+		catalog.DeclareEdge(InheritEdge{Parent: events, Child: declared.Relation.OID, ParentIsPartitioned: true})
+		assert.Contains(t, catalog.PartitionDescendants(events), declared.Relation.OID)
+		require.Len(t, catalog.Parents(declared.Relation.OID), 1)
+
+		// Declaring the same edge twice keeps one.
+		catalog.DeclareEdge(InheritEdge{Parent: events, Child: declared.Relation.OID, ParentIsPartitioned: true})
+		assert.Len(t, catalog.Children(events), 3)
+
+		catalog.RemoveEdge(events, declared.Relation.OID)
+		assert.NotContains(t, catalog.PartitionDescendants(events), declared.Relation.OID)
+		assert.Empty(t, catalog.Parents(declared.Relation.OID))
 	})
 }
 

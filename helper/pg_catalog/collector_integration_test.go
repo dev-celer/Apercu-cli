@@ -55,6 +55,17 @@ CREATE TABLE events_2025 PARTITION OF events FOR VALUES FROM ('2025-01-01') TO (
 CREATE TABLE events_default PARTITION OF events DEFAULT;
 CREATE INDEX events_at_idx ON events (at);
 
+-- Two levels with a partitioned DEFAULT, a foreign key cloned onto every level, and an index tree:
+-- the shapes where a lock travels below a relation the statement never names.
+CREATE TABLE metrics (id bigint NOT NULL, user_id bigint REFERENCES users(id), at date NOT NULL, kind text NOT NULL)
+    PARTITION BY RANGE (at);
+CREATE TABLE metrics_2025 PARTITION OF metrics FOR VALUES FROM ('2025-01-01') TO ('2026-01-01');
+CREATE TABLE metrics_default PARTITION OF metrics DEFAULT PARTITION BY LIST (kind);
+CREATE TABLE metrics_default_a PARTITION OF metrics_default FOR VALUES IN ('a');
+CREATE TABLE metrics_default_b PARTITION OF metrics_default FOR VALUES IN ('b');
+CREATE TABLE metrics_default_other PARTITION OF metrics_default DEFAULT;
+CREATE INDEX metrics_at_idx ON metrics (at);
+
 CREATE TABLE legacy_parent (id bigint);
 CREATE TABLE legacy_child () INHERITS (legacy_parent);
 
@@ -71,6 +82,7 @@ CREATE MATERIALIZED VIEW order_totals AS SELECT user_id, sum(total) AS total FRO
 
 CREATE FUNCTION bump() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$;
 CREATE TRIGGER orders_bump BEFORE UPDATE ON orders FOR EACH ROW EXECUTE FUNCTION bump();
+CREATE TRIGGER orders_audit AFTER INSERT ON orders FOR EACH STATEMENT EXECUTE FUNCTION bump();
 
 CREATE SEQUENCE standalone_seq;
 
@@ -89,6 +101,10 @@ INSERT INTO users (email) SELECT 'user' || i || '@example.com' FROM generate_ser
 INSERT INTO orders (id, user_id, total, status)
     SELECT i, (i % 500) + 1, i, 'open' FROM generate_series(1, 500) i;
 INSERT INTO events (id, at) SELECT i, '2025-06-01'::timestamptz FROM generate_series(1, 200) i;
+INSERT INTO metrics (id, user_id, at, kind)
+    SELECT i, (i % 500) + 1, CASE WHEN i % 2 = 0 THEN '2025-06-01'::date ELSE '2027-06-01'::date END,
+           (ARRAY['a', 'b', 'c'])[i % 3 + 1]
+    FROM generate_series(1, 300) i;
 ANALYZE;
 -- Cumulative activity is flushed by the stats collector on its own schedule, so a fixture
 -- taken straight after the load would report a table nothing has ever touched (P-20).
@@ -204,6 +220,36 @@ func collectAndVerify(t *testing.T, db *sql.DB) {
 		}
 		assert.True(t, sawDefault, "default partition edge missing")
 		assert.True(t, sawLegacy, "classic inheritance edge missing")
+
+		// A partitioned index is tied to its partitions' indexes by pg_inherits too.
+		index, _ := findRelation(preview, "metrics_at_idx")
+		var indexEdges int
+		for _, edge := range preview.Inherits {
+			if edge.Parent == index.OID {
+				indexEdges++
+				assert.True(t, edge.ParentIsPartitioned)
+			}
+		}
+		assert.Equal(t, 2, indexEdges, "one edge per direct partition of metrics")
+	})
+
+	t.Run("cloned foreign keys", func(t *testing.T) {
+		metrics, _ := findRelation(preview, "metrics")
+		leaf, _ := findRelation(preview, "metrics_default_a")
+
+		var original Constraint
+		for _, constraint := range preview.Constraints {
+			if constraint.RelID == metrics.OID && constraint.Type == "f" {
+				original = constraint
+			}
+		}
+		require.NotZero(t, original.OID)
+		assert.Zero(t, original.ParentID, "the key written on metrics is an original")
+		for _, constraint := range preview.Constraints {
+			if constraint.RelID == leaf.OID && constraint.Type == "f" {
+				assert.NotZero(t, constraint.ParentID, "the leaf's key is a clone")
+			}
+		}
 	})
 
 	t.Run("statistics target normalizes across versions", func(t *testing.T) {
@@ -362,8 +408,8 @@ func collectAndVerify(t *testing.T, db *sql.DB) {
 				names = append(names, trigger.Name)
 			}
 		}
-		// The FK on orders installs internal triggers; only the user one shows.
-		assert.Equal(t, []string{"orders_bump"}, names)
+		// The FK on orders installs internal triggers; only the user ones show.
+		assert.ElementsMatch(t, []string{"orders_bump", "orders_audit"}, names)
 	})
 
 	t.Run("view dependencies keep the column", func(t *testing.T) {

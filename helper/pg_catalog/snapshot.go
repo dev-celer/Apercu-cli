@@ -194,7 +194,9 @@ type Constraint struct {
 	FKUpdateType string  `json:"fk_update_type"`
 	FKDeleteType string  `json:"fk_delete_type"`
 	TypeID       OID     `json:"type_id"` // For domain constraint, the OID link to Type
-	Def          string  `json:"def"`
+	// ParentID is the constraint this one was cloned from onto a partition, 0 for an original.
+	ParentID OID    `json:"parent_id"`
+	Def      string `json:"def"`
 	// Period is PG 18+; false on older versions, where the column does not exist.
 	Period bool `json:"period"`
 	// Enforced is PG 18+; true on older versions, where every constraint is enforced by definition.
@@ -232,6 +234,7 @@ type InheritEdge struct {
 	DetachPending      bool  `json:"detach_pending"` // DetachPending marks an interrupted DETACH CONCURRENTLY.
 	IsDefaultPartition bool  `json:"is_default_partition"`
 	// ParentIsPartitioned separates declarative partitioning from classic INHERITS.
+	// It is true for a partitioned index's edges too, which are what tie an index tree together.
 	ParentIsPartitioned bool `json:"parent_is_partitioned"`
 }
 
@@ -275,6 +278,9 @@ type Trigger struct {
 	ConstraintOID OID    `json:"constraint_oid"` // If the trigger is for a constraint, the OID link to Constraint
 	Def           string `json:"def"`
 }
+
+// Row reports whether the trigger fires for each row, which is what makes a partitioned table clone it onto its partitions.
+func (t Trigger) Row() bool { return t.Type&1 != 0 }
 
 // Policy is S-10.
 type Policy struct {

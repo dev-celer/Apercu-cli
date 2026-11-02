@@ -4,6 +4,7 @@ import (
 	"apercu-cli/helper"
 	"apercu-cli/helper/pg_contract"
 	"fmt"
+	"math"
 	"slices"
 	"sort"
 	"strings"
@@ -22,6 +23,8 @@ type Catalog struct {
 
 	// createdByMigration holds the Relation the migration itself create.
 	createdByMigration map[helper.FullRelationName]Relation
+	// shadowOID is the last OID handed to a relation the migration declares, counting down from the top of the range.
+	shadowOID OID
 
 	// unresolved counts the distinct names no snapshot could found.
 	unresolved map[helper.FullRelationName]struct{}
@@ -69,6 +72,7 @@ func NewCatalog(opts CatalogOptions) (*Catalog, error) {
 		byName:             make(map[helper.FullRelationName]Relation, len(opts.Pre.Relations)),
 		byOID:              make(map[OID]Relation, len(opts.Pre.Relations)),
 		createdByMigration: map[helper.FullRelationName]Relation{},
+		shadowOID:          math.MaxUint32,
 		unresolved:         map[helper.FullRelationName]struct{}{},
 		settings:           map[string]Setting{},
 		extensions:         map[string]Extension{},
@@ -86,6 +90,7 @@ func NewCatalog(opts CatalogOptions) (*Catalog, error) {
 			name := rel.RelationName()
 			if _, existed := c.byName[name]; !existed {
 				c.createdByMigration[name] = rel
+				c.byOID[rel.OID] = rel
 			}
 		}
 	}
@@ -250,7 +255,11 @@ func (c *Catalog) Declare(name helper.FullRelationName, kind string) {
 	if _, declared := c.createdByMigration[name]; declared {
 		return
 	}
-	c.createdByMigration[name] = Relation{Namespace: name.Schema, Name: name.Table, Kind: kind}
+	// No snapshot gave it an OID, so it gets one of its own: the edges a later statement draws to it are keyed on OIDs.
+	c.shadowOID--
+	rel := Relation{OID: c.shadowOID, Namespace: name.Schema, Name: name.Table, Kind: kind}
+	c.createdByMigration[name] = rel
+	c.byOID[rel.OID] = rel
 	delete(c.unresolved, name)
 }
 
