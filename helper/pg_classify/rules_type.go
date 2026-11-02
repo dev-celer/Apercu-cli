@@ -14,8 +14,6 @@ func ruleAddEnumValue(s scope) effect {
 	value, name := enumClause(s)
 	e := newEffect(s, "R-TY-ADDVALUE",
 		fmt.Sprintf("value %q is appended to enum %s; the type is locked, no table is, and the new value cannot be used until the transaction that added it has committed", value, name))
-	e.op = pg_contract.OpKindMetadata
-	e.recursion = parentOnly
 	// The type is not a relation, so there is nothing in the target vocabulary to carry it.
 	return e.onNone()
 }
@@ -24,7 +22,6 @@ func ruleAddEnumValue(s scope) effect {
 func ruleRenameEnumValue(s scope) effect {
 	value, name := enumClause(s)
 	e := newEffect(s, "R-TY-RENAMEVALUE", fmt.Sprintf("value %q of enum %s is renamed; every row already holding it reads back under the new spelling", value, name))
-	e.recursion = parentOnly
 	return e.onNone()
 }
 
@@ -78,7 +75,6 @@ func ruleAlterAttribute(s scope, sub pg_parse.Subcommand) effect {
 // relation of its own, and nothing hangs below it.
 func newAttributeEffect(s scope, message string) effect {
 	e := newEffect(s, "R-TY-ATTR", message)
-	e.recursion = parentOnly
 	return e
 }
 
@@ -97,11 +93,11 @@ func (e effect) carriedToTypedTables(s scope, sub pg_parse.Subcommand) effect {
 		if !ok {
 			continue
 		}
-		e.extra = append(e.extra, pg_contract.Target{
-			Relation: rel.Contract(),
-			Lock:     pg_contract.LockAccessExclusive,
-			OpKind:   e.op,
-			Role:     pg_contract.TargetRoleImplicit,
+		e.touches = append(e.touches, touch{
+			info: s.infoOf(rel),
+			lock: pg_contract.LockAccessExclusive,
+			op:   e.op,
+			role: pg_contract.TargetRoleImplicit,
 		})
 	}
 	e.message += fmt.Sprintf("; %d table(s) declared OF this type are locked and changed with it", len(typedTables))
@@ -144,9 +140,6 @@ func ruleDomainAddConstraint(s scope, sub pg_parse.Subcommand) effect {
 	notValid := sub.Constraint != nil && sub.Constraint.NotValid
 
 	e := newEffect(s, "R-TY-DOMAIN-ADD", fmt.Sprintf("a constraint is added to domain %s, and every table holding a column of it is read to prove it", sub.ObjectName()))
-	e.lock = pg_contract.LockShare
-	e.op = pg_contract.OpKindScan
-	e.recursion = parentOnly
 	if notValid {
 		// NOT VALID reads no user relation, the change is limited to the type only.
 		e.op = pg_contract.OpKindMetadata
@@ -155,34 +148,30 @@ func ruleDomainAddConstraint(s scope, sub pg_parse.Subcommand) effect {
 	}
 
 	e = e.onNone()
-	e.extra = append(e.extra, s.domainColumnTargets(sub.Object, e.lock, e.op)...)
-	if len(e.extra) == 0 {
+	e.touches = append(e.touches, s.domainColumnTargets(sub.Object, e.lock, e.op)...)
+	if len(e.touches) == 0 {
 		e.message += "; no column in the snapshot uses it, so nothing is read"
 	}
 	return e
 }
 
 // domainColumnTargets is the tables holding a column of a type.
-func (s scope) domainColumnTargets(name helper.FullRelationName, lock pg_contract.Lock, op pg_contract.OpKind) []pg_contract.Target {
+func (s scope) domainColumnTargets(name helper.FullRelationName, lock pg_contract.Lock, op pg_contract.OpKind) []touch {
 	domain, ok := s.catalog.TypeByName(name.Schema, name.Table, s.context.SearchPath)
 	if !ok {
 		return nil
 	}
 	columns, typedTables := s.catalog.TypeDependents(domain.OID)
 
-	var targets []pg_contract.Target
+	var targets []touch
 	for _, column := range columns {
 		if rel, ok := s.catalog.ByOID(column.RelID); ok {
-			targets = append(targets, pg_contract.Target{
-				Relation: rel.Contract(), Lock: lock, OpKind: op, Role: pg_contract.TargetRoleImplicit,
-			})
+			targets = append(targets, touch{info: s.infoOf(rel), lock: lock, op: op, role: pg_contract.TargetRoleImplicit})
 		}
 	}
 	for _, oid := range typedTables {
 		if rel, ok := s.catalog.ByOID(oid); ok {
-			targets = append(targets, pg_contract.Target{
-				Relation: rel.Contract(), Lock: lock, OpKind: op, Role: pg_contract.TargetRoleImplicit,
-			})
+			targets = append(targets, touch{info: s.infoOf(rel), lock: lock, op: op, role: pg_contract.TargetRoleImplicit})
 		}
 	}
 	return targets
@@ -191,8 +180,6 @@ func (s scope) domainColumnTargets(name helper.FullRelationName, lock pg_contrac
 // ruleDropType is R-TY-DROP, which covers DROP DOMAIN.
 func ruleDropType(s scope) effect {
 	e := newEffect(s, "R-TY-DROP", "").onNone()
-	e.op = pg_contract.OpKindMetadata
-	e.recursion = parentOnly
 
 	names := make([]string, 0, len(s.statement.Subcommands))
 	used := false
@@ -200,7 +187,7 @@ func ruleDropType(s scope) effect {
 		names = append(names, sub.ObjectName())
 		targets := s.domainColumnTargets(sub.Object, pg_contract.LockAccessExclusive, pg_contract.OpKindMetadata)
 		used = used || len(targets) > 0
-		e.extra = append(e.extra, targets...)
+		e.touches = append(e.touches, targets...)
 	}
 	subject := "the type"
 	if len(names) > 0 {

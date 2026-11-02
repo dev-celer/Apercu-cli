@@ -75,21 +75,6 @@ func classifyAlterTable(s scope) ([]pg_contract.Finding, []pg_contract.Error) {
 	return classifyClauses(s, subcommandRules)
 }
 
-// onlyRefusal is the REJECTED branch of ALTER TABLE ONLY on a parent that has children.
-func (s scope) onlyRefusal(sub pg_parse.Subcommand) (string, pg_contract.VersionRange, bool) {
-	if !s.only() || !s.partitioned() || s.atLeast18() || len(s.descendants()) == 0 {
-		return "", pg_contract.AnyVersion, false
-	}
-
-	switch sub.Kind {
-	case pg_parse.SubDropConstraint, pg_parse.SubDropNotNull:
-		// The same 42P16 both spellings raise, lifted in 18.
-		return "PostgreSQL 15-17 cannot remove a constraint from only the partitioned table while partitions exist",
-			s.versionsWhen(pg_contract.AtLeast(pg_contract.Version18)), true
-	}
-	return "", pg_contract.AnyVersion, false
-}
-
 // moveAll is what one "ALL IN TABLESPACE" object type moves.
 type moveAll struct {
 	code  pg_contract.Code

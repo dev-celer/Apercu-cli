@@ -105,12 +105,18 @@ func (s *Session) Declare(statement pg_parse.Statement, context Context) {
 	s.declare(statement, context)
 }
 
+// Link records the partition and inheritance edges a statement that ran draws or breaks.
+func (s *Session) Link(statement pg_parse.Statement, context Context) {
+	s.link(statement, context)
+}
+
 // Walk is Next over a whole migration, for callers that want the contexts up front.
 func (s *Session) Walk(statements []pg_parse.Statement) []Context {
 	contexts := make([]Context, 0, len(statements))
 	for _, statement := range statements {
 		context := s.Next(statement)
 		s.Declare(statement, context)
+		s.Link(statement, context)
 		contexts = append(contexts, context)
 	}
 	return contexts

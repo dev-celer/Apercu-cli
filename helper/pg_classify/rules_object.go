@@ -10,8 +10,9 @@ import (
 // ruleCreateTrigger is R-OB-CREATETRIG.
 func ruleCreateTrigger(s scope) effect {
 	e := newEffect(s, "R-OB-CREATETRIG", "the trigger is recorded on the table; writes wait for it, reads do not")
-	e.lock = pg_contract.LockShareRowExclusive
-	e.recursion = partitionsOnly
+	if !s.statement.Flags.Row {
+		e.below = nowhere
+	}
 	return e.onEvery(s)
 }
 
@@ -22,7 +23,9 @@ func ruleDropTrigger(s scope) effect {
 		name = s.statement.Subcommands[0].Name
 	}
 	e := newEffect(s, "R-OB-DROPTRIG", fmt.Sprintf("trigger %q is removed, under a stronger lock than the one that created it", name))
-	e.recursion = partitionsOnly
+	if !s.rowTrigger(name) {
+		e.below = nowhere
+	}
 	return e
 }
 
@@ -33,28 +36,25 @@ func ruleAlterTrigger(s scope) effect {
 	if len(sub) > 0 {
 		rename = fmt.Sprintf("trigger %q is renamed to %q", sub[0].Name, sub[0].NewName)
 	}
-	return newEffect(s, "R-OB-ALTERTRIG", rename+"; the clone on every inheritor is renamed with it, so they are all locked")
+	// The server locks every partition before it even looks the trigger up, so a statement trigger reaches them too.
+	return newEffect(s, "R-OB-ALTERTRIG", rename+"; every partition is locked with it, and a row trigger's clone on each one is renamed too")
 }
 
 // rulePolicy is R-OB-POLICY.
 func rulePolicy(s scope) effect {
 	e := newEffect(s, "R-OB-POLICY", "the row-level security policy changes in the catalog, which invalidates every plan built against the table")
-	e.recursion = parentOnly
 	return e
 }
 
 // ruleObjectRule is R-OB-RULE.
 func ruleObjectRule(s scope) effect {
 	e := newEffect(s, "R-OB-RULE", "the rewrite rule changes in the catalog, which invalidates every plan built against the table")
-	e.recursion = parentOnly
 	return e
 }
 
 // ruleStatistics is R-OB-STATS.
 func ruleStatistics(s scope) effect {
 	e := newEffect(s, "R-OB-STATS", "the extended statistics object changes; nothing is sampled until the next ANALYZE")
-	e.lock = pg_contract.LockShareUpdateExclusive
-	e.recursion = parentOnly
 	if len(s.statement.Relations) > 0 {
 		// CREATE STATISTICS names its tables; the other two spell only the statistics object.
 		return e.onEvery(s)
@@ -71,11 +71,11 @@ func ruleStatistics(s scope) effect {
 			e.message += fmt.Sprintf("; the snapshot holds no statistics object named %s, so the table behind it is unknown", sub.ObjectName())
 			continue
 		}
-		e.extra = append(e.extra, pg_contract.Target{
-			Relation: table.Contract(),
-			Lock:     pg_contract.LockShareUpdateExclusive,
-			OpKind:   pg_contract.OpKindMetadata,
-			Role:     pg_contract.TargetRoleResolved,
+		e.touches = append(e.touches, touch{
+			info: s.infoOf(table),
+			lock: pg_contract.LockShareUpdateExclusive,
+			op:   pg_contract.OpKindMetadata,
+			role: pg_contract.TargetRoleResolved,
 		})
 	}
 	return e
@@ -84,8 +84,6 @@ func ruleStatistics(s scope) effect {
 // ruleComment is R-OB-COMMENT.
 func ruleComment(s scope) effect {
 	e := newEffect(s, "R-OB-COMMENT", "the comment is written to the catalog and nothing else changes")
-	e.lock = pg_contract.LockShareUpdateExclusive
-	e.recursion = parentOnly
 	if len(s.statement.Relations) == 0 {
 		return e.onNone()
 	}
@@ -109,11 +107,9 @@ func ruleGrant(s scope) effect {
 
 	// PG18 opens the relation at ACCESS SHARE, 15 to 17 take no lock at all. An unknown production version reads as 18, the stronger of the two.
 	e := newEffect(s, "R-OB-GRANT", fmt.Sprintf("%s is %s on the relation; the access control list is a catalog row and no data is touched", subject, verb))
-	e.lock = pg_contract.LockNone
 	if s.atLeast18() {
 		e.lock = pg_contract.LockAccessShare
 	}
-	e.recursion = parentOnly
 	if len(s.statement.Relations) == 0 {
 		// GRANT … ON ALL TABLES IN SCHEMA and the role-level forms name no relation.
 		e.message += "; the statement names no relation directly"
@@ -125,25 +121,18 @@ func ruleGrant(s scope) effect {
 // ruleDefaultPrivileges is R-OB-DEFACL.
 func ruleDefaultPrivileges(s scope) effect {
 	e := newEffect(s, "R-OB-DEFACL", "only the privileges future objects will be created with change; nothing that exists is touched")
-	e.lock = pg_contract.LockNone
-	e.op = pg_contract.OpKindNone
-	e.recursion = parentOnly
 	return e.onNone()
 }
 
 // rulePublication is R-OB-PUB.
 func rulePublication(s scope) effect {
 	e := newEffect(s, "R-OB-PUB", "the table joins or leaves the publication; logical replication picks the change up and no row is read")
-	e.lock = pg_contract.LockShareUpdateExclusive
 	return e.onEvery(s)
 }
 
 // ruleSubscription is R-OB-SUB.
 func ruleSubscription(s scope) effect {
 	e := newEffect(s, "R-OB-SUB", "nothing in this database is locked, but the subscriber may start a full copy of every table in the publication")
-	e.lock = pg_contract.LockNone
-	e.op = pg_contract.OpKindNone
-	e.recursion = parentOnly
 	return e.onNone()
 }
 
@@ -154,18 +143,12 @@ func ruleExtension(s scope) effect {
 		script = "update"
 	}
 	e := newEffect(s, "R-OB-EXTENSION", fmt.Sprintf("the extension's %s script is opaque: it can create, alter and populate anything, so neither the locks it takes nor the work it does can be read from the statement", script))
-	e.lock = pg_contract.LockNone
-	e.op = pg_contract.OpKindNone
-	e.recursion = parentOnly
 	return e.onNone()
 }
 
 // ruleSchema is R-OB-SCHEMA.
 func ruleSchema(s scope) effect {
 	e := newEffect(s, "R-OB-SCHEMA", "a schema is a namespace; creating or dropping an empty one locks nothing")
-	e.lock = pg_contract.LockNone
-	e.op = pg_contract.OpKindNone
-	e.recursion = parentOnly
 	if s.statement.Command == "DROP SCHEMA" && s.statement.Flags.Cascade {
 		e.message = "DROP SCHEMA … CASCADE drops every object in the schema, each under its own ACCESS EXCLUSIVE lock; the statement names none of them, so none can be listed here"
 	}

@@ -22,7 +22,7 @@ func TestConstraintSubcommands(t *testing.T) {
 		// R-AT-ADDPK, R-AT-ADDUNIQUE, R-AT-ADDUSINGIDX.
 		{name: "a primary key builds its index under the lock", sql: "ALTER TABLE orders ADD CONSTRAINT pk PRIMARY KEY (id)", code: "R-AT-ADDPK", lock: ael, op: scan},
 		{name: "a unique constraint builds its index under the lock", sql: "ALTER TABLE orders ADD CONSTRAINT u UNIQUE (code)", code: "R-AT-ADDUNIQUE", lock: ael, op: scan},
-		{name: "an exclusion constraint is the same shape", sql: "ALTER TABLE orders ADD CONSTRAINT x EXCLUDE (code WITH =)", code: "R-AT-ADDUNIQUE", lock: ael, op: scan},
+		{name: "an exclusion constraint is the same shape", sql: "ALTER TABLE orders ADD CONSTRAINT x EXCLUDE (code WITH =)", code: "R-AT-ADDEXCL", lock: ael, op: scan},
 		{name: "adopting an existing index reads nothing", sql: "ALTER TABLE orders ADD CONSTRAINT u UNIQUE USING INDEX orders_open_idx", code: "R-AT-ADDUSINGIDX", lock: ael, op: meta},
 
 		// R-AT-ADDFK and R-AT-ADDFK-NV.
@@ -128,22 +128,26 @@ func TestAlterConstraintDoesNotLockTheOtherSide(t *testing.T) {
 func TestPrimaryKeyChildLockFollowsTheVersion(t *testing.T) {
 	t.Parallel()
 
+	// events.at is NOT NULL already, events.id is not: 15-17 make it NOT NULL on every partition
+	// first, under ACCESS EXCLUSIVE, before the index build that only needs SHARE.
+	const notNullKey = "ALTER TABLE events ADD CONSTRAINT pk PRIMARY KEY (at)"
+	const nullableKey = "ALTER TABLE events ADD CONSTRAINT pk PRIMARY KEY (id, at)"
 	cases := []struct {
 		name    string
 		catalog func(*testing.T) *pg_catalog.Catalog
+		sql     string
 		lock    pg_contract.Lock
 	}{
-		{name: "15 holds the partitions at SHARE", catalog: func(t *testing.T) *pg_catalog.Catalog { return testCatalogOn(t, pg_contract.Version15) }, lock: sh},
-		{name: "17 holds the partitions at SHARE", catalog: func(t *testing.T) *pg_catalog.Catalog { return testCatalogOn(t, pg_contract.Version17) }, lock: sh},
-		{name: "18 holds them at ACCESS EXCLUSIVE", catalog: func(t *testing.T) *pg_catalog.Catalog { return testCatalogOn(t, pg_contract.Version18) }, lock: ael},
-		{name: "an unknown version takes the stronger one", catalog: testCatalog, lock: ael},
+		{name: "15 holds the partitions at SHARE", catalog: func(t *testing.T) *pg_catalog.Catalog { return testCatalogOn(t, pg_contract.Version15) }, sql: notNullKey, lock: sh},
+		{name: "17 holds the partitions at SHARE", catalog: func(t *testing.T) *pg_catalog.Catalog { return testCatalogOn(t, pg_contract.Version17) }, sql: notNullKey, lock: sh},
+		{name: "17 with a nullable key column holds them at ACCESS EXCLUSIVE", catalog: func(t *testing.T) *pg_catalog.Catalog { return testCatalogOn(t, pg_contract.Version17) }, sql: nullableKey, lock: ael},
+		{name: "18 holds them at ACCESS EXCLUSIVE", catalog: func(t *testing.T) *pg_catalog.Catalog { return testCatalogOn(t, pg_contract.Version18) }, sql: notNullKey, lock: ael},
+		{name: "an unknown version takes the stronger one", catalog: testCatalog, sql: notNullKey, lock: ael},
 	}
 
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			finding := findingOf(t,
-				single(t, testCase.catalog(t), "ALTER TABLE events ADD CONSTRAINT pk PRIMARY KEY (id, at)"),
-				"R-AT-ADDPK")
+			finding := findingOf(t, single(t, testCase.catalog(t), testCase.sql), "R-AT-ADDPK")
 			partition := targetOf(t, finding, "apercu_snapshot_test.events_2025")
 			assert.Equal(t, testCase.lock.Short(), partition.Lock.Short())
 			assert.Equal(t, pg_contract.OpKindScan, partition.OpKind, "the partitions hold the rows the index is built from")

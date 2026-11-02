@@ -24,12 +24,7 @@ func ruleDML(s scope) effect {
 	kind := backfills[s.statement.Command]
 	e := newEffect(s, kind.code,
 		fmt.Sprintf("%s under ROW EXCLUSIVE, which blocks no reader and no other writer; the cost is the number of rows and the indexes that have to be maintained with them", kind.message))
-	e.lock = pg_contract.LockRowExclusive
-	e.op = pg_contract.OpKindDML
-	e.extra = s.readTargets()
-	if s.statement.Command == "INSERT" {
-		e.recursion = partitionsOnly
-	}
+	e.touches = s.readTargets()
 	return e
 }
 
@@ -41,20 +36,18 @@ func ruleSelectFor(s scope) effect {
 	}
 	e := newEffect(s, "R-DML-SELECTFOR",
 		fmt.Sprintf("FOR%s takes a row lock on every row the query returns and holds it to the end of the transaction; the table itself is barely locked, the rows are what other writers queue on", strength))
-	e.lock = pg_contract.LockRowShare
-	e.op = pg_contract.OpKindNone
 	return e.onEvery(s)
 }
 
 // readTargets is every relation the statement reads beside the one it writes.
-func (s scope) readTargets() []pg_contract.Target {
-	var targets []pg_contract.Target
+func (s scope) readTargets() []touch {
+	var targets []touch
 	for _, info := range s.sources() {
-		targets = append(targets, pg_contract.Target{
-			Relation: contract(info),
-			Lock:     pg_contract.LockAccessShare,
-			OpKind:   pg_contract.OpKindNone,
-			Role:     pg_contract.TargetRoleDirect,
+		targets = append(targets, touch{
+			info: info,
+			lock: pg_contract.LockAccessShare,
+			op:   pg_contract.OpKindNone,
+			role: pg_contract.TargetRoleDirect,
 		})
 	}
 	return targets

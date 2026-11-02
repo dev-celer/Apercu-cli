@@ -83,6 +83,8 @@ type Flags struct {
 	Unique       bool
 	// Finalize is ALTER TABLE … DETACH PARTITION … FINALIZE.
 	Finalize bool
+	// Row is CREATE TRIGGER … FOR EACH ROW, the only kind a partitioned table clones onto its partitions.
+	Row bool
 	// Nowait is the NOWAIT of LOCK TABLE and of ALTER … ALL IN TABLESPACE.
 	Nowait bool
 	// Persistence is the TEMP / UNLOGGED a CREATE carries.

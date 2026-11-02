@@ -173,6 +173,15 @@ type lockScript struct {
 	// outsideTransaction runs the statement with no BEGIN, for the ones that cannot sit in a
 	// block. No lock can be read back for those, so only the refusal is compared.
 	outsideTransaction bool
+	// gap names a known classifier gap: the script has to keep disagreeing with the server, on
+	// gapOn or on every version when gapOn is empty, until the fix lands and the marker goes.
+	gap   string
+	gapOn []pg_contract.Version
+}
+
+// gapped reports whether the script is expected to disagree with the server on this version.
+func (s lockScript) gapped(version pg_contract.Version) bool {
+	return s.gap != "" && (len(s.gapOn) == 0 || slices.Contains(s.gapOn, version))
 }
 
 func (s lockScript) runsOn(version pg_contract.Version) bool {
@@ -194,7 +203,8 @@ var (
 var lockScripts = []lockScript{
 	// 4.1 columns.
 	{sql: "ALTER TABLE orders ADD COLUMN z int"},
-	{sql: "ALTER TABLE orders ADD COLUMN z text DEFAULT next_code()"},
+	// next_code() is a VOLATILE SQL function the planner inlines into a constant, so no rewrite happens.
+	{sql: "ALTER TABLE orders ADD COLUMN z text DEFAULT next_code()", gap: gapInlinedDefault},
 	{sql: "ALTER TABLE orders ADD COLUMN z positive_int"},
 	{sql: "ALTER TABLE orders ADD COLUMN z text UNIQUE"},
 	{sql: "ALTER TABLE events ADD COLUMN z int"},
@@ -483,15 +493,21 @@ func TestPredictedLocksMatchTheServer(t *testing.T) {
 					_, err = db.Exec(oracleDDL18)
 					require.NoError(t, err)
 				}
+				_, err = db.Exec(oracleTreeDDL)
+				require.NoError(t, err)
 
-				catalog := oracleCatalog(t, db)
-				require.Equal(t, version, catalog.Version(), "P-18 has to see the version the rules are gated on")
+				catalogs := oracleCatalogs(t, db)
+				require.Equal(t, version, catalogs().Version(), "P-18 has to see the version the rules are gated on")
 
-				for _, script := range lockScripts {
+				for _, script := range append(slices.Clone(lockScripts), partitionScripts...) {
 					if !script.runsOn(version) {
 						continue
 					}
-					t.Run(script.sql, func(t *testing.T) { replayLocks(t, db, catalog, script, version) })
+					t.Run(script.sql, func(t *testing.T) { replayLocks(t, db, catalogs(), script, version) })
+				}
+				// The scenarios commit their setup, so they run last.
+				for _, scenario := range lockScenarios {
+					t.Run(scenario.sql, func(t *testing.T) { replayScenario(t, db, catalogs(), scenario) })
 				}
 			})
 		}(version)
@@ -503,6 +519,14 @@ func TestPredictedLocksMatchTheServer(t *testing.T) {
 // production snapshot, so P-18 answers and G-07 can branch.
 func oracleCatalog(t *testing.T, db *sql.DB) *pg_catalog.Catalog {
 	t.Helper()
+	return oracleCatalogs(t, db)()
+}
+
+// oracleCatalogs captures the database once and hands out a fresh catalog on every call: the
+// shadow catalog learns what each classified statement creates and attaches, and a script the
+// server rolled back must not leave that behind for the next one.
+func oracleCatalogs(t *testing.T, db *sql.DB) func() *pg_catalog.Catalog {
+	t.Helper()
 	ctx := context.Background()
 
 	pre, err := pg_catalog.Collect(ctx, db, pg_catalog.CollectOptions{Source: pg_catalog.SourcePreview, PIT: pg_catalog.PITPre})
@@ -510,19 +534,66 @@ func oracleCatalog(t *testing.T, db *sql.DB) *pg_catalog.Catalog {
 	prod, err := pg_catalog.Collect(ctx, db, pg_catalog.CollectOptions{Source: pg_catalog.SourceProd, PIT: pg_catalog.PITPre, ProdAvailable: true})
 	require.NoError(t, err)
 
-	catalog, err := pg_catalog.NewCatalog(pg_catalog.CatalogOptions{Pre: pre, Prod: prod})
-	require.NoError(t, err)
-	return catalog
+	return func() *pg_catalog.Catalog {
+		catalog, err := pg_catalog.NewCatalog(pg_catalog.CatalogOptions{Pre: pre, Prod: prod})
+		require.NoError(t, err)
+		return catalog
+	}
 }
 
 // replayLocks runs one statement and compares what the classifier said against what the server did.
 func replayLocks(t *testing.T, db *sql.DB, catalog *pg_catalog.Catalog, script lockScript, version pg_contract.Version) {
 	t.Helper()
-	ctx := context.Background()
 
 	statements := pg_parse.Parse(script.sql)
 	require.Len(t, statements, 1)
 	analysis := NewClassifier(catalog).Next(statements[0])
+
+	observed, execErr := runObserved(t, db, script.sql, script.outsideTransaction)
+
+	// The script's own expectation about the server is not a classifier claim: it has to hold.
+	assert.Equalf(t, script.refused(version), execErr != nil,
+		"the server %s %q, the script says it %s (server said: %v)",
+		accepted(execErr), script.sql, expected(script.refused(version)), execErr)
+
+	var mismatches []string
+	if (script.refused(version) && !script.leftToServer) != analysis.HasErrors() {
+		mismatches = append(mismatches, fmt.Sprintf("the classifier %s %q, the server %s it", classifierVerdict(analysis), script.sql, accepted(execErr)))
+	}
+	if execErr == nil && !script.outsideTransaction {
+		mismatches = append(mismatches, compareLocks(catalog, analysis, observed)...)
+	}
+	reportMismatches(t, script.sql, script.gap, script.gapped(version), mismatches)
+}
+
+// reportMismatches fails on every disagreement, except on a script tagged with a gap, which has to keep disagreeing.
+func reportMismatches(t *testing.T, sql, gap string, gapped bool, mismatches []string) {
+	t.Helper()
+	if !gapped {
+		for _, mismatch := range mismatches {
+			t.Error(mismatch)
+		}
+		return
+	}
+	if len(mismatches) == 0 {
+		t.Errorf("%q now matches the server: gap fixed (%s), remove the marker", sql, gap)
+		return
+	}
+	t.Logf("known gap (%s): %s", gap, strings.Join(mismatches, "; "))
+}
+
+// observation is what the server did while the statement's transaction was still open.
+type observation struct {
+	locks map[helper.FullRelationName]lockedRelation
+	// work is the relations with storage the statement read or rewrote.
+	work map[helper.FullRelationName]bool
+}
+
+// runObserved runs one statement on its own connection and reads back its locks and its work
+// before rolling it back.
+func runObserved(t *testing.T, db *sql.DB, statement string, outsideTransaction bool) (observation, error) {
+	t.Helper()
+	ctx := context.Background()
 
 	conn, err := db.Conn(ctx)
 	require.NoError(t, err)
@@ -533,51 +604,143 @@ func replayLocks(t *testing.T, db *sql.DB, catalog *pg_catalog.Catalog, script l
 	pid := 0
 	require.NoError(t, conn.QueryRowContext(ctx, "SELECT pg_backend_pid()").Scan(&pid))
 
-	if !script.outsideTransaction {
-		_, err = conn.ExecContext(ctx, "BEGIN")
-		require.NoError(t, err)
-		defer func() { _, _ = conn.ExecContext(ctx, "ROLLBACK") }()
+	if outsideTransaction {
+		_, execErr := conn.ExecContext(ctx, statement)
+		return observation{}, execErr
 	}
+	_, err = conn.ExecContext(ctx, "BEGIN")
+	require.NoError(t, err)
+	defer func() { _, _ = conn.ExecContext(ctx, "ROLLBACK") }()
 
-	_, execErr := conn.ExecContext(ctx, script.sql)
-
-	// The refusal is a prediction of its own: a clause the classifier rejects has to be a clause
-	// the server refuses, on exactly the versions it refuses it on.
-	assert.Equalf(t, script.refused(version), execErr != nil,
-		"the server %s %q, the script says it %s (server said: %v)",
-		accepted(execErr), script.sql, expected(script.refused(version)), execErr)
-	assert.Equalf(t, script.refused(version) && !script.leftToServer, analysis.HasErrors(),
-		"the classifier %s %q, the server %s it", classifierVerdict(analysis), script.sql, accepted(execErr))
-	if execErr != nil || script.outsideTransaction {
-		return
+	before := readWork(t, conn)
+	if _, execErr := conn.ExecContext(ctx, statement); execErr != nil {
+		return observation{}, execErr
 	}
+	after := readWork(t, conn)
 
-	observed := readLocks(t, db, pid)
-	predicted := predictedLocks(analysis)
+	work := map[helper.FullRelationName]bool{}
+	for name, now := range after {
+		if was, existed := before[name]; existed && (now.scans > was.scans || now.filenode != was.filenode) {
+			work[name] = true
+		}
+	}
+	return observation{locks: readLocks(t, db, pid), work: work}, nil
+}
 
-	for _, held := range observed {
+// storageState is one relation's scan count and file inside the running transaction.
+type storageState struct {
+	scans    int64
+	filenode uint32
+}
+
+const workQuery = `
+SELECT n.nspname, c.relname, pg_stat_get_xact_numscans(c.oid), c.relfilenode
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+ WHERE n.nspname = $1 AND c.relkind IN ('r', 'm')`
+
+// readWork reads, from inside the transaction, how often each relation has been scanned and which file holds it.
+func readWork(t *testing.T, conn *sql.Conn) map[helper.FullRelationName]storageState {
+	t.Helper()
+
+	rows, err := conn.QueryContext(context.Background(), workQuery, oracleSchema)
+	require.NoError(t, err)
+	defer func() { _ = rows.Close() }()
+
+	states := map[helper.FullRelationName]storageState{}
+	for rows.Next() {
+		var schema, name string
+		var state storageState
+		require.NoError(t, rows.Scan(&schema, &name, &state.scans, &state.filenode))
+		states[helper.FullRelationName{Schema: schema, Table: name}] = state
+	}
+	require.NoError(t, rows.Err())
+	return states
+}
+
+// workExempt are the commands whose reads are their own business: a query's scans are its result,
+// not a cost the classifier grades, and ANALYZE samples without counting a scan.
+var workExempt = map[pg_contract.Command]bool{
+	"INSERT": true, "UPDATE": true, "DELETE": true, "MERGE": true, "SELECT FOR": true,
+	"COPY FROM": true, "COPY TO": true, "CREATE TABLE AS": true, "CREATE VIEW": true,
+	"CREATE MATERIALIZED VIEW": true, "REFRESH MATERIALIZED VIEW": true, "ANALYZE": true,
+	// TRUNCATE swaps in a new file without reading the old one: METADATA by design.
+	"TRUNCATE": true,
+}
+
+// compareLocks lists every disagreement between the classifier's targets and what the server did.
+func compareLocks(catalog *pg_catalog.Catalog, analysis pg_contract.StatementAnalysis, observed observation) []string {
+	var mismatches []string
+	predicted := predictedTargets(analysis)
+
+	for _, held := range observed.locks {
 		if catalog.Resolve(held.name, nil).Origin != pg_catalog.OriginExisting {
 			// A relation the statement creates is locked at ACCESS EXCLUSIVE under a name no
 			// other session can reach yet, so it blocks nobody and no rule names it.
 			continue
 		}
-		expectedLock, named := predicted[held.name]
+		target, named := predicted[held.name]
 		kind := pg_contract.RelationKindFromRelkind(held.kind)
 		if !named {
 			// An index is locked with the table it belongs to whether or not a rule names it
-			assert.Falsef(t, kind.IsTable() || kind == pg_contract.RelationKindMaterializedView,
-				"%q locks %s at %s and the classifier never named it", script.sql, held.name, held.lock.Short())
+			if kind.IsTable() || kind == pg_contract.RelationKindMaterializedView {
+				mismatches = append(mismatches, fmt.Sprintf("%q locks %s at %s and the classifier never named it", analysis.RawSQL, held.name, held.lock.Short()))
+			}
 			continue
 		}
-		assert.Equalf(t, held.lock.Short(), expectedLock.Short(), "%q on %s", script.sql, held.name)
-	}
-
-	for name, lock := range predicted {
-		if _, held := observed[name]; !held {
-			assert.Failf(t, "unlocked target",
-				"%q predicts %s on %s and the server locked nothing there", script.sql, lock.Short(), name)
+		if held.lock != target.Lock {
+			mismatches = append(mismatches, fmt.Sprintf("%q on %s: the server holds %s, the classifier predicts %s", analysis.RawSQL, held.name, held.lock.Short(), target.Lock.Short()))
 		}
 	}
+
+	for name, target := range predicted {
+		if _, held := observed.locks[name]; !held {
+			mismatches = append(mismatches, fmt.Sprintf("%q predicts %s on %s and the server locked nothing there", analysis.RawSQL, target.Lock.Short(), name))
+		}
+	}
+
+	if workExempt[analysis.Command] {
+		return mismatches
+	}
+	for name, target := range predicted {
+		// Only a relation with rows of its own can be read or rewritten.
+		if target.Relation.Kind != pg_contract.RelationKindTable && target.Relation.Kind != pg_contract.RelationKindMaterializedView {
+			continue
+		}
+		if _, held := observed.locks[name]; !held {
+			continue
+		}
+		worked := observed.work[name]
+		switch {
+		case target.OpKind.ScalesWithTableSize() && !worked:
+			mismatches = append(mismatches, fmt.Sprintf("%q predicts %s on %s and the server never read it", analysis.RawSQL, target.OpKind, name))
+		case !target.OpKind.ScalesWithTableSize() && worked &&
+			(target.Role == pg_contract.TargetRoleDirect || target.Role == pg_contract.TargetRoleExpanded):
+			mismatches = append(mismatches, fmt.Sprintf("%q reads %s, the classifier says %s", analysis.RawSQL, name, target.OpKind))
+		}
+	}
+	return mismatches
+}
+
+// replayScenario commits the setup, then compares the last statement's locks: the classifier
+// reads the whole migration from the catalog taken before it, as the CLI would.
+func replayScenario(t *testing.T, db *sql.DB, catalog *pg_catalog.Catalog, scenario lockScenario) {
+	t.Helper()
+
+	statements := pg_parse.Parse(strings.Join(append(slices.Clone(scenario.setup), scenario.sql), ";\n"))
+	require.Len(t, statements, len(scenario.setup)+1)
+	analyses := NewClassifier(catalog).Analyze(statements)
+
+	for _, statement := range scenario.setup {
+		_, err := db.Exec("SET search_path TO " + oracleSchema + "; " + statement)
+		require.NoErrorf(t, err, "%s", statement)
+	}
+	observed, err := runObserved(t, db, scenario.sql, false)
+	require.NoError(t, err)
+
+	last := analyses[len(analyses)-1]
+	require.False(t, last.HasErrors(), "%v", last.Errors)
+	reportMismatches(t, scenario.sql, scenario.gap, scenario.gap != "", compareLocks(catalog, last, observed))
 }
 
 func accepted(err error) string {
@@ -635,9 +798,10 @@ func readLocks(t *testing.T, db *sql.DB, pid int) map[helper.FullRelationName]lo
 	return held
 }
 
-// predictedLocks is the strongest lock the classifier says the statement takes on each relation.
-func predictedLocks(analysis pg_contract.StatementAnalysis) map[helper.FullRelationName]pg_contract.Lock {
-	out := map[helper.FullRelationName]pg_contract.Lock{}
+// predictedTargets is, for each relation, the strongest lock and the most severe work the
+// classifier says the statement takes there, under the role it was first named with.
+func predictedTargets(analysis pg_contract.StatementAnalysis) map[helper.FullRelationName]pg_contract.Target {
+	out := map[helper.FullRelationName]pg_contract.Target{}
 	for _, finding := range analysis.Findings {
 		for _, target := range finding.Targets {
 			if !strings.EqualFold(target.Relation.Name.Schema, oracleSchema) {
@@ -646,7 +810,14 @@ func predictedLocks(analysis pg_contract.StatementAnalysis) map[helper.FullRelat
 			if target.Lock == pg_contract.LockNone {
 				continue
 			}
-			out[target.Relation.Name] = pg_contract.MaxLock(out[target.Relation.Name], target.Lock)
+			merged, seen := out[target.Relation.Name]
+			if !seen {
+				out[target.Relation.Name] = target
+				continue
+			}
+			merged.Lock = pg_contract.MaxLock(merged.Lock, target.Lock)
+			merged.OpKind = pg_contract.MaxOpKind(merged.OpKind, target.OpKind)
+			out[target.Relation.Name] = merged
 		}
 	}
 	return out

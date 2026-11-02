@@ -31,7 +31,7 @@ func TestMaintenanceCommands(t *testing.T) {
 		{name: "truncating replaces the file", sql: "TRUNCATE profiles", code: "R-MT-TRUNCATE", lock: ael, op: meta, table: "apercu_snapshot_test.profiles"},
 		{
 			name: "and is refused while something outside the list references it", sql: "TRUNCATE users",
-			errors: []string{"TRUNCATE is refused while apercu_snapshot_test.orders, apercu_snapshot_test.metrics, apercu_snapshot_test.metrics_2025, apercu_snapshot_test.metrics_default, apercu_snapshot_test.metrics_default_a, apercu_snapshot_test.metrics_default_b, apercu_snapshot_test.metrics_default_other, apercu_snapshot_test.profiles references the table and is not being truncated with it; add CASCADE or name it too"},
+			errors: []string{"TRUNCATE is refused while apercu_snapshot_test.orders, apercu_snapshot_test.metrics, apercu_snapshot_test.profiles references the table and is not being truncated with it; add CASCADE or name it too"},
 		},
 		{name: "CASCADE empties the referencing tables too", sql: "TRUNCATE users CASCADE", code: "R-MT-TRUNCATE", lock: ael, op: meta, table: "apercu_snapshot_test.orders"},
 		{name: "naming them all is the other way out", sql: "TRUNCATE users, orders, profiles, metrics", code: "R-MT-TRUNCATE", lock: ael, op: meta, table: "apercu_snapshot_test.users"},

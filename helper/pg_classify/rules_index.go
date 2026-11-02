@@ -13,9 +13,6 @@ func ruleCreateIndex(s scope) effect {
 	if s.statement.Flags.Concurrently {
 		e := newEffect(s, "R-IX-CREATE-CONC",
 			"the index is built in two passes under SHARE UPDATE EXCLUSIVE, so reads and writes keep running; it waits for every transaction open when each pass starts, takes roughly twice as long as a plain build, and leaves an INVALID index behind if it fails")
-		e.lock = pg_contract.LockShareUpdateExclusive
-		e.op = pg_contract.OpKindConcurrent
-		e.recursion = parentOnly
 		if s.partitioned() {
 			return e.reject("CREATE INDEX CONCURRENTLY is not supported on a partitioned table on any of PostgreSQL 15-18; build the index on each partition, then ON ONLY the parent and ALTER INDEX … ATTACH PARTITION", pg_contract.AnyVersion)
 		}
@@ -23,11 +20,10 @@ func ruleCreateIndex(s scope) effect {
 	}
 
 	e := newEffect(s, "R-IX-CREATE", "every row is read to build the index, and writes wait for the whole build; CREATE INDEX CONCURRENTLY does the same work without blocking them")
-	e.lock = pg_contract.LockShare
-	e.op = pg_contract.OpKindScan
-	e.recursion = partitionsOnly
 
-	if s.only() {
+	// ON ONLY a partitioned table records an invalid parent index; on any other table there is
+	// nothing to stop at, and the index is built all the same.
+	if s.only() && s.partitioned() {
 		e.op = pg_contract.OpKindMetadata
 		e.message = "ON ONLY records an invalid parent index and builds nothing; it becomes valid once every partition has a matching index attached to it"
 	}
@@ -44,19 +40,11 @@ func ruleDropIndex(s scope) effect {
 			"the index is retired in stages, the table staying at SHARE UPDATE EXCLUSIVE throughout while the index itself ends at ACCESS EXCLUSIVE; the statement waits for every transaction that could still be using the index")
 		tableLock = pg_contract.LockShareUpdateExclusive
 	}
-	e.recursion = parentOnly
 	e = e.onNone()
+	e.tableLock = tableLock
 
 	for _, index := range s.relations {
 		e.on = append(e.on, relationTarget{info: index, role: pg_contract.TargetRoleDirect})
-		if table, ok := s.tableOfIndex(index); ok {
-			e.extra = append(e.extra, pg_contract.Target{
-				Relation: table,
-				Lock:     tableLock,
-				OpKind:   pg_contract.OpKindMetadata,
-				Role:     pg_contract.TargetRoleResolved,
-			})
-		}
 	}
 	return e
 }
@@ -91,52 +79,35 @@ func classifyAlterIndex(s scope) ([]pg_contract.Finding, []pg_contract.Error) {
 func ruleIndexOptions(s scope, sub pg_parse.Subcommand) effect {
 	e := ruleRelOptions(s, sub)
 	e.code = "R-IX-SETOPT"
-	e.recursion = parentOnly
 	return e
 }
 
 // ruleIndexStatistics is R-IX-SETSTATS.
 func ruleIndexStatistics(s scope, sub pg_parse.Subcommand) effect {
 	e := newEffect(s, "R-IX-SETSTATS", fmt.Sprintf("the statistics target of expression column %s is recorded; nothing is sampled until the next ANALYZE", sub.Name))
-	e.lock = pg_contract.LockShareUpdateExclusive
-	e.recursion = parentOnly
 	return e
 }
 
 // ruleIndexTablespace is R-IX-TABLESPACE.
 func ruleIndexTablespace(s scope, sub pg_parse.Subcommand) effect {
 	e := newEffect(s, "R-IX-TABLESPACE", fmt.Sprintf("the index file is copied into tablespace %q, which blocks every query that could use it", sub.Value))
-	e.op = pg_contract.OpKindRewrite
-	e.recursion = parentOnly
 	return e
 }
 
 // ruleIndexAttach is R-IX-ATTACH.
 func ruleIndexAttach(s scope, sub pg_parse.Subcommand) effect {
 	e := newEffect(s, "R-IX-ATTACH", "the partition's index is recorded under the parent index; no row is read, and the parent index becomes valid once every partition has one")
-	e.lock = pg_contract.LockShareUpdateExclusive
-	e.recursion = parentOnly
+	// Both indexes are opened through their tables, which are only read.
+	e.tableLock = pg_contract.LockAccessShare
 
-	if table, ok := s.tableOfIndex(s.relation()); ok {
-		e.extra = append(e.extra, pg_contract.Target{
-			Relation: table, Lock: pg_contract.LockAccessShare,
-			OpKind: pg_contract.OpKindMetadata, Role: pg_contract.TargetRoleResolved,
-		})
-	}
 	if len(sub.Relations) > 0 {
-		attached := s.resolve(sub.Relations[0])
-		e.extra = append(e.extra, pg_contract.Target{
-			Relation: contract(attached),
-			Lock:     pg_contract.LockAccessExclusive,
-			OpKind:   pg_contract.OpKindMetadata,
-			Role:     pg_contract.TargetRoleDirect,
+		e.touches = append(e.touches, touch{
+			info:      s.resolve(sub.Relations[0]),
+			lock:      pg_contract.LockAccessExclusive,
+			op:        pg_contract.OpKindMetadata,
+			role:      pg_contract.TargetRoleDirect,
+			tableLock: pg_contract.LockAccessShare,
 		})
-		if table, ok := s.tableOfIndex(attached); ok {
-			e.extra = append(e.extra, pg_contract.Target{
-				Relation: table, Lock: pg_contract.LockAccessShare,
-				OpKind: pg_contract.OpKindMetadata, Role: pg_contract.TargetRoleResolved,
-			})
-		}
 	}
 	return e
 }
@@ -148,8 +119,6 @@ func ruleRenameIndex(s scope) effect {
 		newName = s.statement.Subcommands[0].NewName
 	}
 	e := newEffect(s, "R-IX-RENAME", fmt.Sprintf("the index is renamed to %q in the catalog, under a lock that blocks neither reads nor writes", newName))
-	e.lock = pg_contract.LockShareUpdateExclusive
-	e.recursion = parentOnly
 	return e
 }
 
@@ -166,25 +135,18 @@ func ruleReindex(s scope) effect {
 	e, named := shape.table, s.relation()
 
 	if pg_contract.RelationKindFromRelkind(named.Relation.Kind).IsIndex() {
-		// REINDEX INDEX rebuilds the one index and opens the table behind it.
-		tableLock := e.lock
+		// REINDEX INDEX rebuilds the index, every index of its tree when it is partitioned, and opens the table behind each one.
+		e.tableLock = e.lock
 		e.lock, e.op = shape.indexLock, shape.indexOp
-		if table, ok := s.tableOfIndex(named); ok {
-			e.extra = append(e.extra, pg_contract.Target{
-				Relation: table,
-				Lock:     tableLock,
-				OpKind:   pg_contract.OpKindMetadata,
-				Role:     pg_contract.TargetRoleResolved,
-			})
-		}
+		e.below = toPartitions
 		return e
 	}
 
 	// REINDEX TABLE reads the table, and its partitions, to rebuild every index hanging off them.
-	e.recursion = partitionsOnly
-	e.extra = append(e.extra, s.indexesOf(named, shape.indexLock, shape.indexOp)...)
+	e.below = toPartitions
+	e.touches = append(e.touches, s.indexesOf(named, shape.indexLock, shape.indexOp)...)
 	for _, child := range s.descendantsOf(named) {
-		e.extra = append(e.extra, s.indexesOf(s.byName(child.relation), shape.indexLock, shape.indexOp)...)
+		e.touches = append(e.touches, s.indexesOf(s.byName(child.relation), shape.indexLock, shape.indexOp)...)
 	}
 	return e
 }
@@ -194,16 +156,10 @@ func newReindexShape(s scope, concurrent bool) reindexShape {
 	if concurrent {
 		e := newEffect(s, "R-IX-REINDEX-CONC",
 			"each index is rebuilt beside the old one under SHARE UPDATE EXCLUSIVE, so reads and writes keep running; it waits for every transaction open when a pass starts and leaves an INVALID index behind if it fails")
-		e.lock = pg_contract.LockShareUpdateExclusive
-		e.op = pg_contract.OpKindConcurrent
-		e.recursion = parentOnly
 		return reindexShape{table: e, indexLock: pg_contract.LockShareUpdateExclusive, indexOp: pg_contract.OpKindConcurrent}
 	}
 	e := newEffect(s, "R-IX-REINDEX",
 		"every index is rebuilt from a full read of the table; the table itself is only held at SHARE, but no query can be planned without its indexes and those are held at ACCESS EXCLUSIVE, so grade the whole statement as if the table were too")
-	e.lock = pg_contract.LockShare
-	e.op = pg_contract.OpKindScan
-	e.recursion = parentOnly
 	return reindexShape{table: e, indexLock: pg_contract.LockAccessExclusive, indexOp: pg_contract.OpKindRewrite}
 }
 
@@ -213,21 +169,21 @@ func (s scope) byName(relation pg_contract.Relation) pg_catalog.RelationInfo {
 }
 
 // indexesOf is the indexes hanging off a table.
-func (s scope) indexesOf(table pg_catalog.RelationInfo, lock pg_contract.Lock, op pg_contract.OpKind) []pg_contract.Target {
+func (s scope) indexesOf(table pg_catalog.RelationInfo, lock pg_contract.Lock, op pg_contract.OpKind) []touch {
 	if !table.Exists() {
 		return nil
 	}
-	var targets []pg_contract.Target
+	var targets []touch
 	for _, index := range s.catalog.IndexesOf(table.Relation.OID) {
 		rel, ok := s.catalog.ByOID(index.IndexRelID)
 		if !ok {
 			continue
 		}
-		targets = append(targets, pg_contract.Target{
-			Relation: rel.Contract(),
-			Lock:     lock,
-			OpKind:   op,
-			Role:     pg_contract.TargetRoleResolved,
+		targets = append(targets, touch{
+			info: s.infoOf(rel),
+			lock: lock,
+			op:   op,
+			role: pg_contract.TargetRoleResolved,
 		})
 	}
 	return targets
@@ -256,13 +212,13 @@ func ruleReindexWide(s scope) effect {
 		pg_contract.RelationKindTable, pg_contract.RelationKindMaterializedView,
 	}) {
 		info := pg_catalog.RelationInfo{Name: table.RelationName(), Relation: table, Origin: pg_catalog.OriginExisting}
-		e.extra = append(e.extra, pg_contract.Target{
-			Relation: table.Contract(),
-			Lock:     tableLock,
-			OpKind:   e.op,
-			Role:     pg_contract.TargetRoleExpanded,
+		e.touches = append(e.touches, touch{
+			info: s.infoOf(table),
+			lock: tableLock,
+			op:   e.op,
+			role: pg_contract.TargetRoleExpanded,
 		})
-		e.extra = append(e.extra, s.indexesOf(info, shape.indexLock, shape.indexOp)...)
+		e.touches = append(e.touches, s.indexesOf(info, shape.indexLock, shape.indexOp)...)
 	}
 	return e
 }

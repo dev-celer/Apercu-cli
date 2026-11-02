@@ -237,6 +237,7 @@ func normalizeDrop(stmt *pg_query.DropStmt, s Statement) Statement {
 func normalizeCreateTrigger(stmt *pg_query.CreateTrigStmt, s Statement) Statement {
 	s.Command = "CREATE TRIGGER"
 	s.Flags.OrReplace = stmt.Replace
+	s.Flags.Row = stmt.Row
 	s.Relations = []RelationRef{relationRef(stmt.Relation)}
 	if stmt.Constrrel != nil {
 		s.Relations = append(s.Relations, relationRef(stmt.Constrrel))

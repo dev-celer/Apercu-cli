@@ -66,6 +66,11 @@ func (c *Classifier) classify(statement pg_parse.Statement, context Context) pg_
 		analysis.Findings = nil
 	}
 
+	// A statement the server refuses changes no edge.
+	if !analysis.HasErrors() {
+		c.session.Link(statement, context)
+	}
+
 	collapseStatementLocks(analysis.Findings)
 	analysis.Findings = append(analysis.Findings, unboundedQueue(ruled, analysis.Findings)...)
 	analysis.Findings = append(analysis.Findings, maintenanceStatements(ruled, analysis.Findings)...)
@@ -228,19 +233,15 @@ func (s scope) resolve(ref pg_parse.RelationRef) pg_catalog.RelationInfo {
 	return s.catalog.Resolve(ref.Name, s.context.SearchPath)
 }
 
-// descendant is one relation a recursing clause reaches.
+// descendant is one relation below another, for the rules that list a tree rather than lock it:
+// locking goes through expand.
 type descendant struct {
 	relation pg_contract.Relation
 	// partition separates declarative partitioning from classic INHERITS.
 	partition bool
 }
 
-// descendants is the inherited children an alter table locks.
-func (s scope) descendants() []descendant {
-	return s.descendantsOf(s.relation())
-}
-
-// descendantsOf is the same for any relation a rule reached on its own.
+// descendantsOf is every partition and inherited child below a relation.
 func (s scope) descendantsOf(info pg_catalog.RelationInfo) []descendant {
 	if !info.Exists() {
 		return nil

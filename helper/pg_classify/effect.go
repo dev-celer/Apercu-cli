@@ -6,22 +6,6 @@ import (
 	"apercu-cli/helper/pg_parse"
 )
 
-type recursion uint8
-
-const (
-	// recurses reaches the partitions and the inheritance children.
-	recurses recursion = iota
-	// partitionsOnly reaches the partitions and leaves the inheritance children alone.
-	partitionsOnly
-	// parentOnly stops at the parent table.
-	parentOnly
-	// rejected is a clause the server refuses on a partitioned parent.
-	rejected
-)
-
-// expands reports whether the class reaches anything below the table.
-func (r recursion) expands() bool { return r == recurses || r == partitionsOnly }
-
 // relationTarget is one relation a rule acts on directly.
 type relationTarget struct {
 	info pg_catalog.RelationInfo
@@ -32,43 +16,62 @@ type relationTarget struct {
 
 // effect is what one subcommand does.
 type effect struct {
-	code      pg_contract.Code
-	message   string
+	code    pg_contract.Code
+	message string
+	// lock, op, below, underOnly and tableLock are what the named relations get; newEffect seeds them from the clause table.
 	lock      pg_contract.Lock
 	op        pg_contract.OpKind
-	recursion recursion
+	below     below
+	underOnly below
+	tableLock pg_contract.Lock
+	// leafOp, when set, decides the work on each leaf below a named relation.
+	leafOp func(leaf pg_catalog.RelationInfo) pg_contract.OpKind
 	// on lists the relations the rule acts on.
 	on []relationTarget
-	// partitionLock is the lock the partitions take instead of the table's.
-	partitionLock pg_contract.Lock
-	// partitionLockSet indicate if the partitionLock override value should be used
-	partitionLockSet bool
-	// childrenUnderOnly marks a clause that stops at the named table under ONLY but still opens the children.
-	// They are locked exactly as hard as they would have been without the ONLY.
-	childrenUnderOnly bool
-	// extra are the relations the clause names or implies beyond the primary targets.
-	extra []pg_contract.Target
+	// touches are the relations the clause reaches beyond the named ones.
+	touches []touch
 	// errors are what the server would refuse.
 	errors []pg_contract.Error
 	// silent drops the clause from the findings: it errored and never runs.
 	silent bool
+	// row is the clause table's row the effect started from, which holds what the server refuses.
+	row clause
 }
 
-// newEffect is where every rule starts, the rule analysis will then refine attribute of the effect.
+// newEffect is where every rule starts: the clause table gives the static half, the rule then refines it.
 func newEffect(s scope, code pg_contract.Code, message string) effect {
+	row := clauseFor(code)
+	reach, underOnly := row.reachAt(s.version)
 	return effect{
 		code:      code,
 		message:   message,
-		lock:      pg_contract.LockAccessExclusive,
-		op:        pg_contract.OpKindMetadata,
-		recursion: recurses,
+		lock:      row.lock,
+		op:        row.op,
+		below:     reach,
+		underOnly: underOnly,
+		tableLock: row.tableLock,
 		on:        []relationTarget{{info: s.relation(), only: s.only(), role: pg_contract.TargetRoleDirect}},
+		row:       row,
 	}
 }
 
-// onPartitions override the lock taken on the main table for its partitions.
-func (e effect) onPartitions(lock pg_contract.Lock) effect {
-	e.partitionLock, e.partitionLockSet = lock, true
+// refusals turns what the clause table says the server refuses into errors: the clause on a
+// partitioned table on a version that does not support it, or ONLY where the server wants the partitions too.
+func (e effect) refusals(s scope) effect {
+	if e.silent {
+		return e
+	}
+	for _, on := range e.on {
+		if !partitionedInfo(on.info) {
+			continue
+		}
+		if !e.row.accepts(s.version) {
+			return e.reject(e.row.refusal, s.versionsWhen(e.row.partitioned))
+		}
+		if on.only && e.underOnly.partitions == refused && s.hasPartitions(on.info) {
+			return e.reject(e.row.onlyRefusal, s.versionsWhen(e.row.onlyAcceptedFrom()))
+		}
+	}
 	return e
 }
 
@@ -89,7 +92,6 @@ func (e effect) onEvery(s scope) effect {
 
 // reject says that the statement errored.
 func (e effect) reject(reason string, versions pg_contract.VersionRange) effect {
-	e.recursion = rejected
 	e.silent = true
 	e.errors = append(e.errors, pg_contract.Error{Code: e.code, Message: reason, Versions: versions})
 	return e
@@ -109,9 +111,6 @@ func classifyClauses(s scope, rules map[pg_parse.SubKind]func(scope, pg_parse.Su
 		// run the rule
 		result := rule(s, sub)
 
-		if reason, versions, refused := s.onlyRefusal(sub); refused {
-			result = result.reject(reason, versions)
-		}
 		finding, clauseErrors := result.report(s)
 		errors = append(errors, clauseErrors...)
 		if finding != nil {
@@ -134,6 +133,7 @@ func one(rule func(scope) effect) func(scope) ([]pg_contract.Finding, []pg_contr
 
 // report turns an effect into the finding it produces, nil when it never runs.
 func (e effect) report(s scope) (*pg_contract.Finding, []pg_contract.Error) {
+	e = e.refusals(s)
 	if e.silent || e.code == "" {
 		return nil, e.errors
 	}
@@ -145,43 +145,23 @@ func (e effect) report(s scope) (*pg_contract.Finding, []pg_contract.Error) {
 	}, e.errors
 }
 
-// targets convert the effect's on values to targets object.
+// targets turns the effect into what its finding carries: the named relations and the touches,
+// then everything the server reaches below them.
 func (e effect) targets(s scope) []pg_contract.Target {
-	var targets []pg_contract.Target
+	touches := make([]touch, 0, len(e.on)+len(e.touches))
 	for _, on := range e.on {
-		targets = append(targets, pg_contract.Target{
-			Relation: contract(on.info),
-			Lock:     e.lock,
-			OpKind:   opOn(e.op, partitionedInfo(on.info)),
-			Role:     on.role,
+		reach := e.below
+		if on.only {
+			reach = e.underOnly
+		}
+		touches = append(touches, touch{
+			info: on.info, lock: e.lock, op: e.op, role: on.role,
+			below: reach, tableLock: e.tableLock, leafOp: e.leafOp,
 		})
 	}
-	targets = append(targets, e.extra...)
+	touches = append(touches, e.touches...)
 
-	if !e.recursion.expands() {
-		return targets
-	}
-	for _, on := range e.on {
-		if on.only && !e.childrenUnderOnly {
-			continue
-		}
-		for _, child := range s.descendantsOf(on.info) {
-			if e.recursion == partitionsOnly && !child.partition {
-				continue
-			}
-			lock := e.lock
-			if e.partitionLockSet && child.partition {
-				lock = e.partitionLock
-			}
-			targets = append(targets, pg_contract.Target{
-				Relation: child.relation,
-				Lock:     lock,
-				OpKind:   opOn(e.op, child.relation.Kind.IsPartitioned()),
-				Role:     pg_contract.TargetRoleExpanded,
-			})
-		}
-	}
-	return targets
+	return s.expand(touches)
 }
 
 // opOn downgrades work that is measured in rows to metadata on a partitioned parent.

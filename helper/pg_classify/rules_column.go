@@ -100,9 +100,6 @@ func buildsIndex(constraints []pg_parse.ConstraintDef) bool {
 // ruleDropColumn is R-AT-DROPCOL.
 func ruleDropColumn(s scope, sub pg_parse.Subcommand) effect {
 	e := newEffect(s, "R-AT-DROPCOL", "the column is marked dropped in the catalog; existing rows keep their pages until something else rewrites them")
-	// ONLY stops the column being dropped from the children, not the children being locked: their
-	// inheritance count still has to come down.
-	e.childrenUnderOnly = true
 	column, ok := s.column(sub.Name)
 	if !ok {
 		return e
@@ -116,21 +113,20 @@ func ruleDropColumn(s scope, sub pg_parse.Subcommand) effect {
 		if !ok {
 			continue
 		}
-		e.extra = append(e.extra, pg_contract.Target{
-			Relation: rel.Contract(),
-			Lock:     pg_contract.LockAccessExclusive,
-			OpKind:   pg_contract.OpKindMetadata,
-			Role:     pg_contract.TargetRoleImplicit,
+		e.touches = append(e.touches, touch{
+			info: s.infoOf(rel),
+			lock: pg_contract.LockAccessExclusive,
+			op:   pg_contract.OpKindMetadata,
+			role: pg_contract.TargetRoleImplicit,
 		})
 	}
-	e.message += fmt.Sprintf("; %d view(s) read this column and are dropped with it under CASCADE, or refuse the statement without it", len(e.extra))
+	e.message += fmt.Sprintf("; %d view(s) read this column and are dropped with it under CASCADE, or refuse the statement without it", len(e.touches))
 	return e
 }
 
 // ruleAlterColumnType is R-AT-TYPE.
 func ruleAlterColumnType(s scope, sub pg_parse.Subcommand) effect {
 	e := newEffect(s, "R-AT-TYPE", "")
-	e.op = pg_contract.OpKindRewrite
 
 	def := sub.Column
 	if def == nil {
@@ -173,15 +169,15 @@ func ruleAlterColumnType(s scope, sub pg_parse.Subcommand) effect {
 		if !ok {
 			continue
 		}
-		e.extra = append(e.extra, pg_contract.Target{
-			Relation: rel.Contract(),
-			Lock:     pg_contract.LockAccessExclusive,
-			OpKind:   pg_contract.OpKindRewrite,
-			Role:     pg_contract.TargetRoleResolved,
+		e.touches = append(e.touches, touch{
+			info: s.infoOf(rel),
+			lock: pg_contract.LockAccessExclusive,
+			op:   pg_contract.OpKindRewrite,
+			role: pg_contract.TargetRoleResolved,
 		})
 	}
-	if len(e.extra) > 0 {
-		e.message += fmt.Sprintf("; %d index(es) over the column are rebuilt", len(e.extra))
+	if len(e.touches) > 0 {
+		e.message += fmt.Sprintf("; %d index(es) over the column are rebuilt", len(e.touches))
 	}
 	return e
 }
@@ -226,6 +222,13 @@ func ruleSetNotNull(s scope, sub pg_parse.Subcommand) effect {
 		e.message = "the table is not in the snapshot, so the full scan is assumed"
 		return e
 	}
+	// Every table below is verified on its own: a CHECK of its own spares it the scan the parent needs.
+	e.leafOp = func(leaf pg_catalog.RelationInfo) pg_contract.OpKind {
+		if s.catalog.NotNullProof(leaf.Relation.OID, sub.Name).Proven() {
+			return pg_contract.OpKindMetadata
+		}
+		return pg_contract.OpKindScan
+	}
 	proof := s.catalog.NotNullProof(s.relation().Relation.OID, sub.Name)
 	if proof.Proven() {
 		e.message = fmt.Sprintf("%s already rules out NULL, so the server skips the verifying scan", proof)
@@ -238,12 +241,7 @@ func ruleSetNotNull(s scope, sub pg_parse.Subcommand) effect {
 
 // ruleDropNotNull is R-AT-DROPNOTNULL.
 func ruleDropNotNull(s scope, _ pg_parse.Subcommand) effect {
-	e := newEffect(s, "R-AT-DROPNOTNULL", "the constraint is dropped from the catalog; no row is read")
-	// From 18 a NOT NULL is a constraint with an inheritance count, so the children are opened to
-	// have theirs corrected even under ONLY. Up to 17 it is nothing but attnotnull on the parent's
-	// own row, and ONLY really does stop there.
-	e.childrenUnderOnly = s.atLeast18()
-	return e
+	return newEffect(s, "R-AT-DROPNOTNULL", "the constraint is dropped from the catalog; no row is read")
 }
 
 // ruleSetExpression is R-AT-SETEXPR ⟨VERSION >= 17⟩.
@@ -292,7 +290,6 @@ func ruleDropIdentity(s scope, _ pg_parse.Subcommand) effect {
 // more than the lock a vacuum takes.
 func ruleSetStatistics(s scope, sub pg_parse.Subcommand) effect {
 	e := newEffect(s, "R-AT-SETSTATS", fmt.Sprintf("the statistics target becomes %s, which the next ANALYZE reads", sub.Value))
-	e.lock = pg_contract.LockShareUpdateExclusive
 	return e
 }
 
@@ -303,8 +300,6 @@ func ruleAttributeOptions(s scope, sub pg_parse.Subcommand) effect {
 		names = append(names, option.Name)
 	}
 	e := newEffect(s, "R-AT-ATTROPT", fmt.Sprintf("the planner estimate carried by %s is recorded on the column", strings.Join(names, ", ")))
-	e.lock = pg_contract.LockShareUpdateExclusive
-	e.recursion = parentOnly
 	return e
 }
 
