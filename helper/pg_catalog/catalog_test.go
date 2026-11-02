@@ -47,6 +47,15 @@ func findOID(t *testing.T, catalog *Catalog, relation string) OID {
 	return info.Relation.OID
 }
 
+// findKey is a relation's node in the partition and inheritance graph.
+func findKey(t *testing.T, catalog *Catalog, relation string) RelationKey {
+	t.Helper()
+
+	info := catalog.Resolve(name(relation), nil)
+	require.True(t, info.Exists(), "%s must resolve", relation)
+	return info.Key()
+}
+
 func TestNewCatalogRejectsWrongSnapshots(t *testing.T) {
 	t.Parallel()
 
@@ -145,17 +154,17 @@ func TestSizeSumsThePartitionTree(t *testing.T) {
 			assert.Positive(t, parent.PreviewBytes, "but P-01 sums its leaves")
 
 			var leaves int64
-			for _, oid := range catalog.PartitionDescendants(parent.Relation.OID) {
-				leaf, ok := catalog.ByOID(oid)
+			for _, key := range catalog.PartitionDescendants(parent.Key()) {
+				leaf, ok := catalog.RelationByKey(key)
 				require.True(t, ok)
-				leaves += leaf.TotalBytes
+				leaves += leaf.Relation.TotalBytes
 			}
 			assert.Equal(t, leaves, parent.PreviewBytes)
 
 			// A classic INHERITS parent keeps its own storage, so nothing is summed into it.
 			legacy := catalog.Resolve(name("legacy_parent"), nil)
 			require.True(t, legacy.Exists())
-			assert.Empty(t, catalog.PartitionDescendants(legacy.Relation.OID))
+			assert.Empty(t, catalog.PartitionDescendants(legacy.Key()))
 			assert.Equal(t, legacy.Relation.TotalBytes, legacy.PreviewBytes)
 		})
 	}
@@ -286,13 +295,13 @@ func TestSequenceOwner(t *testing.T) {
 // P-06
 func TestPartitionTree(t *testing.T) {
 	eachVersion(t, func(t *testing.T, catalog *Catalog, _ int) {
-		events := findOID(t, catalog, "events")
-		defaultPart := findOID(t, catalog, "events_default")
-		legacyParent := findOID(t, catalog, "legacy_parent")
-		legacyChild := findOID(t, catalog, "legacy_child")
+		events := findKey(t, catalog, "events")
+		defaultPart := findKey(t, catalog, "events_default")
+		legacyParent := findKey(t, catalog, "legacy_parent")
+		legacyChild := findKey(t, catalog, "legacy_child")
 
 		assert.Len(t, catalog.Children(events), 2)
-		assert.ElementsMatch(t, []OID{defaultPart, findOID(t, catalog, "events_2025")},
+		assert.ElementsMatch(t, []RelationKey{defaultPart, findKey(t, catalog, "events_2025")},
 			catalog.PartitionDescendants(events))
 
 		// ATTACH and DETACH lock the default partition without ever naming it.
@@ -305,7 +314,7 @@ func TestPartitionTree(t *testing.T) {
 		assert.Empty(t, catalog.PendingDetach(events))
 
 		// Classic inheritance is in the closure a TRUNCATE expands, but not in the partition one.
-		assert.Equal(t, []OID{legacyChild}, catalog.Descendants(legacyParent))
+		assert.Equal(t, []RelationKey{legacyChild}, catalog.Descendants(legacyParent))
 		assert.Empty(t, catalog.PartitionDescendants(legacyParent))
 
 		parents := catalog.Parents(legacyChild)
@@ -314,17 +323,19 @@ func TestPartitionTree(t *testing.T) {
 		assert.False(t, parents[0].ParentIsPartitioned)
 
 		// Two levels: the partitioned default carries partitions of its own.
-		metrics := findOID(t, catalog, "metrics")
-		metricsDefault := findOID(t, catalog, "metrics_default")
+		metrics := findKey(t, catalog, "metrics")
+		metricsDefault := findKey(t, catalog, "metrics_default")
 		assert.Len(t, catalog.PartitionDescendants(metrics), 5)
 		assert.Len(t, catalog.PartitionDescendants(metricsDefault), 3)
 
 		// An index tree mirrors the table tree, and its edges count as partition edges.
-		index := findOID(t, catalog, "metrics_at_idx")
+		index := findKey(t, catalog, "metrics_at_idx")
 		leafIndexes := catalog.PartitionDescendants(index)
 		assert.Len(t, leafIndexes, 5)
-		for _, oid := range leafIndexes {
-			_, ok := catalog.TableOfIndex(oid)
+		for _, key := range leafIndexes {
+			oid, ok := key.OID()
+			require.True(t, ok, "a snapshot relation is keyed by its OID")
+			_, ok = catalog.TableOfIndex(oid)
 			assert.True(t, ok, "every index of the tree belongs to one partition")
 		}
 	})
@@ -357,32 +368,46 @@ func TestTriggerLookup(t *testing.T) {
 	})
 }
 
-// The shadow catalog: a relation the migration declares can take part in the edges it draws.
-func TestDeclaredEdges(t *testing.T) {
+// The shadow catalog: a relation the migration declares takes part in the links it draws, by name,
+// and never carries an OID a snapshot lookup could mistake for one of its own.
+func TestDeclaredLinks(t *testing.T) {
 	eachVersion(t, func(t *testing.T, catalog *Catalog, _ int) {
-		events := findOID(t, catalog, "events")
+		events := findKey(t, catalog, "events")
 
 		catalog.Declare(name("events_2027"), "r")
 		declared := catalog.Resolve(name("events_2027"), nil)
-		require.NotZero(t, declared.Relation.OID, "a declared relation gets an OID of its own")
-		rel, ok := catalog.ByOID(declared.Relation.OID)
+		require.Equal(t, OriginCreated, declared.Origin)
+		assert.Zero(t, declared.Relation.OID, "a declared relation has no OID")
+		key := declared.Key()
+		assert.Equal(t, DeclaredKey(name("events_2027")), key)
+		_, isSnapshot := key.OID()
+		assert.False(t, isSnapshot)
+
+		back, ok := catalog.RelationByKey(key)
 		require.True(t, ok)
-		assert.Equal(t, "events_2027", rel.Name)
+		assert.Equal(t, declared.Name, back.Name)
+		_, ok = catalog.RelationByKey(DeclaredKey(name("never_declared")))
+		assert.False(t, ok)
 
-		catalog.Declare(name("events_2028"), "r")
-		assert.NotEqual(t, declared.Relation.OID, catalog.Resolve(name("events_2028"), nil).Relation.OID)
+		catalog.DeclareLink(Link{Parent: events, Child: key, ParentIsPartitioned: true})
+		assert.Contains(t, catalog.PartitionDescendants(events), key)
+		require.Len(t, catalog.Parents(key), 1)
+		assert.Equal(t, events, catalog.Parents(key)[0].Parent)
 
-		catalog.DeclareEdge(InheritEdge{Parent: events, Child: declared.Relation.OID, ParentIsPartitioned: true})
-		assert.Contains(t, catalog.PartitionDescendants(events), declared.Relation.OID)
-		require.Len(t, catalog.Parents(declared.Relation.OID), 1)
-
-		// Declaring the same edge twice keeps one.
-		catalog.DeclareEdge(InheritEdge{Parent: events, Child: declared.Relation.OID, ParentIsPartitioned: true})
+		// Declaring the same link twice keeps one.
+		catalog.DeclareLink(Link{Parent: events, Child: key, ParentIsPartitioned: true})
 		assert.Len(t, catalog.Children(events), 3)
 
-		catalog.RemoveEdge(events, declared.Relation.OID)
-		assert.NotContains(t, catalog.PartitionDescendants(events), declared.Relation.OID)
-		assert.Empty(t, catalog.Parents(declared.Relation.OID))
+		// A declared parent takes a snapshot child, and the two kinds of key never meet.
+		catalog.Declare(name("np"), "p")
+		parent := catalog.Resolve(name("np"), nil).Key()
+		orders := findKey(t, catalog, "orders")
+		catalog.DeclareLink(Link{Parent: parent, Child: orders, ParentIsPartitioned: true})
+		assert.Equal(t, []RelationKey{orders}, catalog.PartitionDescendants(parent))
+
+		catalog.RemoveLink(events, key)
+		assert.NotContains(t, catalog.PartitionDescendants(events), key)
+		assert.Empty(t, catalog.Parents(key))
 	})
 }
 

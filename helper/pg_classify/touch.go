@@ -75,34 +75,33 @@ func (s scope) ownTargets(touches []touch) []pg_contract.Target {
 func (s scope) belowTargets(touches []touch) []pg_contract.Target {
 	var targets []pg_contract.Target
 	for _, t := range touches {
-		targets = s.walk(t, t.info, map[pg_catalog.OID]bool{}, targets)
+		targets = s.walk(t, t.info, map[pg_catalog.RelationKey]bool{}, targets)
 	}
 	return targets
 }
 
 // walk follows the partition and inheritance edges under one relation, the way the server
 // does when it works inside a tree: every level at the touch's lock, the work on the leaves.
-func (s scope) walk(t touch, parent pg_catalog.RelationInfo, seen map[pg_catalog.OID]bool, targets []pg_contract.Target) []pg_contract.Target {
+func (s scope) walk(t touch, parent pg_catalog.RelationInfo, seen map[pg_catalog.RelationKey]bool, targets []pg_contract.Target) []pg_contract.Target {
 	if !parent.Exists() {
 		return targets
 	}
-	for _, edge := range s.catalog.Children(parent.Relation.OID) {
+	for _, link := range s.catalog.Children(parent.Key()) {
 		reaches := t.below.children
-		if edge.ParentIsPartitioned {
+		if link.ParentIsPartitioned {
 			reaches = t.below.partitions
 		}
-		if (reaches != locked && reaches != worked) || seen[edge.Child] {
+		if (reaches != locked && reaches != worked) || seen[link.Child] {
 			continue
 		}
-		seen[edge.Child] = true
-		rel, ok := s.catalog.ByOID(edge.Child)
+		seen[link.Child] = true
+		child, ok := s.catalog.RelationByKey(link.Child)
 		if !ok {
 			continue
 		}
-		child := s.infoOf(rel)
 
 		lock := t.lock
-		if edge.ParentIsPartitioned && t.below.partitionLock != pg_contract.LockNone {
+		if link.ParentIsPartitioned && t.below.partitionLock != pg_contract.LockNone {
 			lock = t.below.partitionLock
 		}
 		op := pg_contract.OpKindMetadata
@@ -158,8 +157,8 @@ func (s scope) hasPartitions(info pg_catalog.RelationInfo) bool {
 	if !info.Exists() {
 		return false
 	}
-	for _, edge := range s.catalog.Children(info.Relation.OID) {
-		if edge.ParentIsPartitioned {
+	for _, link := range s.catalog.Children(info.Key()) {
+		if link.ParentIsPartitioned {
 			return true
 		}
 	}

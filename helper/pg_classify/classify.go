@@ -66,7 +66,6 @@ func (c *Classifier) classify(statement pg_parse.Statement, context Context) pg_
 		analysis.Findings = nil
 	}
 
-	// A statement the server refuses changes no edge.
 	if !analysis.HasErrors() {
 		c.session.Link(statement, context)
 	}
@@ -246,17 +245,17 @@ func (s scope) descendantsOf(info pg_catalog.RelationInfo) []descendant {
 	if !info.Exists() {
 		return nil
 	}
-	partitions := map[pg_catalog.OID]bool{}
-	for _, oid := range s.catalog.PartitionDescendants(info.Relation.OID) {
-		partitions[oid] = true
+	partitions := map[pg_catalog.RelationKey]bool{}
+	for _, key := range s.catalog.PartitionDescendants(info.Key()) {
+		partitions[key] = true
 	}
 	var out []descendant
-	for _, oid := range s.catalog.Descendants(info.Relation.OID) {
-		rel, ok := s.catalog.ByOID(oid)
+	for _, key := range s.catalog.Descendants(info.Key()) {
+		child, ok := s.catalog.RelationByKey(key)
 		if !ok {
 			continue
 		}
-		out = append(out, descendant{relation: rel.Contract(), partition: partitions[oid]})
+		out = append(out, descendant{relation: contract(child), partition: partitions[key]})
 	}
 	return out
 }

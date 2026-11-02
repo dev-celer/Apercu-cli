@@ -4,7 +4,6 @@ import (
 	"apercu-cli/helper"
 	"apercu-cli/helper/pg_contract"
 	"fmt"
-	"math"
 	"slices"
 	"sort"
 	"strings"
@@ -23,8 +22,6 @@ type Catalog struct {
 
 	// createdByMigration holds the Relation the migration itself create.
 	createdByMigration map[helper.FullRelationName]Relation
-	// shadowOID is the last OID handed to a relation the migration declares, counting down from the top of the range.
-	shadowOID OID
 
 	// unresolved counts the distinct names no snapshot could found.
 	unresolved map[helper.FullRelationName]struct{}
@@ -72,7 +69,6 @@ func NewCatalog(opts CatalogOptions) (*Catalog, error) {
 		byName:             make(map[helper.FullRelationName]Relation, len(opts.Pre.Relations)),
 		byOID:              make(map[OID]Relation, len(opts.Pre.Relations)),
 		createdByMigration: map[helper.FullRelationName]Relation{},
-		shadowOID:          math.MaxUint32,
 		unresolved:         map[helper.FullRelationName]struct{}{},
 		settings:           map[string]Setting{},
 		extensions:         map[string]Extension{},
@@ -90,7 +86,6 @@ func NewCatalog(opts CatalogOptions) (*Catalog, error) {
 			name := rel.RelationName()
 			if _, existed := c.byName[name]; !existed {
 				c.createdByMigration[name] = rel
-				c.byOID[rel.OID] = rel
 			}
 		}
 	}
@@ -173,6 +168,19 @@ type RelationInfo struct {
 // Exists reports whether the relation is found from the snapshot or the shadow catalog.
 func (r RelationInfo) Exists() bool { return r.Origin != OriginUnknown }
 
+// Key is the relation's node in the partition and inheritance graph: its OID when the pre-migration
+// snapshot holds it, its qualified name when the migration created it, nothing when it is unknown.
+func (r RelationInfo) Key() RelationKey {
+	switch r.Origin {
+	case OriginExisting:
+		return SnapshotKey(r.Relation.OID)
+	case OriginCreated:
+		return DeclaredKey(r.Name)
+	default:
+		return RelationKey{}
+	}
+}
+
 // Resolve turns a name from a statement into a relation.
 //
 // An unqualified name is looked up through the search path.
@@ -224,6 +232,21 @@ func (c *Catalog) lookup(name helper.FullRelationName) RelationInfo {
 	return RelationInfo{Name: name, ProdBytes: -1}
 }
 
+// RelationByKey resolves a node of the partition and inheritance graph back to its relation.
+func (c *Catalog) RelationByKey(key RelationKey) (RelationInfo, bool) {
+	if oid, ok := key.OID(); ok {
+		rel, found := c.byOID[oid]
+		if !found {
+			return RelationInfo{}, false
+		}
+		return c.lookup(rel.RelationName()), true
+	}
+	if _, declared := c.createdByMigration[key.declared]; !declared {
+		return RelationInfo{}, false
+	}
+	return c.lookup(key.declared), true
+}
+
 // ByOID resolves a relation the catalog already handed out an OID for.
 func (c *Catalog) ByOID(oid OID) (Relation, bool) {
 	rel, ok := c.byOID[oid]
@@ -255,11 +278,7 @@ func (c *Catalog) Declare(name helper.FullRelationName, kind string) {
 	if _, declared := c.createdByMigration[name]; declared {
 		return
 	}
-	// No snapshot gave it an OID, so it gets one of its own: the edges a later statement draws to it are keyed on OIDs.
-	c.shadowOID--
-	rel := Relation{OID: c.shadowOID, Namespace: name.Schema, Name: name.Table, Kind: kind}
-	c.createdByMigration[name] = rel
-	c.byOID[rel.OID] = rel
+	c.createdByMigration[name] = Relation{Namespace: name.Schema, Name: name.Table, Kind: kind}
 	delete(c.unresolved, name)
 }
 
@@ -305,8 +324,8 @@ func (c *Catalog) previewSizeOf(rel Relation) int64 {
 		return storageBytes(rel)
 	}
 	var total int64
-	for _, leaf := range c.relations.partitionDescendants(rel.OID) {
-		if child, ok := c.byOID[leaf]; ok {
+	for _, leaf := range c.relations.partitionDescendants(SnapshotKey(rel.OID)) {
+		if child, ok := c.byOID[leaf.oid]; ok {
 			total += storageBytes(child)
 		}
 	}
@@ -331,8 +350,8 @@ func (c *Catalog) prodSizeOf(rel Relation, rawProdSize map[helper.FullRelationNa
 
 	var total int64
 	var known bool
-	for _, leaf := range c.relations.partitionDescendants(rel.OID) {
-		child, ok := c.byOID[leaf]
+	for _, leaf := range c.relations.partitionDescendants(SnapshotKey(rel.OID)) {
+		child, ok := c.byOID[leaf.oid]
 		if !ok {
 			continue
 		}

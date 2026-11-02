@@ -55,7 +55,7 @@ func (s *Session) declare(statement pg_parse.Statement, context Context) {
 	}
 }
 
-// link updates the shadow catalog's parent-child edges for the ones a statement draws or breaks,
+// link updates the shadow catalog's parent-child links for the ones a statement draws or breaks,
 // so the statements after it expand through the tree the migration has built so far.
 // The server never combines ATTACH or DETACH with another clause, so the statement's own expansion
 // is the tree before it, and the next one's is the tree after it.
@@ -83,19 +83,19 @@ func (s *Session) link(statement pg_parse.Statement, context Context) {
 		switch {
 		case sub.Kind == pg_parse.SubAttachPartition && statement.Command == "CREATE TABLE":
 			// CREATE TABLE … PARTITION OF names the new table first and its parent in the clause.
-			s.catalog.DeclareEdge(pg_catalog.InheritEdge{Parent: other.Relation.OID, Child: named.Relation.OID,
+			s.catalog.DeclareLink(pg_catalog.Link{Parent: other.Key(), Child: named.Key(),
 				ParentIsPartitioned: true, IsDefaultPartition: sub.Value == "DEFAULT"})
 		case sub.Kind == pg_parse.SubAttachPartition:
 			// ALTER TABLE … ATTACH PARTITION, and ALTER INDEX … ATTACH PARTITION for an index tree.
-			s.catalog.DeclareEdge(pg_catalog.InheritEdge{Parent: named.Relation.OID, Child: other.Relation.OID,
+			s.catalog.DeclareLink(pg_catalog.Link{Parent: named.Key(), Child: other.Key(),
 				ParentIsPartitioned: true, IsDefaultPartition: sub.Value == "DEFAULT"})
 		case sub.Kind == pg_parse.SubDetachPartition:
-			s.catalog.RemoveEdge(named.Relation.OID, other.Relation.OID)
+			s.catalog.RemoveLink(named.Key(), other.Key())
 		case sub.Kind == pg_parse.SubAddInherit:
 			// INHERITS and ALTER TABLE … INHERIT both name the child first.
-			s.catalog.DeclareEdge(pg_catalog.InheritEdge{Parent: other.Relation.OID, Child: named.Relation.OID})
+			s.catalog.DeclareLink(pg_catalog.Link{Parent: other.Key(), Child: named.Key()})
 		case sub.Kind == pg_parse.SubDropInherit:
-			s.catalog.RemoveEdge(other.Relation.OID, named.Relation.OID)
+			s.catalog.RemoveLink(other.Key(), named.Key())
 		}
 	}
 }

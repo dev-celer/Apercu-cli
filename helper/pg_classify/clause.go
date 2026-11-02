@@ -4,8 +4,7 @@ import (
 	"apercu-cli/helper/pg_contract"
 )
 
-// clause is the static effect of one rule code on the relation the statement names: what does
-// not depend on the expression, the catalog or anything the rule has to look up.
+// clause is the static effect of one rule code on the relation the statement names.
 type clause struct {
 	lock pg_contract.Lock
 	op   pg_contract.OpKind
@@ -106,12 +105,10 @@ func (c clause) accepts(version pg_contract.Version) bool {
 	return version == pg_contract.VersionUnknown || c.partitioned.IsUnbounded() || c.partitioned.Contains(version)
 }
 
-// clauses is the static half of every rule, keyed by rule code.
 var clauses = map[pg_contract.Code]clause{
 	// columns.
 	"R-AT-ADDCOL": {lock: pg_contract.LockAccessExclusive, op: pg_contract.OpKindMetadata, below: everywhere},
-	// ONLY stops the column being dropped from the children, not the children being locked: their
-	// inheritance count still has to come down.
+	// ONLY stops the column being dropped from the children, not the children being locked.
 	"R-AT-DROPCOL":    {lock: pg_contract.LockAccessExclusive, op: pg_contract.OpKindMetadata, below: everywhere, underOnly: everywhere},
 	"R-AT-TYPE":       {lock: pg_contract.LockAccessExclusive, op: pg_contract.OpKindRewrite, below: everywhere},
 	"R-AT-SETDEF":     {lock: pg_contract.LockAccessExclusive, op: pg_contract.OpKindMetadata, below: everywhere},
@@ -144,7 +141,6 @@ var clauses = map[pg_contract.Code]clause{
 	"R-AT-ADDCHECK-NV": {lock: pg_contract.LockAccessExclusive, op: pg_contract.OpKindMetadata, below: everywhere},
 	"R-AT-ADDNN-NV":    {lock: pg_contract.LockAccessExclusive, op: pg_contract.OpKindMetadata, below: everywhere},
 	"R-AT-ADDUSINGIDX": {lock: pg_contract.LockAccessExclusive, op: pg_contract.OpKindMetadata, below: everywhere},
-	// A foreign key recurses into partitions only; from 18 the classic children are opened too, but get nothing.
 	"R-AT-ADDFK": {lock: pg_contract.LockShareRowExclusive, op: pg_contract.OpKindScan, below: toPartitions,
 		changes: []change{{from: pg_contract.Version18, below: below{partitions: worked, children: locked}}}},
 	"R-AT-ADDFK-NV": {lock: pg_contract.LockShareRowExclusive, op: pg_contract.OpKindMetadata, below: toPartitions,
@@ -154,9 +150,8 @@ var clauses = map[pg_contract.Code]clause{
 	"R-AT-ALTERCON-INH": {lock: pg_contract.LockAccessExclusive, op: pg_contract.OpKindMetadata, below: everywhere},
 	"R-AT-ALTERCON-ENF": {lock: pg_contract.LockAccessExclusive, op: pg_contract.OpKindMetadata, below: everywhere},
 	"R-AT-RENAMECON":    {lock: pg_contract.LockAccessExclusive, op: pg_contract.OpKindMetadata, below: everywhere},
-	// 15-17 hold SHARE on each partition while the parent's index is built, 18 holds ACCESS
-	// EXCLUSIVE; UNIQUE and EXCLUDE leave the classic children alone up to 17, then open them
-	// without building anything there, as PRIMARY KEY always does.
+	// 15-17 hold SHARE on each partition while the parent's index is built, 18 holds ACCESS EXCLUSIVE;
+	// UNIQUE and EXCLUDE leave the classic children alone up to 17.
 	"R-AT-ADDUNIQUE": {lock: pg_contract.LockAccessExclusive, op: pg_contract.OpKindScan,
 		below:   below{partitions: worked, partitionLock: pg_contract.LockShare},
 		changes: []change{{from: pg_contract.Version18, below: below{partitions: worked, children: locked}}}},
@@ -168,33 +163,27 @@ var clauses = map[pg_contract.Code]clause{
 	"R-AT-ADDPK": {lock: pg_contract.LockAccessExclusive, op: pg_contract.OpKindScan,
 		below:   below{partitions: worked, children: locked, partitionLock: pg_contract.LockShare},
 		changes: []change{{from: pg_contract.Version18, below: below{partitions: worked, children: locked}}}},
-	// ONLY stops the constraint being dropped from the children, not the children being locked:
-	// their inheritance count still has to come down. Up to 17 a partitioned parent with partitions refuses it (42P16).
+	// ONLY stops the constraint being dropped from the children, not the children being locked.
 	"R-AT-DROPCON": {lock: pg_contract.LockAccessExclusive, op: pg_contract.OpKindMetadata, below: everywhere,
 		underOnly:   below{partitions: refused, children: worked},
 		onlyRefusal: "PostgreSQL 15-17 cannot remove a constraint from only the partitioned table while partitions exist",
 		changes:     []change{{from: pg_contract.Version18, below: everywhere, underOnly: everywhere}}},
 
 	// triggers, rules, row-level security.
-	// A row trigger is cloned onto every partition and a statement trigger is not; neither reaches
-	// a classic child. The rule narrows the reach once it knows the trigger fires per statement.
-	"R-AT-TRIG":     {lock: pg_contract.LockShareRowExclusive, op: pg_contract.OpKindMetadata, below: toPartitions},
-	"R-AT-TRIG-REP": {lock: pg_contract.LockShareRowExclusive, op: pg_contract.OpKindMetadata, below: toPartitions},
-	// A rule is the table's own: the server never recurses it.
+	"R-AT-TRIG":      {lock: pg_contract.LockShareRowExclusive, op: pg_contract.OpKindMetadata, below: toPartitions},
+	"R-AT-TRIG-REP":  {lock: pg_contract.LockShareRowExclusive, op: pg_contract.OpKindMetadata, below: toPartitions},
 	"R-AT-RULE":      {lock: pg_contract.LockAccessExclusive, op: pg_contract.OpKindMetadata, below: nowhere},
 	"R-AT-RLS":       {lock: pg_contract.LockAccessExclusive, op: pg_contract.OpKindMetadata, below: nowhere},
 	"R-AT-RLS-FORCE": {lock: pg_contract.LockAccessExclusive, op: pg_contract.OpKindMetadata, below: nowhere},
 
 	// storage, layout, ownership.
-	// The server never recurses storage parameters into the partitions or the inheritance children;
-	// the lock is the strongest any named parameter asks for.
+	// The server never recurses storage parameters into the partitions or the inheritance children.
 	"R-AT-RELOPT":     {lock: pg_contract.LockNone, op: pg_contract.OpKindMetadata, below: nowhere},
 	"R-AT-TABLESPACE": {lock: pg_contract.LockAccessExclusive, op: pg_contract.OpKindRewrite, below: nowhere},
 	"R-AT-ACCESSMETHOD": {lock: pg_contract.LockAccessExclusive, op: pg_contract.OpKindMetadata, below: nowhere,
 		partitioned: pg_contract.AtLeast(pg_contract.Version17),
 		refusal:     "PostgreSQL 15 and 16 cannot change the access method of a partitioned table"},
-	"R-AT-LOGGED": {lock: pg_contract.LockAccessExclusive, op: pg_contract.OpKindRewrite, below: nowhere},
-	// The mark is the named table's own; the server never recurses it.
+	"R-AT-LOGGED":      {lock: pg_contract.LockAccessExclusive, op: pg_contract.OpKindRewrite, below: nowhere},
 	"R-AT-CLUSTERON":   {lock: pg_contract.LockShareUpdateExclusive, op: pg_contract.OpKindMetadata, below: nowhere},
 	"R-AT-WITHOUTOIDS": {lock: pg_contract.LockAccessExclusive, op: pg_contract.OpKindMetadata, below: everywhere},
 	"R-AT-OWNER":       {lock: pg_contract.LockAccessExclusive, op: pg_contract.OpKindMetadata, below: nowhere},
@@ -247,12 +236,11 @@ var clauses = map[pg_contract.Code]clause{
 	// the objects that hang off a table.
 	"R-OB-CREATETRIG": {lock: pg_contract.LockShareRowExclusive, op: pg_contract.OpKindMetadata, below: toPartitions},
 	"R-OB-DROPTRIG":   {lock: pg_contract.LockAccessExclusive, op: pg_contract.OpKindMetadata, below: toPartitions},
-	// The rename locks every partition, whatever the trigger, and never a classic child.
-	"R-OB-ALTERTRIG": {lock: pg_contract.LockAccessExclusive, op: pg_contract.OpKindMetadata, below: toPartitions},
-	"R-OB-POLICY":    {lock: pg_contract.LockAccessExclusive, op: pg_contract.OpKindMetadata, below: nowhere},
-	"R-OB-RULE":      {lock: pg_contract.LockAccessExclusive, op: pg_contract.OpKindMetadata, below: nowhere},
-	"R-OB-STATS":     {lock: pg_contract.LockShareUpdateExclusive, op: pg_contract.OpKindMetadata, below: nowhere},
-	"R-OB-COMMENT":   {lock: pg_contract.LockShareUpdateExclusive, op: pg_contract.OpKindMetadata, below: nowhere},
+	"R-OB-ALTERTRIG":  {lock: pg_contract.LockAccessExclusive, op: pg_contract.OpKindMetadata, below: toPartitions},
+	"R-OB-POLICY":     {lock: pg_contract.LockAccessExclusive, op: pg_contract.OpKindMetadata, below: nowhere},
+	"R-OB-RULE":       {lock: pg_contract.LockAccessExclusive, op: pg_contract.OpKindMetadata, below: nowhere},
+	"R-OB-STATS":      {lock: pg_contract.LockShareUpdateExclusive, op: pg_contract.OpKindMetadata, below: nowhere},
+	"R-OB-COMMENT":    {lock: pg_contract.LockShareUpdateExclusive, op: pg_contract.OpKindMetadata, below: nowhere},
 	// PG18 opens the relation at ACCESS SHARE, 15 to 17 take no lock at all; the rule picks.
 	"R-OB-GRANT":  {lock: pg_contract.LockNone, op: pg_contract.OpKindMetadata, below: nowhere},
 	"R-OB-DEFACL": {lock: pg_contract.LockNone, op: pg_contract.OpKindNone, below: nowhere},
@@ -282,7 +270,7 @@ var clauses = map[pg_contract.Code]clause{
 	"R-MT-COPYFROM": {lock: pg_contract.LockRowExclusive, op: pg_contract.OpKindDML, below: toPartitions},
 	"R-MT-COPYTO":   {lock: pg_contract.LockAccessShare, op: pg_contract.OpKindNone, below: nowhere},
 
-	// data backfills. A row routed into a partition reaches it; an INSERT never lands in a classic child.
+	// data backfills.
 	"R-DML-INSERT":    {lock: pg_contract.LockRowExclusive, op: pg_contract.OpKindDML, below: toPartitions},
 	"R-DML-UPDATE":    {lock: pg_contract.LockRowExclusive, op: pg_contract.OpKindDML, below: everywhere},
 	"R-DML-DELETE":    {lock: pg_contract.LockRowExclusive, op: pg_contract.OpKindDML, below: everywhere},

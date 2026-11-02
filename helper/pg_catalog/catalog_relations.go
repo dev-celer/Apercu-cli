@@ -5,7 +5,56 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"apercu-cli/helper"
 )
+
+// RelationKey is a node of the partition and inheritance graph: a relation a snapshot holds, by
+// OID, or one the migration declared, by the qualified name it was declared under. Exactly one of
+// the two is set, so a declared relation never carries an OID it could be mistaken for.
+type RelationKey struct {
+	oid      OID
+	declared helper.FullRelationName
+}
+
+// SnapshotKey is the key of a relation the pre-migration snapshot holds.
+func SnapshotKey(oid OID) RelationKey { return RelationKey{oid: oid} }
+
+// DeclaredKey is the key of a relation the migration declared, by its qualified name.
+func DeclaredKey(name helper.FullRelationName) RelationKey { return RelationKey{declared: name} }
+
+// OID is the snapshot OID behind the key, false for a declared relation.
+func (k RelationKey) OID() (OID, bool) { return k.oid, k.oid != 0 }
+
+func (k RelationKey) String() string {
+	if k.oid != 0 {
+		return fmt.Sprintf("oid %d", k.oid)
+	}
+	return k.declared.String()
+}
+
+// Link is one parent-child edge of the partition and inheritance graph, between relations the
+// snapshot holds or relations the migration declared.
+type Link struct {
+	Parent RelationKey
+	Child  RelationKey
+	// DetachPending marks an interrupted DETACH CONCURRENTLY.
+	DetachPending      bool
+	IsDefaultPartition bool
+	// ParentIsPartitioned separates declarative partitioning, index trees included, from classic INHERITS.
+	ParentIsPartitioned bool
+}
+
+// linkOf is a snapshot edge as a node of the graph.
+func linkOf(edge InheritEdge) Link {
+	return Link{
+		Parent:              SnapshotKey(edge.Parent),
+		Child:               SnapshotKey(edge.Child),
+		DetachPending:       edge.DetachPending,
+		IsDefaultPartition:  edge.IsDefaultPartition,
+		ParentIsPartitioned: edge.ParentIsPartitioned,
+	}
+}
 
 // columnKey identifies one column by its relation and its name.
 type columnKey struct {
@@ -22,8 +71,8 @@ type relationIndex struct {
 	fkTo           map[OID][]Constraint        // All foreign key Constraint targeting this table, keyed by table OID
 	sequences      map[OID]Sequence            // All Sequence, keyed by sequence OID
 	sequencesOwned map[OID][]Sequence          // All Sequence a table owns, keyed by the owning table OID
-	children       map[OID][]InheritEdge       // All InheritEdge children for a relation, keyed by parent relation OID
-	parents        map[OID][]InheritEdge       // All InheritEdge parents for a relation, keyed by children relation OID
+	children       map[RelationKey][]Link      // All Link to the children of a relation, keyed by the parent
+	parents        map[RelationKey][]Link      // All Link to the parents of a relation, keyed by the child
 	columns        map[OID][]Column            // All Column for a table, keyed by table OID
 	columnByName   map[columnKey]Column        // All Column keyed by columnKey (table OID + column name)
 	defaults       map[columnKey]ColumnDefault // All Column default keyed by columnKey (table OID + column name)
@@ -41,8 +90,8 @@ func (r *relationIndex) build(snapshot *Snapshot) {
 	r.fkTo = map[OID][]Constraint{}
 	r.sequences = make(map[OID]Sequence, len(snapshot.Sequences))
 	r.sequencesOwned = map[OID][]Sequence{}
-	r.children = map[OID][]InheritEdge{}
-	r.parents = map[OID][]InheritEdge{}
+	r.children = map[RelationKey][]Link{}
+	r.parents = map[RelationKey][]Link{}
 	r.columns = map[OID][]Column{}
 	r.columnByName = make(map[columnKey]Column, len(snapshot.Columns))
 	r.defaults = make(map[columnKey]ColumnDefault, len(snapshot.Defaults))
@@ -71,8 +120,9 @@ func (r *relationIndex) build(snapshot *Snapshot) {
 		}
 	}
 	for _, edge := range snapshot.Inherits {
-		r.children[edge.Parent] = append(r.children[edge.Parent], edge)
-		r.parents[edge.Child] = append(r.parents[edge.Child], edge)
+		link := linkOf(edge)
+		r.children[link.Parent] = append(r.children[link.Parent], link)
+		r.parents[link.Child] = append(r.parents[link.Child], link)
 	}
 	for _, column := range snapshot.Columns {
 		r.columns[column.RelID] = append(r.columns[column.RelID], column)
@@ -105,24 +155,24 @@ func (r *relationIndex) columnAt(relID OID, num int16) (Column, bool) {
 }
 
 // partitionDescendants return all the partition child of a partitioned table
-func (r *relationIndex) partitionDescendants(parent OID) []OID {
-	return r.descend(parent, func(edge InheritEdge) bool { return edge.ParentIsPartitioned })
+func (r *relationIndex) partitionDescendants(parent RelationKey) []RelationKey {
+	return r.descend(parent, func(link Link) bool { return link.ParentIsPartitioned })
 }
 
-func (r *relationIndex) descend(parent OID, keep func(InheritEdge) bool) []OID {
-	var out []OID
-	seen := map[OID]bool{parent: true}
-	queue := []OID{parent}
+func (r *relationIndex) descend(parent RelationKey, keep func(Link) bool) []RelationKey {
+	var out []RelationKey
+	seen := map[RelationKey]bool{parent: true}
+	queue := []RelationKey{parent}
 	for len(queue) > 0 {
 		current := queue[0]
 		queue = queue[1:]
-		for _, edge := range r.children[current] {
-			if !keep(edge) || seen[edge.Child] {
+		for _, link := range r.children[current] {
+			if !keep(link) || seen[link.Child] {
 				continue
 			}
-			seen[edge.Child] = true
-			out = append(out, edge.Child)
-			queue = append(queue, edge.Child)
+			seen[link.Child] = true
+			out = append(out, link.Child)
+			queue = append(queue, link.Child)
 		}
 	}
 	return out
@@ -200,46 +250,46 @@ func (c *Catalog) SequencesOwnedBy(relID OID) []Sequence {
 }
 
 // Children lists the direct children of a relation.
-func (c *Catalog) Children(relID OID) []InheritEdge {
-	return c.relations.children[relID]
+func (c *Catalog) Children(key RelationKey) []Link {
+	return c.relations.children[key]
 }
 
 // Parents lists the direct parents of a relation.
-func (c *Catalog) Parents(relID OID) []InheritEdge {
-	return c.relations.parents[relID]
+func (c *Catalog) Parents(key RelationKey) []Link {
+	return c.relations.parents[key]
 }
 
 // Descendants return all children recursively from a relation.
-func (c *Catalog) Descendants(relID OID) []OID {
-	return c.relations.descend(relID, func(InheritEdge) bool { return true })
+func (c *Catalog) Descendants(key RelationKey) []RelationKey {
+	return c.relations.descend(key, func(Link) bool { return true })
 }
 
 // PartitionDescendants return all the partition child of a partitioned table
-func (c *Catalog) PartitionDescendants(relID OID) []OID {
-	return c.relations.partitionDescendants(relID)
+func (c *Catalog) PartitionDescendants(key RelationKey) []RelationKey {
+	return c.relations.partitionDescendants(key)
 }
 
 // DefaultPartition return the default partition of a partitioned table, or false if no default partition exist
-func (c *Catalog) DefaultPartition(relID OID) (OID, bool) {
-	for _, edge := range c.relations.children[relID] {
-		if edge.IsDefaultPartition {
-			return edge.Child, true
+func (c *Catalog) DefaultPartition(key RelationKey) (RelationKey, bool) {
+	for _, link := range c.relations.children[key] {
+		if link.IsDefaultPartition {
+			return link.Child, true
 		}
 	}
-	return 0, false
+	return RelationKey{}, false
 }
 
-// DeclareEdge records a parent-child link the migration draws: ATTACH, PARTITION OF, INHERIT.
-func (c *Catalog) DeclareEdge(edge InheritEdge) {
-	c.RemoveEdge(edge.Parent, edge.Child)
-	c.relations.children[edge.Parent] = append(c.relations.children[edge.Parent], edge)
-	c.relations.parents[edge.Child] = append(c.relations.parents[edge.Child], edge)
+// DeclareLink records a parent-child link the migration draws: ATTACH, PARTITION OF, INHERIT.
+func (c *Catalog) DeclareLink(link Link) {
+	c.RemoveLink(link.Parent, link.Child)
+	c.relations.children[link.Parent] = append(c.relations.children[link.Parent], link)
+	c.relations.parents[link.Child] = append(c.relations.parents[link.Child], link)
 }
 
-// RemoveEdge forgets a parent-child link the migration breaks: DETACH, NO INHERIT.
-func (c *Catalog) RemoveEdge(parent, child OID) {
-	c.relations.children[parent] = slices.DeleteFunc(c.relations.children[parent], func(edge InheritEdge) bool { return edge.Child == child })
-	c.relations.parents[child] = slices.DeleteFunc(c.relations.parents[child], func(edge InheritEdge) bool { return edge.Parent == parent })
+// RemoveLink forgets a parent-child link the migration breaks: DETACH, NO INHERIT.
+func (c *Catalog) RemoveLink(parent, child RelationKey) {
+	c.relations.children[parent] = slices.DeleteFunc(c.relations.children[parent], func(link Link) bool { return link.Child == child })
+	c.relations.parents[child] = slices.DeleteFunc(c.relations.parents[child], func(link Link) bool { return link.Parent == parent })
 }
 
 // TriggerByName resolves a user trigger by its table and name.
@@ -258,11 +308,11 @@ func (c *Catalog) TriggersOf(relID OID) []Trigger {
 }
 
 // PendingDetach lists the children of a partitioned table left pending by an interrupted DETACH CONCURRENTLY.
-func (c *Catalog) PendingDetach(relID OID) []OID {
-	var pending []OID
-	for _, edge := range c.relations.children[relID] {
-		if edge.DetachPending {
-			pending = append(pending, edge.Child)
+func (c *Catalog) PendingDetach(key RelationKey) []RelationKey {
+	var pending []RelationKey
+	for _, link := range c.relations.children[key] {
+		if link.DetachPending {
+			pending = append(pending, link.Child)
 		}
 	}
 	return pending

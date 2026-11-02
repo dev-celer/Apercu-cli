@@ -189,3 +189,31 @@ func TestDroppingAReferencedTableReachesTheReferencingTree(t *testing.T) {
 		assert.Equal(t, pg_contract.TargetRoleImplicit, target.Role, table)
 	}
 }
+
+// The shadow catalog: a statement expands through the tree the migration has built so far, links
+// between a declared relation and a snapshot one included.
+func TestExpandFollowsTheLinksTheMigrationDraws(t *testing.T) {
+	t.Parallel()
+
+	catalog := testCatalogOn(t, pg_contract.Version17)
+	analyses := analyze(t, catalog, `
+CREATE TABLE np (id bigint, user_id bigint, total numeric(10,2), status text, code text) PARTITION BY RANGE (id);
+ALTER TABLE np ATTACH PARTITION orders FOR VALUES FROM (0) TO (1000);
+ALTER TABLE np ADD COLUMN z text DEFAULT gen_random_uuid()::text;
+ALTER TABLE np DETACH PARTITION orders;
+ALTER TABLE np ADD COLUMN y text DEFAULT gen_random_uuid()::text;`)
+	require.Len(t, analyses, 5)
+
+	attached := targetOf(t, findingOf(t, analyses[2], "R-AT-ADDCOL"), fixtureName("orders"))
+	assert.Equal(t, pg_contract.LockAccessExclusive, attached.Lock)
+	assert.Equal(t, pg_contract.OpKindRewrite, attached.OpKind, "the attached table is rewritten through its new parent")
+	assert.Equal(t, pg_contract.TargetRoleExpanded, attached.Role)
+
+	for _, target := range findingOf(t, analyses[4], "R-AT-ADDCOL").Targets {
+		assert.NotEqual(t, "orders", target.Relation.Name.Table, "a detached table is no longer reached")
+	}
+
+	np := catalog.Resolve(helper.FullRelationName{Schema: "apercu_snapshot_test", Table: "np"}, nil)
+	require.Equal(t, pg_catalog.OriginCreated, np.Origin)
+	assert.Zero(t, np.Relation.OID, "a relation the migration creates carries no OID")
+}

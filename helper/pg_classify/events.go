@@ -64,15 +64,11 @@ func (s scope) defaultPartitionOf(parent pg_catalog.RelationInfo) (pg_catalog.Re
 	if !parent.Exists() {
 		return pg_catalog.RelationInfo{}, false
 	}
-	oid, ok := s.catalog.DefaultPartition(parent.Relation.OID)
+	key, ok := s.catalog.DefaultPartition(parent.Key())
 	if !ok {
 		return pg_catalog.RelationInfo{}, false
 	}
-	rel, ok := s.catalog.ByOID(oid)
-	if !ok {
-		return pg_catalog.RelationInfo{}, false
-	}
-	return s.infoOf(rel), true
+	return s.catalog.RelationByKey(key)
 }
 
 // movedPartition is the table an ATTACH or a DETACH moves: ACCESS EXCLUSIVE on its whole tree.
@@ -155,13 +151,13 @@ func (s scope) keysInto(partition pg_catalog.RelationInfo) []touch {
 // partition constraint a new partition has to satisfy.
 func (s scope) ancestors(info pg_catalog.RelationInfo) []touch {
 	var touches []touch
-	seen := map[pg_catalog.OID]bool{}
-	for info.Exists() && !seen[info.Relation.OID] {
-		seen[info.Relation.OID] = true
+	seen := map[pg_catalog.RelationKey]bool{}
+	for info.Exists() && !seen[info.Key()] {
+		seen[info.Key()] = true
 		var parent pg_catalog.RelationInfo
-		for _, edge := range s.catalog.Parents(info.Relation.OID) {
-			if rel, ok := s.catalog.ByOID(edge.Parent); ok && edge.ParentIsPartitioned {
-				parent = s.infoOf(rel)
+		for _, link := range s.catalog.Parents(info.Key()) {
+			if rel, ok := s.catalog.RelationByKey(link.Parent); ok && link.ParentIsPartitioned {
+				parent = rel
 			}
 		}
 		if !parent.Exists() {

@@ -185,16 +185,16 @@ func (s scope) partitionParents(info pg_catalog.RelationInfo) []touch {
 		return nil
 	}
 	var targets []touch
-	for _, edge := range s.catalog.Parents(info.Relation.OID) {
-		if !edge.ParentIsPartitioned {
+	for _, link := range s.catalog.Parents(info.Key()) {
+		if !link.ParentIsPartitioned {
 			continue
 		}
-		rel, ok := s.catalog.ByOID(edge.Parent)
+		parent, ok := s.catalog.RelationByKey(link.Parent)
 		if !ok {
 			continue
 		}
 		targets = append(targets, touch{
-			info: s.infoOf(rel),
+			info: parent,
 			lock: pg_contract.LockAccessExclusive,
 			op:   pg_contract.OpKindMetadata,
 			role: pg_contract.TargetRoleImplicit,
