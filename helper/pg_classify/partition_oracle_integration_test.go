@@ -98,7 +98,7 @@ ANALYZE;
 // The gaps a script can still be tagged with. Every other gap the 2026-10-26 audit measured is closed,
 // and its script now has to match the server.
 const (
-	gapBoundProof     = "a CHECK that proves the bound skips the ATTACH scan (V-03)"
+	gapBoundProof     = "a CHECK that proves the bound skips the ATTACH scan (R-AT-ATTACH CHECK branch)"
 	gapInlinedDefault = "a VOLATILE SQL function inlined into a constant default does not rewrite the table"
 )
 

@@ -12,6 +12,9 @@ import (
 // queueRiskCode is a statement that can wait for a lock blocking writers or readers with nothing to bound the wait.
 const queueRiskCode pg_contract.Code = "V-01"
 
+// nullableKeyCode is an ATTACH PARTITION whose CHECK bounds a nullable partition key without ruling NULL out, so it proves nothing.
+const nullableKeyCode pg_contract.Code = "V-03"
+
 // maintenanceStatementCode is a VACUUM FULL or a CLUSTER, maintenance statement that should not be found inside a migration file.
 const maintenanceStatementCode pg_contract.Code = "V-04"
 
@@ -62,6 +65,129 @@ func unboundedQueue(s scope, findings []pg_contract.Finding) []pg_contract.Findi
 			"arriving after it queue behind it, and the readers too where the lock is ACCESS EXCLUSIVE", unboundedReason(s.context.LockTimeout)),
 		Targets: dedupeTargets(targets),
 	}}
+}
+
+// unprovenNullableKey create a warn finding on an ATTACH PARTITION whose partition carries a CHECK on a nullable partition key
+// column and nothing that says the column IS NOT NULL. The implied partition constraint includes it, so the CHECK cannot prove
+// the bound and the partition is read in full.
+// it ignores a partition that was created during the migration, a DEFAULT partition, a HASH key, a key column the parent
+// holds NOT NULL, and a key column no CHECK of the partition mentions, since nothing there was meant to prove the bound.
+func unprovenNullableKey(s scope, findings []pg_contract.Finding) []pg_contract.Finding {
+	if s.statement.Command != "ALTER TABLE" {
+		return nil
+	}
+	var attach *pg_parse.Subcommand
+	for i, sub := range s.statement.Subcommands {
+		if sub.Kind == pg_parse.SubAttachPartition && sub.Value != "DEFAULT" && len(sub.Relations) > 0 {
+			attach = &s.statement.Subcommands[i]
+		}
+	}
+	if attach == nil {
+		return nil
+	}
+
+	parent := s.relation()
+	strategy, keys := parent.Relation.PartitionKeyColumns()
+	// A hash bound is a satisfies_hash_partition call that accepts NULL: there is no IS NOT NULL to omit.
+	if strategy == "HASH" || len(keys) == 0 {
+		return nil
+	}
+	partition := s.resolve(attach.Relations[0])
+	if !partition.Exists() || s.catalog.CreatedByMigration(partition.Name) {
+		return nil
+	}
+
+	checks := s.checksOn(partition)
+	inherited := s.checkNamesOn(parent)
+	var columns, bounding []string
+	for _, key := range keys {
+		// A key the parent holds NOT NULL has to be NOT NULL on the partition too, or the server refuses the attach.
+		if s.neverNull(parent, key) || s.neverNull(partition, key) {
+			continue
+		}
+		var mentioned []string
+		tested := false
+		for _, check := range checks {
+			tested = tested || testsNull(check.expr, key)
+			if !inherited[check.name] && mentions(check.expr, key) {
+				mentioned = append(mentioned, check.name)
+			}
+		}
+		if len(mentioned) > 0 && !tested {
+			columns = append(columns, key)
+			bounding = append(bounding, mentioned...)
+		}
+	}
+	if len(columns) == 0 {
+		return nil
+	}
+
+	var targets []pg_contract.Target
+	for _, finding := range findings {
+		for _, target := range finding.Targets {
+			if target.Relation.Name != partition.Name {
+				continue
+			}
+			targets = append(targets, pg_contract.Target{
+				Relation: target.Relation,
+				Lock:     target.Lock,
+				OpKind:   pg_contract.OpKindNone,
+				Role:     target.Role,
+			})
+		}
+	}
+	if len(targets) == 0 {
+		return nil
+	}
+
+	slices.Sort(bounding)
+	notNull := make([]string, len(columns))
+	for i, column := range columns {
+		notNull[i] = column + " IS NOT NULL"
+	}
+	return []pg_contract.Finding{{
+		Code:     nullableKeyCode,
+		Severity: pg_contract.SeverityWarn,
+		Message: fmt.Sprintf("%s can hold NULL in %s, and the partition constraint ATTACH has to prove includes %s, which no CHECK on %s "+
+			"says: %s cannot prove the bound on its own, so %s is still read in full under ACCESS EXCLUSIVE. Add %s to the CHECK so the "+
+			"scan is skipped", partition.Name, strings.Join(columns, ", "), strings.Join(notNull, " AND "), partition.Name,
+			strings.Join(slices.Compact(bounding), ", "), partition.Name, strings.Join(notNull, " AND ")),
+		Targets: dedupeTargets(targets),
+	}}
+}
+
+// testsNull reports whether an expression tests the column for NULL anywhere, IS NULL included: a LIST bound that accepts NULL
+// has no IS NOT NULL in its partition constraint, and a CHECK spelling the IS NULL branch is aware of it.
+func testsNull(expr *pg_parse.Expr, column string) bool {
+	found := false
+	expr.Walk(func(node *pg_parse.Expr) bool {
+		if node.Kind == pg_parse.ExprNullTest && len(node.Args) > 0 && refersTo(&node.Args[0], column) {
+			found = true
+		}
+		return !found
+	})
+	return found
+}
+
+// mentions reports whether an expression reads the column anywhere.
+func mentions(expr *pg_parse.Expr, column string) bool {
+	found := false
+	expr.Walk(func(node *pg_parse.Expr) bool {
+		if refersTo(node, column) {
+			found = true
+		}
+		return !found
+	})
+	return found
+}
+
+// refersTo reports whether the node is a reference to the column, qualified by its table or not.
+func refersTo(node *pg_parse.Expr, column string) bool {
+	if node.Kind != pg_parse.ExprColumnRef {
+		return false
+	}
+	parts := strings.Split(node.Literal, ".")
+	return parts[len(parts)-1] == column
 }
 
 // maintenanceStatements create a warn finding on a VACUUM FULL or a CLUSTER, naming every relation it rewrites.

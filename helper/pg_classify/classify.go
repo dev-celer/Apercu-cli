@@ -10,10 +10,11 @@ import (
 type Classifier struct {
 	catalog *pg_catalog.Catalog
 	session *Session
+	checks  *migrationChecks
 }
 
 func NewClassifier(catalog *pg_catalog.Catalog) *Classifier {
-	return &Classifier{catalog: catalog, session: NewSession(catalog)}
+	return &Classifier{catalog: catalog, session: NewSession(catalog), checks: newMigrationChecks()}
 }
 
 // Analyze classifies a whole migration.
@@ -68,10 +69,12 @@ func (c *Classifier) classify(statement pg_parse.Statement, context Context) pg_
 
 	if !analysis.HasErrors() {
 		c.session.Link(statement, context)
+		c.checks.record(ruled)
 	}
 
 	collapseStatementLocks(analysis.Findings)
 	analysis.Findings = append(analysis.Findings, unboundedQueue(ruled, analysis.Findings)...)
+	analysis.Findings = append(analysis.Findings, unprovenNullableKey(ruled, analysis.Findings)...)
 	analysis.Findings = append(analysis.Findings, maintenanceStatements(ruled, analysis.Findings)...)
 	analysis.Findings = append(analysis.Findings, indexRenamedAsTable(ruled, analysis.Findings)...)
 	analysis.Findings = append(analysis.Findings, partitionCreatedInPlace(ruled, analysis.Findings)...)
@@ -189,6 +192,8 @@ type scope struct {
 	version pg_contract.Version
 	// relations is statement.Relations resolved through the search path.
 	relations []pg_catalog.RelationInfo
+	// checks is what the statements before this one did to the tables' constraints.
+	checks *migrationChecks
 }
 
 func (c *Classifier) scope(statement pg_parse.Statement, context Context) scope {
@@ -197,6 +202,7 @@ func (c *Classifier) scope(statement pg_parse.Statement, context Context) scope 
 		context:   context,
 		statement: statement,
 		version:   c.catalog.Version(),
+		checks:    c.checks,
 	}
 	for _, named := range statement.Relations {
 		s.relations = append(s.relations, c.catalog.Resolve(named.Name, context.SearchPath))

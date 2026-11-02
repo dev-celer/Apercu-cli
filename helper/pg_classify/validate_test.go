@@ -724,3 +724,201 @@ func TestExtensionScriptPrefersProduction(t *testing.T) {
 	assert.Nil(t, filterV07(single(t, catalog, "CREATE EXTENSION IF NOT EXISTS pgcrypto")), "production already has it")
 	assert.NotNil(t, filterV07(single(t, catalog, "CREATE EXTENSION IF NOT EXISTS plpgsql")), "the preview's plpgsql does not count")
 }
+
+func filterV03(analysis pg_contract.StatementAnalysis) *pg_contract.Finding {
+	for i, finding := range analysis.Findings {
+		if finding.Code == nullableKeyCode {
+			return &analysis.Findings[i]
+		}
+	}
+	return nil
+}
+
+// nullableKeyCatalog adds to the fixture a range-partitioned readings whose key at can hold NULL, a list- and a
+// hash-partitioned parent alike, and tables waiting to be attached, each with its own way of proving or not proving
+// the bound. The fixture's own parents all have a NOT NULL key, where the partition has to be NOT NULL too.
+func nullableKeyCatalog(t *testing.T) *pg_catalog.Catalog {
+	t.Helper()
+
+	pre, err := pg_catalog.LoadJSON(filepath.Join("..", "pg_catalog", "testdata", "snapshot_pg17_preview.json.gz"))
+	require.NoError(t, err)
+
+	oid := pg_catalog.OID(9_000_000)
+	table := func(name, kind, key string, notNull bool, checks ...pg_catalog.Constraint) {
+		oid++
+		pre.Relations = append(pre.Relations, pg_catalog.Relation{OID: oid, Namespace: "apercu_snapshot_test", Name: name,
+			Kind: kind, Persistence: "p", PartitionKey: key})
+		pre.Columns = append(pre.Columns,
+			pg_catalog.Column{RelID: oid, Num: 1, Name: "id", FormattedType: "bigint", NotNull: true},
+			pg_catalog.Column{RelID: oid, Num: 2, Name: "at", FormattedType: "integer", NotNull: notNull})
+		for i, check := range checks {
+			check.OID, check.RelID, check.Type, check.Enforced = oid*10+pg_catalog.OID(i), oid, "c", true
+			pre.Constraints = append(pre.Constraints, check)
+		}
+	}
+	bound := func(name string, validated bool, def string) pg_catalog.Constraint {
+		return pg_catalog.Constraint{Name: name, Validated: validated, Def: def}
+	}
+	positive := bound("readings_at_positive", true, "CHECK ((at > 0))")
+
+	table("readings", "p", "RANGE (at)", false, positive)
+	table("readings_list", "p", "LIST (at)", false)
+	table("readings_hash", "p", "HASH (at)", false)
+	table("rd_bound", "r", "", false, positive, bound("rd_bound_b", true, "CHECK (((at >= 100) AND (at < 200)))"))
+	table("rd_proved", "r", "", false, positive, bound("rd_proved_b", true, "CHECK (((at IS NOT NULL) AND (at >= 100) AND (at < 200)))"))
+	table("rd_split", "r", "", false, positive, bound("rd_split_b", true, "CHECK (((at >= 100) AND (at < 200)))"),
+		bound("rd_split_nn", true, "CHECK ((at IS NOT NULL))"))
+	table("rd_notnull", "r", "", true, positive, bound("rd_notnull_b", true, "CHECK (((at >= 100) AND (at < 200)))"))
+	table("rd_notvalid", "r", "", false, positive, bound("rd_notvalid_b", false, "CHECK (((at >= 100) AND (at < 200))) NOT VALID"))
+	table("rd_inherited", "r", "", false, positive)
+	table("rd_plain", "r", "", false)
+	table("rd_list", "r", "", false, bound("rd_list_b", true, "CHECK ((at = ANY (ARRAY[1, 2])))"))
+	table("rd_list_null", "r", "", false, bound("rd_list_null_b", true, "CHECK (((at IS NULL) OR (at = ANY (ARRAY[1, 2]))))"))
+
+	catalog, err := pg_catalog.NewCatalog(pg_catalog.CatalogOptions{Pre: pre})
+	require.NoError(t, err)
+	return catalog
+}
+
+func TestUnprovenNullableKey(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		sql      string
+		fires    bool
+		bounding string
+	}{
+		{name: "a range CHECK on a nullable key omits IS NOT NULL", fires: true, bounding: "rd_bound_b",
+			sql: "ALTER TABLE readings ATTACH PARTITION rd_bound FOR VALUES FROM (100) TO (200)"},
+		{name: "the CHECK says IS NOT NULL",
+			sql: "ALTER TABLE readings ATTACH PARTITION rd_proved FOR VALUES FROM (100) TO (200)"},
+		{name: "another CHECK says IS NOT NULL, and the server reads them together",
+			sql: "ALTER TABLE readings ATTACH PARTITION rd_split FOR VALUES FROM (100) TO (200)"},
+		{name: "the column is NOT NULL already",
+			sql: "ALTER TABLE readings ATTACH PARTITION rd_notnull FOR VALUES FROM (100) TO (200)"},
+		{name: "a NOT VALID CHECK proves nothing either way",
+			sql: "ALTER TABLE readings ATTACH PARTITION rd_notvalid FOR VALUES FROM (100) TO (200)"},
+		{name: "the parent's own CHECK is not a bound proof",
+			sql: "ALTER TABLE readings ATTACH PARTITION rd_inherited FOR VALUES FROM (100) TO (200)"},
+		{name: "no CHECK at all: nothing tried to prove the bound",
+			sql: "ALTER TABLE readings ATTACH PARTITION rd_plain FOR VALUES FROM (100) TO (200)"},
+		{name: "a list CHECK on a nullable key omits IS NOT NULL", fires: true, bounding: "rd_list_b",
+			sql: "ALTER TABLE readings_list ATTACH PARTITION rd_list FOR VALUES IN (1, 2)"},
+		{name: "a list CHECK that spells the NULL branch",
+			sql: "ALTER TABLE readings_list ATTACH PARTITION rd_list_null FOR VALUES IN (NULL, 1, 2)"},
+		{name: "a hash bound accepts NULL",
+			sql: "ALTER TABLE readings_hash ATTACH PARTITION rd_bound FOR VALUES WITH (MODULUS 2, REMAINDER 0)"},
+		{name: "a default partition has no bound of its own",
+			sql: "ALTER TABLE readings ATTACH PARTITION rd_bound DEFAULT"},
+		{name: "the fixture's parents have a NOT NULL key",
+			sql: "ALTER TABLE events ATTACH PARTITION rd_bound FOR VALUES FROM ('2027-01-01') TO ('2028-01-01')"},
+		{name: "an unknown partition",
+			sql: "ALTER TABLE readings ATTACH PARTITION no_such_table FOR VALUES FROM (100) TO (200)"},
+	}
+
+	catalog := nullableKeyCatalog(t)
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			analysis := single(t, catalog, testCase.sql)
+			finding := filterV03(analysis)
+			if !testCase.fires {
+				assert.Nil(t, finding)
+				return
+			}
+			require.NotNil(t, finding)
+			assert.Equal(t, pg_contract.SeverityWarn, finding.Severity)
+			assert.Equal(t, pg_contract.LevelUnset, finding.Level, "graded from the table's size and traffic, not fixed")
+			assert.Contains(t, finding.Message, "at IS NOT NULL")
+			assert.Contains(t, finding.Message, testCase.bounding)
+			assert.NotContains(t, finding.Message, "readings_at_positive", "the parent's CHECK is not named as the bound proof")
+
+			rule := findingOf(t, analysis, "R-AT-ATTACH")
+			require.Len(t, finding.Targets, 1, "V-03 names the partition alone")
+			target := finding.Targets[0]
+			assert.Subset(t, targetNames(&rule), targetNames(finding), "V-03 names a relation R-AT-ATTACH locks")
+			assert.Equal(t, pg_contract.OpKindNone, target.OpKind, "V-03 does no work of its own")
+			assert.Equal(t, pg_contract.LockAccessExclusive, target.Lock)
+			assert.Equal(t, analysis.LockOn(target.Relation.Name), target.Lock)
+		})
+	}
+}
+
+func TestUnprovenNullableKeyAcrossTheMigration(t *testing.T) {
+	t.Parallel()
+
+	const attach = "ALTER TABLE readings ATTACH PARTITION rd_plain FOR VALUES FROM (100) TO (200)"
+	cases := []struct {
+		name   string
+		before string
+		fires  bool
+	}{
+		{name: "a CHECK added earlier omits IS NOT NULL", fires: true,
+			before: "ALTER TABLE rd_plain ADD CONSTRAINT rd_plain_b CHECK (at >= 100 AND at < 200)"},
+		{name: "an unnamed CHECK added earlier omits IS NOT NULL", fires: true,
+			before: "ALTER TABLE rd_plain ADD CHECK (at >= 100 AND at < 200)"},
+		{name: "a CHECK added earlier says IS NOT NULL",
+			before: "ALTER TABLE rd_plain ADD CONSTRAINT rd_plain_b CHECK (at IS NOT NULL AND at >= 100 AND at < 200)"},
+		{name: "a CHECK added NOT VALID and never validated",
+			before: "ALTER TABLE rd_plain ADD CONSTRAINT rd_plain_b CHECK (at >= 100 AND at < 200) NOT VALID"},
+		{name: "a CHECK added NOT VALID, then validated", fires: true,
+			before: "ALTER TABLE rd_plain ADD CONSTRAINT rd_plain_b CHECK (at >= 100 AND at < 200) NOT VALID; " +
+				"ALTER TABLE rd_plain VALIDATE CONSTRAINT rd_plain_b"},
+		{name: "a CHECK added, then dropped",
+			before: "ALTER TABLE rd_plain ADD CONSTRAINT rd_plain_b CHECK (at >= 100 AND at < 200); " +
+				"ALTER TABLE rd_plain DROP CONSTRAINT rd_plain_b"},
+		{name: "the column made NOT NULL earlier",
+			before: "ALTER TABLE rd_plain ADD CONSTRAINT rd_plain_b CHECK (at >= 100 AND at < 200); " +
+				"ALTER TABLE rd_plain ALTER COLUMN at SET NOT NULL"},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			analyses := analyze(t, nullableKeyCatalog(t), testCase.before+"; "+attach)
+			last := analyses[len(analyses)-1]
+			findingOf(t, last, "R-AT-ATTACH")
+			if testCase.fires {
+				assert.NotNil(t, filterV03(last))
+			} else {
+				assert.Nil(t, filterV03(last))
+			}
+		})
+	}
+
+	snapshot := []struct {
+		name   string
+		before string
+		sql    string
+		fires  bool
+	}{
+		{name: "a snapshot NOT VALID CHECK validated earlier", fires: true,
+			before: "ALTER TABLE rd_notvalid VALIDATE CONSTRAINT rd_notvalid_b",
+			sql:    "ALTER TABLE readings ATTACH PARTITION rd_notvalid FOR VALUES FROM (100) TO (200)"},
+		{name: "a snapshot CHECK dropped earlier",
+			before: "ALTER TABLE rd_bound DROP CONSTRAINT rd_bound_b",
+			sql:    "ALTER TABLE readings ATTACH PARTITION rd_bound FOR VALUES FROM (100) TO (200)"},
+		{name: "a snapshot IS NOT NULL CHECK dropped earlier", fires: true,
+			before: "ALTER TABLE rd_split DROP CONSTRAINT rd_split_nn",
+			sql:    "ALTER TABLE readings ATTACH PARTITION rd_split FOR VALUES FROM (100) TO (200)"},
+	}
+	for _, testCase := range snapshot {
+		t.Run(testCase.name, func(t *testing.T) {
+			analyses := analyze(t, nullableKeyCatalog(t), testCase.before+"; "+testCase.sql)
+			last := analyses[len(analyses)-1]
+			if testCase.fires {
+				assert.NotNil(t, filterV03(last))
+			} else {
+				assert.Nil(t, filterV03(last))
+			}
+		})
+	}
+}
+
+func TestUnprovenNullableKeyCreatedByMigration(t *testing.T) {
+	t.Parallel()
+
+	analyses := analyze(t, nullableKeyCatalog(t), "CREATE TABLE fresh (id bigint NOT NULL, at int, CHECK (at >= 100 AND at < 200)); "+
+		"ALTER TABLE readings ATTACH PARTITION fresh FOR VALUES FROM (100) TO (200)")
+	require.Len(t, analyses, 2)
+	assert.Nil(t, filterV03(analyses[1]), "a partition the migration created is empty: its scan costs nothing")
+}

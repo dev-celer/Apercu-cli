@@ -902,3 +902,30 @@ func TestExtensionPrefersProduction(t *testing.T) {
 	_, ok = fallback.Extension("plpgsql")
 	assert.True(t, ok, "without production the preview's list stands")
 }
+
+func TestPartitionKeyColumns(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		key      string
+		strategy string
+		columns  []string
+	}{
+		{"RANGE (at)", "RANGE", []string{"at"}},
+		{"LIST (kind)", "LIST", []string{"kind"}},
+		{"HASH (id)", "HASH", []string{"id"}},
+		{"RANGE (a, b)", "RANGE", []string{"a", "b"}},
+		{`RANGE ("Mixed Case", b)`, "RANGE", []string{"Mixed Case", "b"}},
+		{`RANGE ("a""b")`, "RANGE", []string{`a"b`}},
+		{`RANGE (name COLLATE "C")`, "RANGE", []string{"name"}},
+		{"RANGE (k int4_ops)", "RANGE", []string{"k"}},
+		{"RANGE (lower(name), k)", "RANGE", []string{"k"}},
+		{"RANGE ((a + b))", "RANGE", nil},
+		{"", "", nil},
+	}
+	for _, testCase := range cases {
+		strategy, columns := Relation{PartitionKey: testCase.key}.PartitionKeyColumns()
+		assert.Equal(t, testCase.strategy, strategy, testCase.key)
+		assert.Equal(t, testCase.columns, columns, testCase.key)
+	}
+}

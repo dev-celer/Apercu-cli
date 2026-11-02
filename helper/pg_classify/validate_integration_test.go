@@ -405,3 +405,89 @@ func (p *pending) stop(t *testing.T, db *sql.DB) {
 	p.err = <-p.done
 	p.finished = true
 }
+
+// nullableKeyDDL is V-03's fixture: parents whose partition key can hold NULL, and tables waiting to be attached
+// with a CHECK that proves the bound, one that omits IS NOT NULL, and the shapes in between.
+const nullableKeyDDL = `
+CREATE SCHEMA IF NOT EXISTS ` + oracleSchema + `;
+SET search_path TO ` + oracleSchema + `;
+
+CREATE TABLE v03_range (id bigint NOT NULL, at int) PARTITION BY RANGE (at);
+CREATE TABLE v03_list (id bigint NOT NULL, at int) PARTITION BY LIST (at);
+
+CREATE TABLE v03_bound (id bigint NOT NULL, at int, CONSTRAINT v03_bound_b CHECK (at >= 100 AND at < 200));
+CREATE TABLE v03_proved (id bigint NOT NULL, at int, CONSTRAINT v03_proved_b CHECK (at IS NOT NULL AND at >= 100 AND at < 200));
+CREATE TABLE v03_split (id bigint NOT NULL, at int, CONSTRAINT v03_split_b CHECK (at >= 100 AND at < 200),
+    CONSTRAINT v03_split_nn CHECK (at IS NOT NULL));
+CREATE TABLE v03_notnull (id bigint NOT NULL, at int NOT NULL, CONSTRAINT v03_notnull_b CHECK (at >= 100 AND at < 200));
+CREATE TABLE v03_plain (id bigint NOT NULL, at int);
+CREATE TABLE v03_inlist (id bigint NOT NULL, at int, CONSTRAINT v03_inlist_b CHECK (at IN (1, 2)));
+CREATE TABLE v03_inlist_null (id bigint NOT NULL, at int, CONSTRAINT v03_inlist_null_b CHECK (at IS NULL OR at IN (1, 2)));
+
+INSERT INTO v03_bound VALUES (1, 150);
+INSERT INTO v03_proved VALUES (1, 150);
+INSERT INTO v03_split VALUES (1, 150);
+INSERT INTO v03_notnull VALUES (1, 150);
+INSERT INTO v03_plain VALUES (1, 150);
+INSERT INTO v03_inlist VALUES (1, 1);
+INSERT INTO v03_inlist_null VALUES (1, NULL);
+ANALYZE;
+`
+
+type nullableKeyScript struct {
+	sql       string
+	partition string
+	// scanned is what the server does: ATTACH reads the partition unless its CHECKs prove the bound.
+	scanned bool
+	// fires is V-03's verdict. It may only fire where the server scanned.
+	fires bool
+}
+
+var nullableKeyScripts = []nullableKeyScript{
+	{sql: "ALTER TABLE v03_range ATTACH PARTITION v03_bound FOR VALUES FROM (100) TO (200)", partition: "v03_bound", scanned: true, fires: true},
+	{sql: "ALTER TABLE v03_range ATTACH PARTITION v03_proved FOR VALUES FROM (100) TO (200)", partition: "v03_proved"},
+	{sql: "ALTER TABLE v03_range ATTACH PARTITION v03_split FOR VALUES FROM (100) TO (200)", partition: "v03_split"},
+	{sql: "ALTER TABLE v03_range ATTACH PARTITION v03_notnull FOR VALUES FROM (100) TO (200)", partition: "v03_notnull"},
+	// Nothing tried to prove the bound: the scan is the plain cost of ATTACH, not a CHECK that fell short.
+	{sql: "ALTER TABLE v03_range ATTACH PARTITION v03_plain FOR VALUES FROM (100) TO (200)", partition: "v03_plain", scanned: true},
+	{sql: "ALTER TABLE v03_list ATTACH PARTITION v03_inlist FOR VALUES IN (1, 2)", partition: "v03_inlist", scanned: true, fires: true},
+	{sql: "ALTER TABLE v03_list ATTACH PARTITION v03_inlist_null FOR VALUES IN (NULL, 1, 2)", partition: "v03_inlist_null"},
+}
+
+// TestUnprovenNullableKeyOracle measures V-03's premise on a live 15/16/17/18: a CHECK bounding a nullable key
+// without IS NOT NULL leaves the ATTACH scan in place, and saying it, in that CHECK or another, removes the scan.
+func TestUnprovenNullableKeyOracle(t *testing.T) {
+	t.Parallel()
+
+	var wg sync.WaitGroup
+	for _, version := range integrationVersions {
+		wg.Add(1)
+		go func(version pg_contract.Version) {
+			defer wg.Done()
+			t.Run(fmt.Sprintf("pg%d", version), func(t *testing.T) {
+				db := startPostgres(t, version)
+				_, err := db.Exec(nullableKeyDDL)
+				require.NoError(t, err)
+				catalogs := oracleCatalogs(t, db)
+
+				for _, script := range nullableKeyScripts {
+					t.Run(script.sql, func(t *testing.T) {
+						observed, err := runObserved(t, db, script.sql, false)
+						require.NoError(t, err)
+						partition := helper.FullRelationName{Schema: oracleSchema, Table: script.partition}
+						assert.Equal(t, script.scanned, observed.work[partition], "the server's scan of %s", partition)
+
+						statements := pg_parse.Parse("SET search_path TO " + oracleSchema + "; " + script.sql)
+						analyses := NewClassifier(catalogs()).Analyze(statements)
+						fired := filterV03(analyses[len(analyses)-1]) != nil
+						assert.Equal(t, script.fires, fired, "V-03")
+						if fired {
+							assert.True(t, observed.work[partition], "V-03 fired on an ATTACH the server did not scan")
+						}
+					})
+				}
+			})
+		}(version)
+	}
+	wg.Wait()
+}
