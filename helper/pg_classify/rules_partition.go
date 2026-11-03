@@ -14,13 +14,23 @@ func ruleAttachPartition(s scope, sub pg_parse.Subcommand) effect {
 	parent := s.relation()
 
 	attached := "the new partition"
+	proven := false
 	if len(sub.Relations) > 0 {
 		partition := s.resolve(sub.Relations[0])
 		attached = partition.Name.String()
-		e.touches = append(e.touches, s.movedPartition(partition, pg_contract.OpKindScan))
+		proven = s.boundProven(parent, partition, sub.Bound)
+		op := pg_contract.OpKindScan
+		if proven {
+			op = pg_contract.OpKindMetadata
+		}
+		e.touches = append(e.touches, s.movedPartition(partition, op))
 	}
-	e.message = fmt.Sprintf("%s is read in full to prove every row belongs inside the partition bound", attached) +
-		"; the scan is skipped only by a validated CHECK that implies the whole bound, and the bound includes \"partition key IS NOT NULL\""
+	if proven {
+		e.message = fmt.Sprintf("the validated CHECK constraints of %s already imply the partition bound, so it is not read", attached)
+	} else {
+		e.message = fmt.Sprintf("%s is read in full to prove every row belongs inside the partition bound", attached) +
+			"; the scan is skipped only by a validated CHECK that implies the whole bound, and the bound includes \"partition key IS NOT NULL\""
+	}
 
 	// The default partition has to be re-proved too, rows that used to fall into it may now belong to the partition being attached.
 	if def, ok := s.defaultPartitionOf(parent); ok {

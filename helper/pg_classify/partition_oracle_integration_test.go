@@ -98,7 +98,6 @@ ANALYZE;
 // The gaps a script can still be tagged with. Every other gap the 2026-10-26 audit measured is closed,
 // and its script now has to match the server.
 const (
-	gapBoundProof     = "a CHECK that proves the bound skips the ATTACH scan (R-AT-ATTACH CHECK branch)"
 	gapInlinedDefault = "a VOLATILE SQL function inlined into a constant default does not rewrite the table"
 )
 
@@ -160,7 +159,7 @@ var partitionScripts = []lockScript{
 	// attach, detach, partition of.
 	{sql: "ALTER TABLE m ATTACH PARTITION m_new FOR VALUES FROM (200) TO (300)"},
 	{sql: "ALTER TABLE m ATTACH PARTITION m_new_p FOR VALUES FROM (300) TO (400)"},
-	{sql: "ALTER TABLE m ATTACH PARTITION m_new2 FOR VALUES FROM (500) TO (600)", gap: gapBoundProof},
+	{sql: "ALTER TABLE m ATTACH PARTITION m_new2 FOR VALUES FROM (500) TO (600)"},
 	{sql: "ALTER TABLE fkp ATTACH PARTITION fkp_new FOR VALUES FROM (200) TO (300)"},
 	{sql: "ALTER TABLE refd ATTACH PARTITION refd_new FOR VALUES FROM (200) TO (300)"},
 	{sql: "ALTER TABLE m_def ATTACH PARTITION m_new FOR VALUES IN ('zz')"},

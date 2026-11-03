@@ -491,3 +491,140 @@ func TestUnprovenNullableKeyOracle(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// boundProofDDL is the fixture for R-AT-ATTACH's CHECK branch: parents of each key type the proof models, and tables
+// whose CHECKs prove their bound, fall short of it, or say it in a shape the proof has to read.
+const boundProofDDL = `
+CREATE SCHEMA IF NOT EXISTS ` + oracleSchema + `;
+SET search_path TO ` + oracleSchema + `;
+
+CREATE TABLE bp_int (id bigint NOT NULL, k int) PARTITION BY RANGE (k);
+CREATE TABLE bp_ts (id bigint NOT NULL, at timestamptz) PARTITION BY RANGE (at);
+CREATE TABLE bp_day (id bigint NOT NULL, d date) PARTITION BY RANGE (d);
+CREATE TABLE bp_text (id bigint NOT NULL, v text) PARTITION BY LIST (v);
+CREATE TABLE bp_sub (id bigint NOT NULL, k int) PARTITION BY RANGE (k);
+CREATE TABLE bp_sub_1 PARTITION OF bp_sub FOR VALUES FROM (0) TO (1000) PARTITION BY RANGE (k);
+
+CREATE TABLE bp_exact (id bigint NOT NULL, k int, CHECK (k IS NOT NULL AND k >= 100 AND k < 200));
+CREATE TABLE bp_tighter (id bigint NOT NULL, k int, CHECK (k IS NOT NULL AND k > 120 AND k <= 150));
+CREATE TABLE bp_looser (id bigint NOT NULL, k int, CHECK (k IS NOT NULL AND k >= 50 AND k < 200));
+CREATE TABLE bp_between (id bigint NOT NULL, k int NOT NULL, CHECK (k BETWEEN 100 AND 199));
+CREATE TABLE bp_flipped (id bigint NOT NULL, k int, CHECK (100 <= k AND 200 > k AND NOT (k IS NULL)));
+CREATE TABLE bp_split (id bigint NOT NULL, k int NOT NULL, CHECK (k >= 100), CHECK (k < 200));
+CREATE TABLE bp_lower (id bigint NOT NULL, k int NOT NULL, CHECK (k < 200));
+CREATE TABLE bp_fraction (id bigint NOT NULL, k int NOT NULL, CHECK (k >= 99.5 AND k < 200));
+CREATE TABLE bp_or (id bigint NOT NULL, k int NOT NULL, CHECK (k >= 100 AND k < 150 OR k >= 150 AND k < 200));
+CREATE TABLE bp_in (id bigint NOT NULL, k int NOT NULL, CHECK (k IN (100, 150, 199)));
+CREATE TABLE bp_notvalid (id bigint NOT NULL, k int NOT NULL);
+ALTER TABLE bp_notvalid ADD CONSTRAINT bp_notvalid_b CHECK (k >= 100 AND k < 200) NOT VALID;
+CREATE TABLE bp_ts_day (id bigint NOT NULL, at timestamptz NOT NULL, CHECK (at >= '2025-01-01' AND at < '2026-01-01'));
+CREATE TABLE bp_ts_utc (id bigint NOT NULL, at timestamptz NOT NULL, CHECK (at >= '2025-01-01 00:00:00+00' AND at < '2026-01-01 00:00:00+00'));
+CREATE TABLE bp_day_ok (id bigint NOT NULL, d date NOT NULL, CHECK (d >= '2025-03-01' AND d < '2025-04-01'));
+CREATE TABLE bp_text_ok (id bigint NOT NULL, v text NOT NULL, CHECK (v IN ('a', 'b')));
+CREATE TABLE bp_text_one (id bigint NOT NULL, v text NOT NULL, CHECK (v = 'a'));
+CREATE TABLE bp_text_null (id bigint NOT NULL, v text, CHECK (v IS NULL OR v = 'a'));
+CREATE TABLE bp_sub_new (id bigint NOT NULL, k int NOT NULL, CHECK (k >= 100 AND k < 200));
+-- Proves its own bound but not bp_sub_1's, which the implied constraint carries too.
+CREATE TABLE bp_sub_wide (id bigint NOT NULL, k int NOT NULL, CHECK (k >= 900 AND k < 1100));
+-- Bounds another column than the key.
+CREATE TABLE bp_other (id bigint NOT NULL, k int NOT NULL, CHECK (id >= 100 AND id < 200));
+
+INSERT INTO bp_exact VALUES (1, 150);
+INSERT INTO bp_tighter VALUES (1, 130);
+INSERT INTO bp_looser VALUES (1, 150);
+INSERT INTO bp_between VALUES (1, 150);
+INSERT INTO bp_flipped VALUES (1, 150);
+INSERT INTO bp_split VALUES (1, 150);
+INSERT INTO bp_lower VALUES (1, 150);
+INSERT INTO bp_fraction VALUES (1, 150);
+INSERT INTO bp_or VALUES (1, 150);
+INSERT INTO bp_in VALUES (1, 150);
+INSERT INTO bp_notvalid VALUES (1, 150);
+INSERT INTO bp_ts_day VALUES (1, '2025-06-01');
+INSERT INTO bp_ts_utc VALUES (1, '2025-06-01');
+INSERT INTO bp_day_ok VALUES (1, '2025-03-15');
+INSERT INTO bp_text_ok VALUES (1, 'a');
+INSERT INTO bp_text_one VALUES (1, 'a');
+INSERT INTO bp_text_null VALUES (1, NULL);
+INSERT INTO bp_sub_new VALUES (1, 150);
+INSERT INTO bp_sub_wide VALUES (1, 950);
+INSERT INTO bp_other VALUES (150, 150);
+ANALYZE;
+`
+
+type boundProofScript struct {
+	sql       string
+	partition string
+	// skipped is what the server does: the partition's constraints imply the bound, so it reads nothing.
+	skipped bool
+}
+
+var boundProofScripts = []boundProofScript{
+	{sql: "ALTER TABLE bp_int ATTACH PARTITION bp_exact FOR VALUES FROM (100) TO (200)", partition: "bp_exact", skipped: true},
+	{sql: "ALTER TABLE bp_int ATTACH PARTITION bp_tighter FOR VALUES FROM (100) TO (200)", partition: "bp_tighter", skipped: true},
+	{sql: "ALTER TABLE bp_int ATTACH PARTITION bp_looser FOR VALUES FROM (100) TO (200)", partition: "bp_looser"},
+	{sql: "ALTER TABLE bp_int ATTACH PARTITION bp_looser FOR VALUES FROM (MINVALUE) TO (200)", partition: "bp_looser", skipped: true},
+	{sql: "ALTER TABLE bp_int ATTACH PARTITION bp_between FOR VALUES FROM (100) TO (200)", partition: "bp_between", skipped: true},
+	{sql: "ALTER TABLE bp_int ATTACH PARTITION bp_flipped FOR VALUES FROM (100) TO (200)", partition: "bp_flipped", skipped: true},
+	{sql: "ALTER TABLE bp_int ATTACH PARTITION bp_split FOR VALUES FROM (100) TO (200)", partition: "bp_split", skipped: true},
+	{sql: "ALTER TABLE bp_int ATTACH PARTITION bp_lower FOR VALUES FROM (100) TO (200)", partition: "bp_lower"},
+	{sql: "ALTER TABLE bp_int ATTACH PARTITION bp_lower FOR VALUES FROM (MINVALUE) TO (200)", partition: "bp_lower", skipped: true},
+	{sql: "ALTER TABLE bp_int ATTACH PARTITION bp_fraction FOR VALUES FROM (100) TO (200)", partition: "bp_fraction"},
+	{sql: "ALTER TABLE bp_int ATTACH PARTITION bp_or FOR VALUES FROM (100) TO (200)", partition: "bp_or", skipped: true},
+	{sql: "ALTER TABLE bp_int ATTACH PARTITION bp_in FOR VALUES FROM (100) TO (200)", partition: "bp_in", skipped: true},
+	{sql: "ALTER TABLE bp_int ATTACH PARTITION bp_notvalid FOR VALUES FROM (100) TO (200)", partition: "bp_notvalid"},
+	{sql: "ALTER TABLE bp_ts ATTACH PARTITION bp_ts_day FOR VALUES FROM ('2025-01-01') TO ('2026-01-01')", partition: "bp_ts_day", skipped: true},
+	{sql: "ALTER TABLE bp_ts ATTACH PARTITION bp_ts_utc FOR VALUES FROM ('2025-01-01 00:00:00+00') TO ('2026-01-01 00:00:00+00')", partition: "bp_ts_utc", skipped: true},
+	{sql: "ALTER TABLE bp_day ATTACH PARTITION bp_day_ok FOR VALUES FROM ('2025-01-01') TO ('2026-01-01')", partition: "bp_day_ok", skipped: true},
+	{sql: "ALTER TABLE bp_day ATTACH PARTITION bp_day_ok FOR VALUES FROM ('2025-03-02') TO ('2026-01-01')", partition: "bp_day_ok"},
+	{sql: "ALTER TABLE bp_text ATTACH PARTITION bp_text_ok FOR VALUES IN ('a', 'b', 'c')", partition: "bp_text_ok", skipped: true},
+	{sql: "ALTER TABLE bp_text ATTACH PARTITION bp_text_ok FOR VALUES IN ('a')", partition: "bp_text_ok"},
+	{sql: "ALTER TABLE bp_text ATTACH PARTITION bp_text_one FOR VALUES IN ('a', 'b')", partition: "bp_text_one", skipped: true},
+	{sql: "ALTER TABLE bp_text ATTACH PARTITION bp_text_null FOR VALUES IN (NULL, 'a')", partition: "bp_text_null", skipped: true},
+	{sql: "ALTER TABLE bp_sub_1 ATTACH PARTITION bp_sub_new FOR VALUES FROM (100) TO (200)", partition: "bp_sub_new", skipped: true},
+	{sql: "ALTER TABLE bp_sub_1 ATTACH PARTITION bp_sub_wide FOR VALUES FROM (900) TO (1100)", partition: "bp_sub_wide"},
+	{sql: "ALTER TABLE bp_int ATTACH PARTITION bp_other FOR VALUES FROM (100) TO (200)", partition: "bp_other"},
+}
+
+// TestAttachBoundProofOracle measures R-AT-ATTACH's CHECK branch on a live 15/16/17/18: the classifier reports METADATA on
+// the partition exactly where the server reads nothing of it. Each script runs in a transaction that is rolled back.
+func TestAttachBoundProofOracle(t *testing.T) {
+	t.Parallel()
+
+	var wg sync.WaitGroup
+	for _, version := range integrationVersions {
+		wg.Add(1)
+		go func(version pg_contract.Version) {
+			defer wg.Done()
+			t.Run(fmt.Sprintf("pg%d", version), func(t *testing.T) {
+				db := startPostgres(t, version)
+				_, err := db.Exec(boundProofDDL)
+				require.NoError(t, err)
+				catalogs := oracleCatalogs(t, db)
+
+				for _, script := range boundProofScripts {
+					t.Run(script.sql, func(t *testing.T) {
+						observed, err := runObserved(t, db, script.sql, false)
+						require.NoError(t, err)
+						partition := helper.FullRelationName{Schema: oracleSchema, Table: script.partition}
+						assert.Equal(t, !script.skipped, observed.work[partition], "the server's scan of %s", partition)
+
+						statements := pg_parse.Parse("SET search_path TO " + oracleSchema + "; " + script.sql)
+						analyses := NewClassifier(catalogs()).Analyze(statements)
+						var op pg_contract.OpKind
+						for _, finding := range analyses[len(analyses)-1].Findings {
+							for _, target := range finding.Targets {
+								if finding.Code == "R-AT-ATTACH" && target.Relation.Name == partition {
+									op = target.OpKind
+								}
+							}
+						}
+						assert.Equal(t, observed.work[partition], op == pg_contract.OpKindScan,
+							"the classifier says %s, the server scanned: %v", op, observed.work[partition])
+					})
+				}
+			})
+		}(version)
+	}
+	wg.Wait()
+}

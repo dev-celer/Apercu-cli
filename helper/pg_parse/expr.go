@@ -64,6 +64,8 @@ type Expr struct {
 	Args []Expr
 	// Literal is the source spelling of a constant or the dotted name of a column reference.
 	Literal string
+	// Form record the kind of operator used, multiple operator share a name and differ on by kind.
+	Form string
 }
 
 // String renders the node for a test failure or a finding message. It is a description, not SQL.
@@ -172,7 +174,7 @@ func convertExpr(node *pg_query.Node) *Expr {
 		return call
 
 	case *pg_query.Node_AExpr:
-		op := &Expr{Kind: ExprOperator, Name: nameParts(n.AExpr.Name)}
+		op := &Expr{Kind: ExprOperator, Name: nameParts(n.AExpr.Name), Form: operatorForm(n.AExpr)}
 		if arg := convertExpr(n.AExpr.Lexpr); arg != nil {
 			op.Args = append(op.Args, *arg)
 		}
@@ -351,6 +353,32 @@ func constLiteral(c *pg_query.A_Const) string {
 		return "'" + v.Sval.Sval + "'"
 	case *pg_query.A_Const_Bsval:
 		return v.Bsval.Bsval
+	default:
+		return ""
+	}
+}
+
+func operatorForm(expr *pg_query.A_Expr) string {
+	switch expr.Kind {
+	case pg_query.A_Expr_Kind_AEXPR_OP:
+		return ""
+	case pg_query.A_Expr_Kind_AEXPR_OP_ANY:
+		return "ANY"
+	case pg_query.A_Expr_Kind_AEXPR_OP_ALL:
+		return "ALL"
+	case pg_query.A_Expr_Kind_AEXPR_IN:
+		if names := nameParts(expr.Name); len(names) == 1 && names[0] == "<>" {
+			return "ALL"
+		}
+		return "ANY"
+	case pg_query.A_Expr_Kind_AEXPR_DISTINCT:
+		return "DISTINCT"
+	case pg_query.A_Expr_Kind_AEXPR_NOT_DISTINCT:
+		return "NOT DISTINCT"
+	case pg_query.A_Expr_Kind_AEXPR_NULLIF:
+		return "NULLIF"
+	case pg_query.A_Expr_Kind_AEXPR_LIKE, pg_query.A_Expr_Kind_AEXPR_ILIKE, pg_query.A_Expr_Kind_AEXPR_SIMILAR:
+		return "MATCH"
 	default:
 		return ""
 	}

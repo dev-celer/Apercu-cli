@@ -286,10 +286,33 @@ func withPartition(sub Subcommand, def *pg_query.Node) Subcommand {
 	sub.Relations = append(sub.Relations, ref)
 	sub.Name = ref.Name.Table
 	sub.Flags.Concurrently = partition.PartitionCmd.Concurrent
-	if bound := partition.PartitionCmd.Bound; bound != nil && bound.IsDefault {
-		sub.Value = "DEFAULT"
+	if bound := partition.PartitionCmd.Bound; bound != nil {
+		sub.Bound = partitionBound(bound)
+		if bound.IsDefault {
+			sub.Value = "DEFAULT"
+		}
 	}
 	return sub
+}
+
+// partitionBound turns a FOR VALUES clause into the IR.
+func partitionBound(spec *pg_query.PartitionBoundSpec) *PartitionBound {
+	bound := &PartitionBound{Default: spec.IsDefault}
+	if spec.IsDefault {
+		return bound
+	}
+	switch spec.Strategy {
+	case "r":
+		bound.Strategy = "RANGE"
+	case "l":
+		bound.Strategy = "LIST"
+	case "h":
+		bound.Strategy = "HASH"
+	}
+	bound.In = convertExprs(spec.Listdatums)
+	bound.From = convertExprs(spec.Lowerdatums)
+	bound.To = convertExprs(spec.Upperdatums)
+	return bound
 }
 
 func defRelation(def *pg_query.Node) RelationRef {

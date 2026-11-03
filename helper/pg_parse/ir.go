@@ -131,11 +131,25 @@ type Subcommand struct {
 	// the mode of SET STORAGE, the method of SET COMPRESSION, the target of SET STATISTICS,
 	// the variant of REPLICA IDENTITY, the schema of SET SCHEMA.
 	Value string
+	// Bound is the partition bound of ATTACH PARTITION and PARTITION OF, nil for every other clause.
+	Bound *PartitionBound
 	// Flags are the clause's own modifiers.
 	Flags Flags
 	// loc is where the clause starts in the parsed text.
 	// The shim uses it to attach a feature it had to blank out to the clause the feature belonged to.
 	loc int
+}
+
+// PartitionBound is a FOR VALUES clause or DEFAULT, as written.
+type PartitionBound struct {
+	// Strategy is RANGE, LIST or HASH, and empty for DEFAULT.
+	Strategy string
+	Default  bool
+	// In are the LIST values. NULL is an ExprConst spelled NULL.
+	In []Expr
+	// From and To are the RANGE bounds, one per key column. MINVALUE and MAXVALUE are column references by those names.
+	From []Expr
+	To   []Expr
 }
 
 // ObjectName renders Object the way the statement wrote it: the schema only when the statement

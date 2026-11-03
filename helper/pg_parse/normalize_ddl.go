@@ -117,8 +117,11 @@ func normalizeCreateTable(stmt *pg_query.CreateStmt, s Statement) Statement {
 		if rv, ok := parent.GetNode().(*pg_query.Node_RangeVar); ok {
 			ref := relationRef(rv.RangeVar)
 			sub := Subcommand{Kind: parentKind, Relations: []RelationRef{ref}, Name: ref.Name.Table}
-			if stmt.Partbound != nil && stmt.Partbound.IsDefault {
-				sub.Value = "DEFAULT"
+			if stmt.Partbound != nil {
+				sub.Bound = partitionBound(stmt.Partbound)
+				if stmt.Partbound.IsDefault {
+					sub.Value = "DEFAULT"
+				}
 			}
 			s.Subcommands = append(s.Subcommands, sub)
 			s.Relations = append(s.Relations, ref)

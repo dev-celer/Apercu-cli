@@ -3,6 +3,7 @@ package pg_classify
 
 import (
 	"strings"
+	"time"
 
 	"apercu-cli/helper/pg_catalog"
 	"apercu-cli/helper/pg_parse"
@@ -27,6 +28,22 @@ type Context struct {
 // TimeZoneIsUTC reports whether the zone in force is exactly UTC.
 func (c Context) TimeZoneIsUTC() bool {
 	return utcZones[strings.ToLower(strings.TrimSpace(c.TimeZone))]
+}
+
+// zone is the session's TimeZone as a location, nil when it is unset or not a zone name the proof can load.
+func (c Context) zone() *time.Location {
+	if c.TimeZoneIsUTC() {
+		return time.UTC
+	}
+	name := strings.Trim(strings.TrimSpace(c.TimeZone), `'"`)
+	if name == "" {
+		return nil
+	}
+	location, err := time.LoadLocation(name)
+	if err != nil {
+		return nil
+	}
+	return location
 }
 
 // CreationSchema is the schema a CREATE with an unqualified name lands in: the first entry of the search path.

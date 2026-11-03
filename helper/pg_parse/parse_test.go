@@ -387,3 +387,52 @@ func TestVariableSetFormsAreDistinct(t *testing.T) {
 		})
 	}
 }
+
+func TestPartitionBound(t *testing.T) {
+	t.Parallel()
+
+	attach := ParseOne("ALTER TABLE m ATTACH PARTITION p FOR VALUES FROM (MINVALUE, 1) TO ('2025-01-01', MAXVALUE)")
+	require.Len(t, attach.Subcommands, 1)
+	bound := attach.Subcommands[0].Bound
+	require.NotNil(t, bound)
+	assert.Equal(t, "RANGE", bound.Strategy)
+	assert.Equal(t, []string{"minvalue", "1"}, []string{bound.From[0].Literal, bound.From[1].Literal})
+	assert.Equal(t, []string{"'2025-01-01'", "maxvalue"}, []string{bound.To[0].Literal, bound.To[1].Literal})
+
+	list := ParseOne("CREATE TABLE p PARTITION OF m FOR VALUES IN (NULL, 'a')")
+	bound = list.Subcommands[len(list.Subcommands)-1].Bound
+	require.NotNil(t, bound)
+	assert.Equal(t, "LIST", bound.Strategy)
+	assert.Equal(t, []string{"NULL", "'a'"}, []string{bound.In[0].Literal, bound.In[1].Literal})
+
+	def := ParseOne("ALTER TABLE m ATTACH PARTITION p DEFAULT")
+	assert.True(t, def.Subcommands[0].Bound.Default)
+	assert.Equal(t, "DEFAULT", def.Subcommands[0].Value)
+
+	hash := ParseOne("ALTER TABLE m ATTACH PARTITION p FOR VALUES WITH (MODULUS 2, REMAINDER 0)")
+	assert.Equal(t, "HASH", hash.Subcommands[0].Bound.Strategy)
+}
+
+func TestOperatorForm(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		"k = 1":                    "",
+		"k IN (1, 2)":              "ANY",
+		"k = ANY (ARRAY[1, 2])":    "ANY",
+		"k NOT IN (1, 2)":          "ALL",
+		"k = ALL (ARRAY[1])":       "ALL",
+		"k IS DISTINCT FROM 1":     "DISTINCT",
+		"k IS NOT DISTINCT FROM 1": "NOT DISTINCT",
+		"k LIKE 'a%'":              "MATCH",
+		"k BETWEEN 1 AND 2":        "",
+	}
+	for condition, form := range cases {
+		statement := ParseOne("ALTER TABLE t ADD CHECK (" + condition + ")")
+		require.Len(t, statement.Subcommands, 1, condition)
+		expr := statement.Subcommands[0].Constraint.Expr
+		require.NotNil(t, expr, condition)
+		assert.Equal(t, ExprOperator, expr.Kind, condition)
+		assert.Equal(t, form, expr.Form, condition)
+	}
+}
