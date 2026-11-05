@@ -234,6 +234,9 @@ var lockScripts = []lockScript{
 	{sql: "ALTER TABLE computed ALTER COLUMN virtual_total SET EXPRESSION AS (base * 5)", since: pg_contract.Version18},
 	{sql: "ALTER TABLE computed ALTER COLUMN stored_total DROP EXPRESSION"},
 	{sql: "ALTER TABLE computed ALTER COLUMN virtual_total DROP EXPRESSION", since: pg_contract.Version18, refusedOn: from18, leftToServer: true},
+	// G-04: GENERATED with no storage keyword is VIRTUAL on 18, stores nothing and reads no row; 15-17 cannot parse it.
+	{sql: "ALTER TABLE computed ADD COLUMN bare_total numeric(10,2) GENERATED ALWAYS AS (base * 6)", refusedOn: upTo17},
+	{sql: "ALTER TABLE computed ADD COLUMN new_virtual numeric(10,2) GENERATED ALWAYS AS (base * 7) VIRTUAL", refusedOn: upTo17},
 
 	// 4.2 constraints.
 	{sql: "ALTER TABLE orders ADD CONSTRAINT c CHECK (total >= 0)"},

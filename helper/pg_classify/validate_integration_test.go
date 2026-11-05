@@ -628,3 +628,112 @@ func TestAttachBoundProofOracle(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// maintenanceScripts run outside a transaction, as VACUUM has to, so the lock oracle cannot read their locks back.
+var maintenanceScripts = []string{
+	"VACUUM FULL spare",
+	"VACUUM (FULL) orders",
+	"VACUUM spare",
+	"CLUSTER orders USING orders_pkey",
+}
+
+// maintenanceTables are the tables each script is measured against, named or not.
+var maintenanceTables = []string{"spare", "spare_child", "orders", "users"}
+
+// TestMaintenanceStatementsOracle measures V-04's premise on a live 15/16/17/18: VACUUM FULL and CLUSTER take every
+// table they name, and on 18 every inheritance child (G-06), at ACCESS EXCLUSIVE and move it to a new file, exactly
+// the tables V-04 names. Another session holds one table at a time at SHARE UPDATE EXCLUSIVE, so the statement has to
+// queue for any lock it takes on it and pg_locks shows the mode it asks for.
+func TestMaintenanceStatementsOracle(t *testing.T) {
+	t.Parallel()
+
+	var wg sync.WaitGroup
+	for _, version := range integrationVersions {
+		wg.Add(1)
+		go func(version pg_contract.Version) {
+			defer wg.Done()
+			t.Run(fmt.Sprintf("pg%d", version), func(t *testing.T) {
+				db := startPostgres(t, version)
+				_, err := db.Exec(oracleDDL)
+				require.NoError(t, err)
+				catalog := oracleCatalog(t, db)
+
+				for _, sql := range maintenanceScripts {
+					statements := pg_parse.Parse(sql)
+					require.Len(t, statements, 1)
+					analysis := NewClassifier(catalog).Next(statements[0])
+					require.Empty(t, analysis.Errors)
+
+					for _, table := range maintenanceTables {
+						t.Run(sql+"/"+table, func(t *testing.T) { maintenanceOn(t, db, analysis, table) })
+					}
+				}
+			})
+		}(version)
+	}
+	wg.Wait()
+}
+
+// maintenanceOn compares what the classifier says the statement does to one table with what the server did.
+func maintenanceOn(t *testing.T, db *sql.DB, analysis pg_contract.StatementAnalysis, table string) {
+	t.Helper()
+	ctx := context.Background()
+	name := helper.FullRelationName{Schema: oracleSchema, Table: table}
+
+	predicted, rewritten := pg_contract.LockNone, false
+	for _, finding := range rulesOnly(analysis).Findings {
+		for _, target := range finding.Targets {
+			if target.Relation.Name == name {
+				predicted = pg_contract.MaxLock(predicted, target.Lock)
+				rewritten = rewritten || target.OpKind == pg_contract.OpKindRewrite
+			}
+		}
+	}
+	flagged := false
+	if finding := filterV04(analysis); finding != nil {
+		for _, target := range finding.Targets {
+			flagged = flagged || target.Relation.Name == name
+		}
+	}
+
+	qualified := oracleSchema + "." + table
+	before := filenode(t, db, qualified)
+
+	holder := oracleConn(t, db)
+	_, err := holder.ExecContext(ctx, "BEGIN")
+	require.NoError(t, err)
+	_, err = holder.ExecContext(ctx, "LOCK TABLE "+qualified+" IN SHARE UPDATE EXCLUSIVE MODE")
+	require.NoError(t, err)
+
+	statement := start(t, oracleConn(t, db), analysis.RawSQL)
+	defer statement.stop(t, db)
+	observed := pg_contract.LockNone
+	if statement.queued(t, db) {
+		var mode string
+		require.NoError(t, db.QueryRow(
+			"SELECT mode FROM pg_locks WHERE pid = $1 AND NOT granted AND relation = $2::regclass", statement.pid, qualified,
+		).Scan(&mode), "%q waits, but not on %s", analysis.RawSQL, table)
+		observed = lockModes[mode]
+	}
+	_, err = holder.ExecContext(ctx, "ROLLBACK")
+	require.NoError(t, err)
+	require.True(t, statement.finish(30*time.Second), "%q did not end once %s was released", analysis.RawSQL, table)
+	require.NoError(t, statement.err)
+	moved := filenode(t, db, qualified) != before
+
+	// A lock SHARE UPDATE EXCLUSIVE does not conflict with is not measured, the classifier's ACCESS SHARE on an index's table included.
+	if predicted.ConflictsWith(pg_contract.LockShareUpdateExclusive) || observed != pg_contract.LockNone {
+		assert.Equalf(t, predicted.Short(), observed.Short(), "%q on %s", analysis.RawSQL, table)
+	}
+	assert.Equalf(t, rewritten, moved, "%q rewrote %s: the server %v, the classifier %v", analysis.RawSQL, table, moved, rewritten)
+	assert.Equalf(t, moved, flagged, "%q rewrote %s: %v, V-04 names it: %v", analysis.RawSQL, table, moved, flagged)
+}
+
+// filenode is the file a relation's rows live in; a rewrite moves them to a new one.
+func filenode(t *testing.T, db *sql.DB, relation string) uint32 {
+	t.Helper()
+
+	var node uint32
+	require.NoError(t, db.QueryRow("SELECT pg_relation_filenode($1::regclass)", relation).Scan(&node))
+	return node
+}

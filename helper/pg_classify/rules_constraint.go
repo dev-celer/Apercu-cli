@@ -89,11 +89,15 @@ func addKey(s scope, constraint pg_parse.ConstraintDef) effect {
 	return e
 }
 
-// notNull reports whether every column is already NOT NULL on the named table.
+// notNull reports whether every column is already NOT NULL on the named table, a SET NOT NULL earlier in the
+// migration included.
 func (s scope) notNull(columns []string) bool {
+	table := s.relation()
+	if !table.Exists() {
+		return false
+	}
 	for _, name := range columns {
-		column, ok := s.column(name)
-		if !ok || !column.NotNull {
+		if !s.neverNull(table, name) {
 			return false
 		}
 	}

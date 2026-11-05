@@ -73,6 +73,8 @@ CREATE TABLE sc_p3 (id bigint NOT NULL, k int NOT NULL, uid bigint) PARTITION BY
 CREATE TABLE sc_p3_1 PARTITION OF sc_p3 FOR VALUES FROM (0) TO (100);
 CREATE TABLE sc_p3_2 PARTITION OF sc_p3 FOR VALUES FROM (100) TO (200);
 CREATE TABLE sc_t4 (id bigint NOT NULL, k int NOT NULL, uid bigint);
+CREATE TABLE sc_p5 (id bigint, k int NOT NULL) PARTITION BY RANGE (k);
+CREATE TABLE sc_p5_1 PARTITION OF sc_p5 FOR VALUES FROM (0) TO (100);
 
 INSERT INTO m SELECT i, i % 200, CASE WHEN i % 3 = 0 THEN 'x' ELSE 'y' END, (i % 200) + 1 FROM generate_series(1, 400) i;
 -- The default partition holds rows outside every bound the scripts attach, so it is never in the way.
@@ -92,6 +94,7 @@ INSERT INTO sc_p2 VALUES (1, 10, 1);
 INSERT INTO sc_t2 VALUES (1, 150, 1);
 INSERT INTO sc_p3 VALUES (1, 10, 1), (2, 150, 2);
 INSERT INTO sc_t4 VALUES (1, 10, 1);
+INSERT INTO sc_p5 VALUES (1, 10);
 ANALYZE;
 `
 
@@ -246,5 +249,10 @@ var lockScenarios = []lockScenario{
 			"ALTER TABLE sc_np4 ATTACH PARTITION sc_t4 FOR VALUES FROM (0) TO (1000)",
 		},
 		sql: "CREATE INDEX sc_np4_uid_idx ON sc_np4 (uid)",
+	},
+	{
+		// G-07: the key column made NOT NULL first, so 15-17 hold the partitions at SHARE for the key, 18 at ACCESS EXCLUSIVE.
+		setup: []string{"ALTER TABLE sc_p5 ALTER COLUMN id SET NOT NULL"},
+		sql:   "ALTER TABLE sc_p5 ADD PRIMARY KEY (id, k)",
 	},
 }

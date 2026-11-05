@@ -699,6 +699,32 @@ func TestExtensionScript(t *testing.T) {
 	}
 }
 
+// TestExtensionScriptAcrossTheMigration is V-07 in a migration: each statement that runs a script is flagged on its own,
+// and the statements around them are left alone.
+func TestExtensionScriptAcrossTheMigration(t *testing.T) {
+	t.Parallel()
+
+	analysis := Analyze(testCatalog(t), apart(
+		event("CREATE EXTENSION IF NOT EXISTS plpgsql"),
+		event("CREATE EXTENSION pgcrypto"),
+		event("CREATE TABLE secrets (id bigint, digest bytea)"),
+		event("ALTER EXTENSION pgcrypto UPDATE"),
+		// Accepted over-report: C-06 does not track extensions, so the second install still reads as one.
+		event("CREATE EXTENSION IF NOT EXISTS pgcrypto"),
+	))
+	require.Len(t, analysis.Statements, 5)
+
+	flagged := make([]bool, 0, len(analysis.Statements))
+	for _, statement := range analysis.Statements {
+		finding := filterV07(statement)
+		flagged = append(flagged, finding != nil)
+		if finding != nil {
+			assert.Equal(t, pg_contract.LevelLow, finding.Level, "%q", statement.RawSQL)
+		}
+	}
+	assert.Equal(t, []bool{false, true, false, true, true}, flagged)
+}
+
 func TestExtensionScriptSilentStillClassified(t *testing.T) {
 	t.Parallel()
 
