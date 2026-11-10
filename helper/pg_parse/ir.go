@@ -95,6 +95,9 @@ type Flags struct {
 	RestartIdentity bool
 	// Chain is the AND CHAIN of COMMIT and ROLLBACK, which ends the transaction and starts another one
 	Chain bool
+	// LikeConstraints and LikeIndexes are the INCLUDING options of a LIKE clause that create constraints.
+	LikeConstraints bool
+	LikeIndexes     bool
 }
 
 // Option is one entry of a parenthesised option list: a storage parameter, an attribute option, a VACUUM option.
@@ -327,8 +330,12 @@ type ConstraintDef struct {
 	Type ConstraintType
 	// Columns are the constrained columns.
 	Columns []string
+	// Including are the INCLUDE columns of a PRIMARY KEY or UNIQUE.
+	Including []string
 	// KeyExprs holds the EXCLUDE elements that are expressions rather than bare columns.
 	KeyExprs []*Expr
+	// KeyNames is what the server calls each EXCLUDE element, columns and expressions in the order written.
+	KeyNames []string
 	// Expr is the CHECK body or the DEFAULT value, nil for the other kinds.
 	Expr *Expr
 	// References is the table a FOREIGN KEY points at, zero otherwise.

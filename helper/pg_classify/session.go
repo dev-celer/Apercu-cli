@@ -127,6 +127,11 @@ func (s *Session) Link(statement pg_parse.Statement, context Context) {
 	s.link(statement, context)
 }
 
+// Retire records the relations a statement that ran drops, renames or moves, and reports what moved.
+func (s *Session) Retire(statement pg_parse.Statement, context Context) []moved {
+	return s.retire(statement, context)
+}
+
 // Walk is Next over a whole migration, for callers that want the contexts up front.
 func (s *Session) Walk(statements []pg_parse.Statement) []Context {
 	contexts := make([]Context, 0, len(statements))
@@ -134,6 +139,7 @@ func (s *Session) Walk(statements []pg_parse.Statement) []Context {
 		context := s.Next(statement)
 		s.Declare(statement, context)
 		s.Link(statement, context)
+		s.Retire(statement, context)
 		contexts = append(contexts, context)
 	}
 	return contexts

@@ -78,8 +78,9 @@ func (s scope) levelConstraint(parent pg_catalog.RelationInfo, bound *pg_parse.P
 		return nil, "", valueDomain{}, false
 	}
 	domain := domainOf(column.FormattedType, s.context.zone())
-	terms, ok := partitionConstraint(keys[0], domain, bound)
-	return terms, keys[0], domain, ok
+	key := s.checks.currentColumn(parent.Key(), keys[0])
+	terms, ok := partitionConstraint(key, domain, bound)
+	return terms, key, domain, ok
 }
 
 func (s scope) partitionParent(child pg_catalog.RelationInfo) (pg_catalog.RelationInfo, bool) {

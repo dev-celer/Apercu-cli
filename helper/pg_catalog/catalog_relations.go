@@ -209,6 +209,41 @@ func (c *Catalog) InvalidIndexes(relID OID) []Index {
 	return invalid
 }
 
+// ConstraintsInSchema lists the constraints a schema holds at this point of the migration, those of its relations and
+// those of its domains: the namespace the server keeps generated constraint names unique in.
+func (c *Catalog) ConstraintsInSchema(schema string) []Constraint {
+	var constraints []Constraint
+	for _, constraint := range c.pre.Constraints {
+		if constraint.RelID == 0 {
+			if domain, ok := c.Type(constraint.TypeID); ok && domain.Namespace == schema {
+				constraints = append(constraints, constraint)
+			}
+			continue
+		}
+		if _, dropped := c.droppedOIDs[constraint.RelID]; dropped || c.nameOf(constraint.RelID).Schema != schema {
+			continue
+		}
+		constraints = append(constraints, constraint)
+	}
+	return constraints
+}
+
+// Holds reports whether a relation of that exact name exists at this point of the migration, without counting it as
+// a name nothing explained. What only the post-migration snapshot knows has not been created yet.
+func (c *Catalog) Holds(name helper.FullRelationName) bool {
+	if _, renamed := c.renamed[name]; renamed {
+		return true
+	}
+	if _, ok := c.byName[name]; ok && !c.isRetired(name) {
+		return true
+	}
+	if _, onlyPost := c.postOnly[name]; onlyPost {
+		return false
+	}
+	_, created := c.createdByMigration[name]
+	return created
+}
+
 // ConstraintsOf lists every constraint on a table.
 func (c *Catalog) ConstraintsOf(relID OID) []Constraint {
 	return c.relations.constraints[relID]
@@ -288,8 +323,40 @@ func (c *Catalog) DeclareLink(link Link) {
 
 // RemoveLink forgets a parent-child link the migration breaks: DETACH, NO INHERIT.
 func (c *Catalog) RemoveLink(parent, child RelationKey) {
-	c.relations.children[parent] = slices.DeleteFunc(c.relations.children[parent], func(link Link) bool { return link.Child == child })
-	c.relations.parents[child] = slices.DeleteFunc(c.relations.parents[child], func(link Link) bool { return link.Parent == parent })
+	c.relations.removeLink(parent, child)
+}
+
+func (r *relationIndex) removeLink(parent, child RelationKey) {
+	r.children[parent] = slices.DeleteFunc(r.children[parent], func(link Link) bool { return link.Child == child })
+	r.parents[child] = slices.DeleteFunc(r.parents[child], func(link Link) bool { return link.Parent == parent })
+}
+
+// forgetEdges removes every edge a relation has, to its parents and to its children.
+func (r *relationIndex) forgetEdges(key RelationKey) {
+	for _, link := range slices.Clone(r.children[key]) {
+		r.removeLink(key, link.Child)
+	}
+	for _, link := range slices.Clone(r.parents[key]) {
+		r.removeLink(link.Parent, key)
+	}
+	delete(r.children, key)
+	delete(r.parents, key)
+}
+
+// rekeyEdges moves every edge of a relation to the key it goes by after a rename.
+func (r *relationIndex) rekeyEdges(from, to RelationKey) {
+	children, parents := slices.Clone(r.children[from]), slices.Clone(r.parents[from])
+	r.forgetEdges(from)
+	for _, link := range children {
+		link.Parent = to
+		r.children[to] = append(r.children[to], link)
+		r.parents[link.Child] = append(r.parents[link.Child], link)
+	}
+	for _, link := range parents {
+		link.Child = to
+		r.children[link.Parent] = append(r.children[link.Parent], link)
+		r.parents[to] = append(r.parents[to], link)
+	}
 }
 
 // TriggerByName resolves a user trigger by its table and name.

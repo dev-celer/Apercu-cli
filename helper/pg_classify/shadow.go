@@ -1,6 +1,8 @@
 package pg_classify
 
 import (
+	"strings"
+
 	"apercu-cli/helper"
 	"apercu-cli/helper/pg_catalog"
 	"apercu-cli/helper/pg_contract"
@@ -98,4 +100,105 @@ func (s *Session) link(statement pg_parse.Statement, context Context) {
 			s.catalog.RemoveLink(other.Key(), named.Key())
 		}
 	}
+}
+
+// relationCommands are the commands whose RENAME and SET SCHEMA act on a relation, not on a type or a function.
+var relationCommands = map[string]bool{
+	"TABLE": true, "INDEX": true, "VIEW": true, "MATERIALIZED VIEW": true, "SEQUENCE": true, "FOREIGN TABLE": true,
+}
+
+// moved is what a statement did to one relation of the shadow catalog: the key it went by, and the key it goes by
+// now, zero when it was dropped.
+type moved struct {
+	from, to pg_catalog.RelationKey
+}
+
+// retire updates the shadow catalog for the relations a statement drops, renames or moves to another schema,
+// and reports what it did so the state keyed by relation follows.
+func (s *Session) retire(statement pg_parse.Statement, context Context) []moved {
+	if s.catalog == nil || !statement.Parsed() || len(statement.Relations) == 0 {
+		return nil
+	}
+	resolve := func(ref pg_parse.RelationRef) (pg_catalog.RelationInfo, bool) {
+		info := s.catalog.Resolve(ref.Name, context.SearchPath)
+		return info, info.Exists()
+	}
+
+	command := string(statement.Command)
+	if object, ok := strings.CutPrefix(command, "DROP "); ok && relationCommands[object] {
+		var out []moved
+		for _, ref := range statement.Relations {
+			if info, ok := resolve(ref); ok {
+				out = append(out, s.drop(info.Key(), statement.Flags.Cascade)...)
+			}
+		}
+		return out
+	}
+
+	object, _ := strings.CutPrefix(command, "ALTER ")
+	object, renames := strings.CutSuffix(object, " RENAME")
+	object, moves := strings.CutSuffix(object, " SET SCHEMA")
+	if !relationCommands[object] || len(statement.Subcommands) != 1 {
+		return nil
+	}
+	sub := statement.Subcommands[0]
+	info, ok := resolve(statement.Relations[0])
+	if !ok {
+		return nil
+	}
+	switch {
+	case renames && sub.Kind == pg_parse.SubRenameRelation:
+		to := helper.FullRelationName{Schema: info.Name.Schema, Table: sub.NewName}
+		return []moved{{from: info.Key(), to: s.catalog.Rename(info.Key(), to)}}
+	case moves && sub.Kind == pg_parse.SubSetSchema:
+		out := []moved{{from: info.Key(), to: s.catalog.Rename(info.Key(), helper.FullRelationName{Schema: sub.Value, Table: info.Name.Table})}}
+		// A table's indexes follow it into the new schema.
+		for _, index := range s.catalog.IndexesOf(info.Relation.OID) {
+			if indexInfo, ok := s.catalog.RelationByKey(pg_catalog.SnapshotKey(index.IndexRelID)); ok {
+				to := helper.FullRelationName{Schema: sub.Value, Table: indexInfo.Name.Table}
+				out = append(out, moved{from: indexInfo.Key(), to: s.catalog.Rename(indexInfo.Key(), to)})
+			}
+		}
+		return out
+	}
+	return nil
+}
+
+// drop removes a relation from the shadow catalog with what goes with it: its partitions, which the server
+// always drops along, its indexes, and with CASCADE its inheritance children and the views built on it.
+func (s *Session) drop(key pg_catalog.RelationKey, cascade bool) []moved {
+	dropped := []pg_catalog.RelationKey{key}
+	if cascade {
+		dropped = append(dropped, s.catalog.Descendants(key)...)
+	} else {
+		dropped = append(dropped, s.catalog.PartitionDescendants(key)...)
+	}
+
+	var out []moved
+	seen := map[pg_catalog.RelationKey]bool{}
+	add := func(key pg_catalog.RelationKey) {
+		if !seen[key] {
+			seen[key] = true
+			out = append(out, moved{from: key})
+		}
+	}
+	for _, key := range dropped {
+		add(key)
+		oid, ok := key.OID()
+		if !ok {
+			continue
+		}
+		for _, index := range s.catalog.IndexesOf(oid) {
+			add(pg_catalog.SnapshotKey(index.IndexRelID))
+		}
+		if cascade {
+			for _, view := range s.catalog.ViewDependents(oid) {
+				add(pg_catalog.SnapshotKey(view.DependentRelID))
+			}
+		}
+	}
+	for _, m := range out {
+		s.catalog.Drop(m.from)
+	}
+	return out
 }

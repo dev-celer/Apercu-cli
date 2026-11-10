@@ -101,6 +101,7 @@ func unprovenNullableKey(s scope, findings []pg_contract.Finding) []pg_contract.
 	inherited := s.checkNamesOn(parent)
 	var columns, bounding []string
 	for _, key := range keys {
+		key = s.checks.currentColumn(parent.Key(), key)
 		// A key the parent holds NOT NULL has to be NOT NULL on the partition too, or the server refuses the attach.
 		if s.neverNull(parent, key) || s.neverNull(partition, key) {
 			continue
@@ -179,6 +180,21 @@ func mentions(expr *pg_parse.Expr, column string) bool {
 		return !found
 	})
 	return found
+}
+
+// columnsOf lists the distinct columns an expression reads, in the order it first reads them.
+func columnsOf(expr *pg_parse.Expr) []string {
+	var columns []string
+	expr.Walk(func(node *pg_parse.Expr) bool {
+		if node.Kind == pg_parse.ExprColumnRef {
+			parts := strings.Split(node.Literal, ".")
+			if column := parts[len(parts)-1]; !slices.Contains(columns, column) {
+				columns = append(columns, column)
+			}
+		}
+		return true
+	})
+	return columns
 }
 
 // refersTo reports whether the node is a reference to the column, qualified by its table or not.

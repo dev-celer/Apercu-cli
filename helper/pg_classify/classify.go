@@ -49,6 +49,7 @@ func (c *Classifier) classify(statement pg_parse.Statement, context Context) pg_
 	}
 	if !statement.Parsed() {
 		c.session.Declare(statement, context)
+		c.checks.blind = true
 		return analysis
 	}
 
@@ -67,7 +68,8 @@ func (c *Classifier) classify(statement pg_parse.Statement, context Context) pg_
 		analysis.Findings = nil
 	}
 
-	if !analysis.HasErrors() {
+	ran := !analysis.HasErrors()
+	if ran {
 		c.session.Link(statement, context)
 		c.checks.record(ruled)
 	}
@@ -79,6 +81,11 @@ func (c *Classifier) classify(statement pg_parse.Statement, context Context) pg_
 	analysis.Findings = append(analysis.Findings, indexRenamedAsTable(ruled, analysis.Findings)...)
 	analysis.Findings = append(analysis.Findings, partitionCreatedInPlace(ruled, analysis.Findings)...)
 	analysis.Findings = append(analysis.Findings, extensionScript(ruled, analysis.Findings)...)
+
+	// Drops and renames come last: everything above reads the relations under the names the statement used.
+	if ran {
+		c.checks.forget(c.catalog, c.session.Retire(statement, context))
+	}
 	return analysis
 }
 

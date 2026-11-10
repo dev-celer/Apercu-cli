@@ -20,8 +20,19 @@ type Catalog struct {
 	byName map[helper.FullRelationName]Relation
 	byOID  map[OID]Relation
 
+	// Shadow Catalog. Record change made by the migration
 	// createdByMigration holds the Relation the migration itself create.
 	createdByMigration map[helper.FullRelationName]Relation
+	// postOnly holds the names createdByMigration knows from the post-migration snapshot alone, until a statement creates them.
+	postOnly map[helper.FullRelationName]struct{}
+
+	// retired holds the snapshot names that no longer resolve to their snapshot row: dropped or renamed away.
+	retired map[helper.FullRelationName]struct{}
+	// droppedOIDs holds the snapshot relations the migration dropped.
+	droppedOIDs map[OID]struct{}
+	// renamed resolves the name a snapshot relation was renamed to, and currentName is the reverse.
+	renamed     map[helper.FullRelationName]OID
+	currentName map[OID]helper.FullRelationName
 
 	// unresolved counts the distinct names no snapshot could found.
 	unresolved map[helper.FullRelationName]struct{}
@@ -69,6 +80,11 @@ func NewCatalog(opts CatalogOptions) (*Catalog, error) {
 		byName:             make(map[helper.FullRelationName]Relation, len(opts.Pre.Relations)),
 		byOID:              make(map[OID]Relation, len(opts.Pre.Relations)),
 		createdByMigration: map[helper.FullRelationName]Relation{},
+		postOnly:           map[helper.FullRelationName]struct{}{},
+		retired:            map[helper.FullRelationName]struct{}{},
+		droppedOIDs:        map[OID]struct{}{},
+		renamed:            map[helper.FullRelationName]OID{},
+		currentName:        map[OID]helper.FullRelationName{},
 		unresolved:         map[helper.FullRelationName]struct{}{},
 		settings:           map[string]Setting{},
 		extensions:         map[string]Extension{},
@@ -86,6 +102,7 @@ func NewCatalog(opts CatalogOptions) (*Catalog, error) {
 			name := rel.RelationName()
 			if _, existed := c.byName[name]; !existed {
 				c.createdByMigration[name] = rel
+				c.postOnly[name] = struct{}{}
 			}
 		}
 	}
@@ -209,20 +226,13 @@ func (c *Catalog) Resolve(name helper.FullRelationName, searchPath []string) Rel
 	return RelationInfo{Name: unqualified, ProdBytes: -1}
 }
 
-// lookup answers an exact, fully qualified name.
+// lookup find a relation in the catalog / shadow catalog from it's qualified name.
 func (c *Catalog) lookup(name helper.FullRelationName) RelationInfo {
-	if rel, ok := c.byName[name]; ok {
-		prodBytes := int64(-1)
-		if size, ok := c.prodSizes[rel.RelationName()]; ok {
-			prodBytes = size
-		}
-		return RelationInfo{
-			Name:         name,
-			Relation:     rel,
-			Origin:       OriginExisting,
-			PreviewBytes: c.previewSizes[rel.OID],
-			ProdBytes:    prodBytes,
-		}
+	if oid, ok := c.renamed[name]; ok {
+		return c.existing(name, c.byOID[oid])
+	}
+	if rel, ok := c.byName[name]; ok && !c.isRetired(name) {
+		return c.existing(name, rel)
 	}
 	// Created by the migration.
 	if rel, ok := c.createdByMigration[name]; ok {
@@ -232,14 +242,44 @@ func (c *Catalog) lookup(name helper.FullRelationName) RelationInfo {
 	return RelationInfo{Name: name, ProdBytes: -1}
 }
 
+// existing is a snapshot relation under the name it currently goes by. Its sizes are keyed by its snapshot name.
+func (c *Catalog) existing(name helper.FullRelationName, rel Relation) RelationInfo {
+	prodBytes := int64(-1)
+	if size, ok := c.prodSizes[rel.RelationName()]; ok {
+		prodBytes = size
+	}
+	return RelationInfo{
+		Name:         name,
+		Relation:     rel,
+		Origin:       OriginExisting,
+		PreviewBytes: c.previewSizes[rel.OID],
+		ProdBytes:    prodBytes,
+	}
+}
+
+func (c *Catalog) isRetired(name helper.FullRelationName) bool {
+	_, retired := c.retired[name]
+	return retired
+}
+
+// nameOf is the name a snapshot relation goes by at this point of the migration.
+func (c *Catalog) nameOf(oid OID) helper.FullRelationName {
+	if name, ok := c.currentName[oid]; ok {
+		return name
+	}
+	return c.byOID[oid].RelationName()
+}
+
 // RelationByKey resolves a node of the partition and inheritance graph back to its relation.
 func (c *Catalog) RelationByKey(key RelationKey) (RelationInfo, bool) {
 	if oid, ok := key.OID(); ok {
-		rel, found := c.byOID[oid]
-		if !found {
+		if _, found := c.byOID[oid]; !found {
 			return RelationInfo{}, false
 		}
-		return c.lookup(rel.RelationName()), true
+		if _, dropped := c.droppedOIDs[oid]; dropped {
+			return RelationInfo{}, false
+		}
+		return c.lookup(c.nameOf(oid)), true
 	}
 	if _, declared := c.createdByMigration[key.declared]; !declared {
 		return RelationInfo{}, false
@@ -259,7 +299,10 @@ func (c *Catalog) ByOID(oid OID) (Relation, bool) {
 func (c *Catalog) RelationsInSchema(schema string, kinds []pg_contract.RelationKind) []Relation {
 	var relations []Relation
 	for _, rel := range c.pre.Relations {
-		if schema != "" && rel.Namespace != schema {
+		if _, dropped := c.droppedOIDs[rel.OID]; dropped {
+			continue
+		}
+		if schema != "" && c.nameOf(rel.OID).Schema != schema {
 			continue
 		}
 		if !slices.Contains(kinds, pg_contract.RelationKindFromRelkind(rel.Kind)) {
@@ -272,14 +315,56 @@ func (c *Catalog) RelationsInSchema(schema string, kinds []pg_contract.RelationK
 
 // Declare records an object the migration creates.
 func (c *Catalog) Declare(name helper.FullRelationName, kind string) {
-	if _, existed := c.byName[name]; existed {
+	if _, existed := c.byName[name]; existed && !c.isRetired(name) {
 		return
 	}
+	if _, renamed := c.renamed[name]; renamed {
+		return
+	}
+	delete(c.postOnly, name)
 	if _, declared := c.createdByMigration[name]; declared {
 		return
 	}
 	c.createdByMigration[name] = Relation{Namespace: name.Schema, Name: name.Table, Kind: kind}
 	delete(c.unresolved, name)
+}
+
+// Drop forgets a relation the migration drops, and every partition and inheritance edge it had.
+// A later CREATE of the same name declares a new relation instead of finding the snapshot row.
+func (c *Catalog) Drop(key RelationKey) {
+	if oid, ok := key.OID(); ok {
+		c.droppedOIDs[oid] = struct{}{}
+		name := c.nameOf(oid)
+		c.retired[name] = struct{}{}
+		delete(c.renamed, name)
+	} else {
+		delete(c.createdByMigration, key.declared)
+	}
+	c.relations.forgetEdges(key)
+}
+
+// Rename moves a relation the migration renames or moves to another schema to its new name, and returns its key
+// under that name: unchanged for a snapshot relation, which is keyed by OID, the new name for a declared one.
+func (c *Catalog) Rename(key RelationKey, to helper.FullRelationName) RelationKey {
+	delete(c.unresolved, to)
+	if oid, ok := key.OID(); ok {
+		from := c.nameOf(oid)
+		c.retired[from] = struct{}{}
+		delete(c.renamed, from)
+		c.renamed[to] = oid
+		c.currentName[oid] = to
+		return key
+	}
+	rel, ok := c.createdByMigration[key.declared]
+	if !ok {
+		return key
+	}
+	delete(c.createdByMigration, key.declared)
+	rel.Namespace, rel.Name = to.Schema, to.Table
+	c.createdByMigration[to] = rel
+	moved := DeclaredKey(to)
+	c.relations.rekeyEdges(key, moved)
+	return moved
 }
 
 // CreatedByMigration reports whether the migration created this relation earlier in the file.

@@ -100,6 +100,7 @@ func constraintDef(node *pg_query.Node) *ConstraintDef {
 	}
 
 	constraint.Columns = nameParts(raw.Keys)
+	constraint.Including = nameParts(raw.Including)
 	if len(raw.FkAttrs) > 0 {
 		constraint.Columns = nameParts(raw.FkAttrs)
 	}
@@ -108,16 +109,18 @@ func constraintDef(node *pg_query.Node) *ConstraintDef {
 		constraint.ReferencedColumns = nameParts(raw.PkAttrs)
 	}
 	if constraint.Type == ConstraintExclusion {
-		constraint.Columns, constraint.KeyExprs = exclusionElements(raw.Exclusions)
+		constraint.Columns, constraint.KeyExprs, constraint.KeyNames = exclusionElements(raw.Exclusions)
 	}
 	return constraint
 }
 
-// exclusionElements splits an EXCLUDE list into the elements that name a column and the ones that are expressions.
-func exclusionElements(exclusions []*pg_query.Node) ([]string, []*Expr) {
+// exclusionElements splits an EXCLUDE list into the elements that name a column and the ones that are expressions,
+// and lists what the server calls each one: the column, the function an expression calls, or "expr".
+func exclusionElements(exclusions []*pg_query.Node) ([]string, []*Expr, []string) {
 	var (
 		columns []string
 		exprs   []*Expr
+		names   []string
 	)
 	for _, item := range exclusions {
 		list, ok := item.GetNode().(*pg_query.Node_List)
@@ -131,13 +134,19 @@ func exclusionElements(exclusions []*pg_query.Node) ([]string, []*Expr) {
 		elem := wrapped.IndexElem
 		if elem.Name != "" {
 			columns = append(columns, elem.Name)
+			names = append(names, elem.Name)
 			continue
 		}
+		name := "expr"
 		if expr := convertExpr(elem.Expr); expr != nil {
 			exprs = append(exprs, expr)
+			if expr.Kind == ExprFuncCall && len(expr.Name) > 0 {
+				name = expr.Name[len(expr.Name)-1]
+			}
 		}
+		names = append(names, name)
 	}
-	return columns, exprs
+	return columns, exprs, names
 }
 
 func constraintType(contype pg_query.ConstrType) ConstraintType {

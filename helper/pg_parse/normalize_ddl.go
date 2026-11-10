@@ -62,6 +62,12 @@ func normalizeReindex(stmt *pg_query.ReindexStmt, s Statement) Statement {
 	return s
 }
 
+// The bits of TableLikeClause.options that create constraints, as parsenodes.h numbers them.
+const (
+	likeConstraints = 1 << 2
+	likeIndexes     = 1 << 6
+)
+
 func normalizeCreateTable(stmt *pg_query.CreateStmt, s Statement) Statement {
 	s.Command = "CREATE TABLE"
 	s.Flags.IfNotExists = stmt.IfNotExists
@@ -103,7 +109,10 @@ func normalizeCreateTable(stmt *pg_query.CreateStmt, s Statement) Statement {
 		case *pg_query.Node_TableLikeClause:
 			like := element.GetTableLikeClause()
 			ref := relationRef(like.Relation)
-			s.Subcommands = append(s.Subcommands, Subcommand{Kind: SubLike, Name: ref.Name.Table, Relations: []RelationRef{ref}})
+			s.Subcommands = append(s.Subcommands, Subcommand{Kind: SubLike, Name: ref.Name.Table, Relations: []RelationRef{ref}, Flags: Flags{
+				LikeConstraints: like.Options&likeConstraints != 0,
+				LikeIndexes:     like.Options&likeIndexes != 0,
+			}})
 			s.Relations = append(s.Relations, ref)
 		}
 	}

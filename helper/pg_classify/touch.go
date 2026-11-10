@@ -167,5 +167,9 @@ func (s scope) hasPartitions(info pg_catalog.RelationInfo) bool {
 
 // infoOf is a relation the catalog handed out by OID, in the shape a touch carries.
 func (s scope) infoOf(rel pg_catalog.Relation) pg_catalog.RelationInfo {
-	return s.catalog.Resolve(rel.RelationName(), nil)
+	// By OID, so a relation the migration renamed is found under its new name.
+	if info, ok := s.catalog.RelationByKey(pg_catalog.SnapshotKey(rel.OID)); ok {
+		return info
+	}
+	return pg_catalog.RelationInfo{Name: rel.RelationName(), ProdBytes: -1}
 }
