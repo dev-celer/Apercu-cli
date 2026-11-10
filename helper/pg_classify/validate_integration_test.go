@@ -435,6 +435,8 @@ ANALYZE;
 `
 
 type nullableKeyScript struct {
+	// setup runs before sql in the same transaction, and is classified but not measured.
+	setup     string
 	sql       string
 	partition string
 	// scanned is what the server does: ATTACH reads the partition unless its CHECKs prove the bound.
@@ -452,6 +454,11 @@ var nullableKeyScripts = []nullableKeyScript{
 	{sql: "ALTER TABLE v03_range ATTACH PARTITION v03_plain FOR VALUES FROM (100) TO (200)", partition: "v03_plain", scanned: true},
 	{sql: "ALTER TABLE v03_list ATTACH PARTITION v03_inlist FOR VALUES IN (1, 2)", partition: "v03_inlist", scanned: true, fires: true},
 	{sql: "ALTER TABLE v03_list ATTACH PARTITION v03_inlist_null FOR VALUES IN (NULL, 1, 2)", partition: "v03_inlist_null"},
+	// The key renamed on both sides: V-03 follows the column.
+	{setup: "ALTER TABLE v03_range RENAME COLUMN at TO k; ALTER TABLE v03_bound RENAME COLUMN at TO k",
+		sql: "ALTER TABLE v03_range ATTACH PARTITION v03_bound FOR VALUES FROM (100) TO (200)", partition: "v03_bound", scanned: true, fires: true},
+	{setup: "ALTER TABLE v03_range RENAME COLUMN at TO k; ALTER TABLE v03_proved RENAME COLUMN at TO k",
+		sql: "ALTER TABLE v03_range ATTACH PARTITION v03_proved FOR VALUES FROM (100) TO (200)", partition: "v03_proved"},
 }
 
 // TestUnprovenNullableKeyOracle measures V-03's premise on a live 15/16/17/18: a CHECK bounding a nullable key
@@ -471,13 +478,17 @@ func TestUnprovenNullableKeyOracle(t *testing.T) {
 				catalogs := oracleCatalogs(t, db)
 
 				for _, script := range nullableKeyScripts {
-					t.Run(script.sql, func(t *testing.T) {
-						observed, err := runObserved(t, db, script.sql, false)
+					name := script.sql
+					if script.setup != "" {
+						name = script.setup + "; " + script.sql
+					}
+					t.Run(name, func(t *testing.T) {
+						observed, err := runObservedSetup(t, db, script.setup, script.sql, false)
 						require.NoError(t, err)
 						partition := helper.FullRelationName{Schema: oracleSchema, Table: script.partition}
 						assert.Equal(t, script.scanned, observed.work[partition], "the server's scan of %s", partition)
 
-						statements := pg_parse.Parse("SET search_path TO " + oracleSchema + "; " + script.sql)
+						statements := pg_parse.Parse("SET search_path TO " + oracleSchema + "; " + name)
 						analyses := NewClassifier(catalogs()).Analyze(statements)
 						fired := filterV03(analyses[len(analyses)-1]) != nil
 						assert.Equal(t, script.fires, fired, "V-03")
@@ -528,6 +539,28 @@ CREATE TABLE bp_sub_new (id bigint NOT NULL, k int NOT NULL, CHECK (k >= 100 AND
 CREATE TABLE bp_sub_wide (id bigint NOT NULL, k int NOT NULL, CHECK (k >= 900 AND k < 1100));
 -- Bounds another column than the key.
 CREATE TABLE bp_other (id bigint NOT NULL, k int NOT NULL, CHECK (id >= 100 AND id < 200));
+-- No CHECK of its own: the scripts add one, and drop it, before the attach.
+CREATE TABLE bp_dropped (id bigint NOT NULL, k int NOT NULL);
+-- The CHECK lives on the parent; bp_inh_1 holds the inherited copy, which DETACH leaves on it.
+CREATE TABLE bp_inh (id bigint NOT NULL, k int NOT NULL, CONSTRAINT bp_inh_b CHECK (k >= 100 AND k < 200)) PARTITION BY RANGE (k);
+CREATE TABLE bp_inh_1 PARTITION OF bp_inh FOR VALUES FROM (0) TO (1000);
+-- Another table of the schema already holds the name the server would give bp_collide's first unnamed CHECK on k.
+CREATE TABLE bp_collide (id bigint NOT NULL, k int NOT NULL);
+CREATE TABLE bp_collide_holder (id bigint NOT NULL, k int NOT NULL, CONSTRAINT bp_collide_k_check CHECK (k > 0));
+CREATE TABLE bp_collide_m (id bigint NOT NULL, k int NOT NULL);
+-- Here the name is held by a domain's constraint, which belongs to the schema and to no table.
+CREATE DOMAIN bp_positive AS int CONSTRAINT bp_collide_d_k_check CHECK (VALUE > 0);
+CREATE TABLE bp_collide_d (id bigint NOT NULL, k int NOT NULL);
+-- Their column is j: the scripts rename it to the key's name before the attach, and the constraints on it follow.
+CREATE TABLE bp_renamed (id bigint NOT NULL, j int NOT NULL, CHECK (j >= 100 AND j < 200));
+CREATE TABLE bp_renamed_proof (id bigint NOT NULL, j int, CHECK (j IS NOT NULL AND j >= 100 AND j < 200));
+CREATE TABLE bp_renamed_null (id bigint NOT NULL, j int, CHECK (j >= 100 AND j < 200));
+CREATE TABLE bp_renamed_bare (id bigint NOT NULL, j int NOT NULL);
+-- Partitioned on b, with the same type on both columns so that the scripts can swap their names.
+CREATE TABLE bp_pair (a int NOT NULL, b int NOT NULL) PARTITION BY RANGE (b);
+CREATE TABLE bp_pair_on_a (a int NOT NULL, b int NOT NULL, CHECK (a >= 100 AND a < 200));
+CREATE TABLE bp_pair_on_b (a int NOT NULL, b int NOT NULL, CHECK (b >= 100 AND b < 200));
+CREATE TABLE bp_pair_lone (b int NOT NULL, CHECK (b >= 100 AND b < 200));
 
 INSERT INTO bp_exact VALUES (1, 150);
 INSERT INTO bp_tighter VALUES (1, 130);
@@ -549,12 +582,28 @@ INSERT INTO bp_text_null VALUES (1, NULL);
 INSERT INTO bp_sub_new VALUES (1, 150);
 INSERT INTO bp_sub_wide VALUES (1, 950);
 INSERT INTO bp_other VALUES (150, 150);
+INSERT INTO bp_dropped VALUES (1, 150);
+INSERT INTO bp_inh VALUES (1, 150);
+INSERT INTO bp_collide VALUES (1, 150);
+INSERT INTO bp_collide_m VALUES (1, 150);
+INSERT INTO bp_collide_d VALUES (1, 150);
+INSERT INTO bp_renamed VALUES (1, 150);
+INSERT INTO bp_renamed_proof VALUES (1, 150);
+INSERT INTO bp_renamed_null VALUES (1, 150);
+INSERT INTO bp_renamed_bare VALUES (1, 150);
+INSERT INTO bp_pair_on_a VALUES (150, 150);
+INSERT INTO bp_pair_on_b VALUES (150, 150);
+INSERT INTO bp_pair_lone VALUES (150);
 ANALYZE;
 `
 
 type boundProofScript struct {
+	// setup runs before sql in the same transaction, and is classified but not measured.
+	setup     string
 	sql       string
 	partition string
+	// since is the first version the script applies to, 0 for all of them.
+	since pg_contract.Version
 	// skipped is what the server does: the partition's constraints imply the bound, so it reads nothing.
 	skipped bool
 }
@@ -584,6 +633,90 @@ var boundProofScripts = []boundProofScript{
 	{sql: "ALTER TABLE bp_sub_1 ATTACH PARTITION bp_sub_new FOR VALUES FROM (100) TO (200)", partition: "bp_sub_new", skipped: true},
 	{sql: "ALTER TABLE bp_sub_1 ATTACH PARTITION bp_sub_wide FOR VALUES FROM (900) TO (1100)", partition: "bp_sub_wide"},
 	{sql: "ALTER TABLE bp_int ATTACH PARTITION bp_other FOR VALUES FROM (100) TO (200)", partition: "bp_other"},
+	// A CHECK the migration adds, then drops or renames, before the attach.
+	{setup: "ALTER TABLE bp_dropped ADD CHECK (k >= 100 AND k < 200)",
+		sql: "ALTER TABLE bp_int ATTACH PARTITION bp_dropped FOR VALUES FROM (100) TO (200)", partition: "bp_dropped", skipped: true},
+	{setup: "ALTER TABLE bp_dropped ADD CHECK (k >= 100 AND k < 200); ALTER TABLE bp_dropped DROP CONSTRAINT bp_dropped_k_check",
+		sql: "ALTER TABLE bp_int ATTACH PARTITION bp_dropped FOR VALUES FROM (100) TO (200)", partition: "bp_dropped"},
+	{setup: "ALTER TABLE bp_dropped ADD CONSTRAINT bp_dropped_b CHECK (k >= 100 AND k < 200); ALTER TABLE bp_dropped DROP CONSTRAINT bp_dropped_b",
+		sql: "ALTER TABLE bp_int ATTACH PARTITION bp_dropped FOR VALUES FROM (100) TO (200)", partition: "bp_dropped"},
+	{setup: "ALTER TABLE bp_dropped ADD CONSTRAINT bp_dropped_b CHECK (k >= 100 AND k < 200); " +
+		"ALTER TABLE bp_dropped RENAME CONSTRAINT bp_dropped_b TO bp_dropped_r; ALTER TABLE bp_dropped DROP CONSTRAINT bp_dropped_r",
+		sql: "ALTER TABLE bp_int ATTACH PARTITION bp_dropped FOR VALUES FROM (100) TO (200)", partition: "bp_dropped"},
+	{setup: "ALTER TABLE bp_exact RENAME CONSTRAINT bp_exact_k_check TO bp_exact_r; ALTER TABLE bp_exact DROP CONSTRAINT bp_exact_r",
+		sql: "ALTER TABLE bp_int ATTACH PARTITION bp_exact FOR VALUES FROM (100) TO (200)", partition: "bp_exact"},
+	// A CHECK dropped on a parent goes from its partitions too, before one of them is detached and attached elsewhere.
+	{setup: "ALTER TABLE bp_inh DETACH PARTITION bp_inh_1",
+		sql: "ALTER TABLE bp_int ATTACH PARTITION bp_inh_1 FOR VALUES FROM (100) TO (200)", partition: "bp_inh_1", skipped: true},
+	{setup: "ALTER TABLE bp_inh DROP CONSTRAINT bp_inh_b; ALTER TABLE bp_inh DETACH PARTITION bp_inh_1",
+		sql: "ALTER TABLE bp_int ATTACH PARTITION bp_inh_1 FOR VALUES FROM (100) TO (200)", partition: "bp_inh_1"},
+	// The name of an unnamed CHECK has to be free in the whole schema: the bounding CHECK comes first, so it gets
+	// _check1 here, and the k > 0 one _check2.
+	{setup: "ALTER TABLE bp_collide ADD CHECK (k >= 100 AND k < 200); ALTER TABLE bp_collide ADD CHECK (k > 0); " +
+		"ALTER TABLE bp_collide DROP CONSTRAINT bp_collide_k_check1",
+		sql: "ALTER TABLE bp_int ATTACH PARTITION bp_collide FOR VALUES FROM (100) TO (200)", partition: "bp_collide"},
+	{setup: "ALTER TABLE bp_collide ADD CHECK (k >= 100 AND k < 200); ALTER TABLE bp_collide ADD CHECK (k > 0); " +
+		"ALTER TABLE bp_collide DROP CONSTRAINT bp_collide_k_check2",
+		sql: "ALTER TABLE bp_int ATTACH PARTITION bp_collide FOR VALUES FROM (100) TO (200)", partition: "bp_collide", skipped: true},
+	// The migration frees the name first, so the bounding CHECK gets it and k > 0 is the _check1 being dropped.
+	{setup: "DROP TABLE bp_collide_holder; ALTER TABLE bp_collide ADD CHECK (k >= 100 AND k < 200); ALTER TABLE bp_collide ADD CHECK (k > 0); " +
+		"ALTER TABLE bp_collide DROP CONSTRAINT bp_collide_k_check1",
+		sql: "ALTER TABLE bp_int ATTACH PARTITION bp_collide FOR VALUES FROM (100) TO (200)", partition: "bp_collide", skipped: true},
+	{setup: "ALTER TABLE bp_collide_holder DROP CONSTRAINT bp_collide_k_check; ALTER TABLE bp_collide ADD CHECK (k >= 100 AND k < 200); " +
+		"ALTER TABLE bp_collide ADD CHECK (k > 0); ALTER TABLE bp_collide DROP CONSTRAINT bp_collide_k_check1",
+		sql: "ALTER TABLE bp_int ATTACH PARTITION bp_collide FOR VALUES FROM (100) TO (200)", partition: "bp_collide", skipped: true},
+	// The migration takes the name on another table.
+	{setup: "ALTER TABLE bp_dropped ADD CONSTRAINT bp_collide_m_k_check CHECK (k > 0); ALTER TABLE bp_collide_m ADD CHECK (k >= 100 AND k < 200); " +
+		"ALTER TABLE bp_collide_m ADD CHECK (k > 0); ALTER TABLE bp_collide_m DROP CONSTRAINT bp_collide_m_k_check1",
+		sql: "ALTER TABLE bp_int ATTACH PARTITION bp_collide_m FOR VALUES FROM (100) TO (200)", partition: "bp_collide_m"},
+	{setup: "ALTER TABLE bp_collide_d ADD CHECK (k >= 100 AND k < 200); ALTER TABLE bp_collide_d ADD CHECK (k > 0); " +
+		"ALTER TABLE bp_collide_d DROP CONSTRAINT bp_collide_d_k_check1",
+		sql: "ALTER TABLE bp_int ATTACH PARTITION bp_collide_d FOR VALUES FROM (100) TO (200)", partition: "bp_collide_d"},
+	// A column renamed before the attach: what the server holds on it, CHECKs and NOT NULL alike, reads the new name.
+	{setup: "ALTER TABLE bp_renamed RENAME COLUMN j TO k",
+		sql: renamedAttach + "bp_renamed" + renamedBound, partition: "bp_renamed", skipped: true},
+	{setup: "ALTER TABLE bp_renamed RENAME COLUMN j TO mid; ALTER TABLE bp_renamed RENAME COLUMN mid TO k",
+		sql: renamedAttach + "bp_renamed" + renamedBound, partition: "bp_renamed", skipped: true},
+	{setup: "ALTER TABLE bp_renamed_proof RENAME COLUMN j TO k",
+		sql: renamedAttach + "bp_renamed_proof" + renamedBound, partition: "bp_renamed_proof", skipped: true},
+	{setup: "ALTER TABLE bp_renamed_null RENAME COLUMN j TO k",
+		sql: renamedAttach + "bp_renamed_null" + renamedBound, partition: "bp_renamed_null"},
+	{setup: "ALTER TABLE bp_renamed_null ALTER COLUMN j SET NOT NULL; ALTER TABLE bp_renamed_null RENAME COLUMN j TO k",
+		sql: renamedAttach + "bp_renamed_null" + renamedBound, partition: "bp_renamed_null", skipped: true},
+	{setup: "ALTER TABLE bp_renamed ALTER COLUMN j DROP NOT NULL; ALTER TABLE bp_renamed RENAME COLUMN j TO k",
+		sql: renamedAttach + "bp_renamed" + renamedBound, partition: "bp_renamed"},
+	{setup: "ALTER TABLE bp_renamed RENAME COLUMN j TO k; ALTER TABLE bp_renamed DROP CONSTRAINT bp_renamed_j_check",
+		sql: renamedAttach + "bp_renamed" + renamedBound, partition: "bp_renamed"},
+	{setup: "ALTER TABLE bp_renamed RENAME COLUMN j TO k; ALTER TABLE bp_renamed DROP CONSTRAINT bp_renamed_j_not_null",
+		sql: renamedAttach + "bp_renamed" + renamedBound, partition: "bp_renamed", since: 18},
+	// A CHECK the migration added follows the rename the same way.
+	{setup: "ALTER TABLE bp_renamed_bare ADD CHECK (j >= 100 AND j < 200); ALTER TABLE bp_renamed_bare RENAME COLUMN j TO k",
+		sql: renamedAttach + "bp_renamed_bare" + renamedBound, partition: "bp_renamed_bare", skipped: true},
+	// Swapping two names: the CHECK that read a now bounds the column called b, and the other way around.
+	{setup: swapPartitionColumns("bp_pair_on_a"),
+		sql: "ALTER TABLE bp_pair ATTACH PARTITION bp_pair_on_a" + renamedBound, partition: "bp_pair_on_a", skipped: true},
+	{setup: swapPartitionColumns("bp_pair_on_b"),
+		sql: "ALTER TABLE bp_pair ATTACH PARTITION bp_pair_on_b" + renamedBound, partition: "bp_pair_on_b"},
+	// The name is taken over by a new column, which no CHECK reads.
+	{setup: "ALTER TABLE bp_pair_lone RENAME COLUMN b TO a; ALTER TABLE bp_pair_lone ADD COLUMN b int NOT NULL DEFAULT 150",
+		sql: "ALTER TABLE bp_pair ATTACH PARTITION bp_pair_lone" + renamedBound, partition: "bp_pair_lone"},
+	// The parent's key is renamed: the key is its column, whatever that column is called by now.
+	{setup: "ALTER TABLE bp_int RENAME COLUMN k TO j",
+		sql: renamedAttach + "bp_renamed" + renamedBound, partition: "bp_renamed", skipped: true},
+	{setup: swapPartitionColumns("bp_pair"),
+		sql: "ALTER TABLE bp_pair ATTACH PARTITION bp_pair_on_a" + renamedBound, partition: "bp_pair_on_a", skipped: true},
+	{setup: swapPartitionColumns("bp_pair"),
+		sql: "ALTER TABLE bp_pair ATTACH PARTITION bp_pair_on_b" + renamedBound, partition: "bp_pair_on_b"},
+}
+
+const (
+	renamedAttach = "ALTER TABLE bp_int ATTACH PARTITION "
+	renamedBound  = " FOR VALUES FROM (100) TO (200)"
+)
+
+// swapPartitionColumns exchanges the names of a table's columns a and b.
+func swapPartitionColumns(table string) string {
+	return fmt.Sprintf("ALTER TABLE %[1]s RENAME COLUMN a TO tmp; ALTER TABLE %[1]s RENAME COLUMN b TO a; ALTER TABLE %[1]s RENAME COLUMN tmp TO b", table)
 }
 
 // TestAttachBoundProofOracle measures R-AT-ATTACH's CHECK branch on a live 15/16/17/18: the classifier reports METADATA on
@@ -603,13 +736,20 @@ func TestAttachBoundProofOracle(t *testing.T) {
 				catalogs := oracleCatalogs(t, db)
 
 				for _, script := range boundProofScripts {
-					t.Run(script.sql, func(t *testing.T) {
-						observed, err := runObserved(t, db, script.sql, false)
+					if version < script.since {
+						continue
+					}
+					name := script.sql
+					if script.setup != "" {
+						name = script.setup + "; " + script.sql
+					}
+					t.Run(name, func(t *testing.T) {
+						observed, err := runObservedSetup(t, db, script.setup, script.sql, false)
 						require.NoError(t, err)
 						partition := helper.FullRelationName{Schema: oracleSchema, Table: script.partition}
 						assert.Equal(t, !script.skipped, observed.work[partition], "the server's scan of %s", partition)
 
-						statements := pg_parse.Parse("SET search_path TO " + oracleSchema + "; " + script.sql)
+						statements := pg_parse.Parse("SET search_path TO " + oracleSchema + "; " + name)
 						analyses := NewClassifier(catalogs()).Analyze(statements)
 						var op pg_contract.OpKind
 						for _, finding := range analyses[len(analyses)-1].Findings {

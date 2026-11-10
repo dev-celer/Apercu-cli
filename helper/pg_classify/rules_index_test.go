@@ -90,13 +90,12 @@ func TestCreateIndexReachesThePartitionsAndNotTheChildren(t *testing.T) {
 func TestDropIndexResolvesItsTable(t *testing.T) {
 	t.Parallel()
 
-	catalog := testCatalog(t)
-	plain := findingOf(t, single(t, catalog, "DROP INDEX orders_open_idx"), "R-IX-DROP")
+	plain := findingOf(t, single(t, testCatalog(t), "DROP INDEX orders_open_idx"), "R-IX-DROP")
 	table := targetOf(t, plain, "apercu_snapshot_test.orders")
 	assert.Equal(t, pg_contract.LockAccessExclusive, table.Lock)
 	assert.Equal(t, pg_contract.TargetRoleResolved, table.Role)
 
-	concurrent := findingOf(t, single(t, catalog, "DROP INDEX CONCURRENTLY orders_open_idx"), "R-IX-DROP-CONC")
+	concurrent := findingOf(t, single(t, testCatalog(t), "DROP INDEX CONCURRENTLY orders_open_idx"), "R-IX-DROP-CONC")
 	assert.Equal(t, pg_contract.LockShareUpdateExclusive, targetOf(t, concurrent, "apercu_snapshot_test.orders").Lock,
 		"the table stays readable and writable while the index is retired")
 }

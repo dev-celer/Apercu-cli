@@ -596,6 +596,12 @@ type observation struct {
 // before rolling it back.
 func runObserved(t *testing.T, db *sql.DB, statement string, outsideTransaction bool) (observation, error) {
 	t.Helper()
+	return runObservedSetup(t, db, "", statement, outsideTransaction)
+}
+
+// runObservedSetup is runObserved after setup statements that run in the same transaction but are not measured.
+func runObservedSetup(t *testing.T, db *sql.DB, setup, statement string, outsideTransaction bool) (observation, error) {
+	t.Helper()
 	ctx := context.Background()
 
 	conn, err := db.Conn(ctx)
@@ -615,6 +621,10 @@ func runObserved(t *testing.T, db *sql.DB, statement string, outsideTransaction 
 	require.NoError(t, err)
 	defer func() { _, _ = conn.ExecContext(ctx, "ROLLBACK") }()
 
+	if setup != "" {
+		_, err = conn.ExecContext(ctx, setup)
+		require.NoError(t, err, "setup: %s", setup)
+	}
 	before := readWork(t, conn)
 	if _, execErr := conn.ExecContext(ctx, statement); execErr != nil {
 		return observation{}, execErr

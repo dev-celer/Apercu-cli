@@ -1,8 +1,10 @@
 package pg_classify
 
 import (
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"apercu-cli/helper/pg_contract"
 	"apercu-cli/helper/pg_parse"
@@ -79,6 +81,36 @@ func TestAttachBoundProof(t *testing.T) {
 		{name: "an OR with an arm the proof cannot read", partition: "rd_plain",
 			script: "ALTER TABLE rd_plain ADD CONSTRAINT b CHECK (at IS NOT NULL AND (at >= 100 AND at < 150 OR abs(at) < 10)); " +
 				"ALTER TABLE readings ATTACH PARTITION rd_plain" + bound},
+		{name: "an unnamed CHECK dropped under the name the server gave it", partition: "rd_plain",
+			script: "ALTER TABLE rd_plain ADD CHECK (at IS NOT NULL AND at >= 100 AND at < 200); " +
+				"ALTER TABLE rd_plain DROP CONSTRAINT rd_plain_at_check; ALTER TABLE readings ATTACH PARTITION rd_plain" + bound},
+		{name: "an unnamed CHECK dropped under a suffix DDL nothing could read made the server pick", partition: "rd_plain",
+			script: "DO $$ BEGIN END $$; ALTER TABLE rd_plain ADD CHECK (at IS NOT NULL AND at >= 100 AND at < 200); " +
+				"ALTER TABLE rd_plain DROP CONSTRAINT rd_plain_at_check1; ALTER TABLE readings ATTACH PARTITION rd_plain" + bound},
+		{name: "an added CHECK renamed", partition: "rd_plain", proven: true,
+			script: "ALTER TABLE rd_plain ADD CONSTRAINT b CHECK (at IS NOT NULL AND at >= 100 AND at < 200); " +
+				"ALTER TABLE rd_plain RENAME CONSTRAINT b TO c; ALTER TABLE readings ATTACH PARTITION rd_plain" + bound},
+		{name: "an added CHECK renamed, then dropped", partition: "rd_plain",
+			script: "ALTER TABLE rd_plain ADD CONSTRAINT b CHECK (at IS NOT NULL AND at >= 100 AND at < 200); " +
+				"ALTER TABLE rd_plain RENAME CONSTRAINT b TO c; ALTER TABLE rd_plain DROP CONSTRAINT c; " +
+				"ALTER TABLE readings ATTACH PARTITION rd_plain" + bound},
+		{name: "a snapshot CHECK renamed", partition: "rd_proved", proven: true,
+			script: "ALTER TABLE rd_proved RENAME CONSTRAINT rd_proved_b TO c; ALTER TABLE readings ATTACH PARTITION rd_proved" + bound},
+		{name: "a snapshot CHECK renamed, then dropped", partition: "rd_proved",
+			script: "ALTER TABLE rd_proved RENAME CONSTRAINT rd_proved_b TO c; ALTER TABLE rd_proved DROP CONSTRAINT c; " +
+				"ALTER TABLE readings ATTACH PARTITION rd_proved" + bound},
+		{name: "the key column renamed away and back", partition: "rd_proved", proven: true,
+			script: "ALTER TABLE rd_proved RENAME COLUMN at TO old_at; ALTER TABLE rd_proved RENAME COLUMN old_at TO at; " +
+				"ALTER TABLE readings ATTACH PARTITION rd_proved" + bound},
+		{name: "the key column dropped and added back", partition: "rd_notnull",
+			script: "ALTER TABLE rd_notnull DROP COLUMN at; ALTER TABLE rd_notnull ADD COLUMN at int; " +
+				"ALTER TABLE readings ATTACH PARTITION rd_notnull" + bound},
+		{name: "the key column renamed away and another added under its name", partition: "rd_proved",
+			script: "ALTER TABLE rd_proved RENAME COLUMN at TO old_at; ALTER TABLE rd_proved ADD COLUMN at int; " +
+				"ALTER TABLE readings ATTACH PARTITION rd_proved" + bound},
+		{name: "the table dropped and created again", partition: "rd_proved",
+			script: "DROP TABLE rd_proved; CREATE TABLE rd_proved (id bigint NOT NULL, at int); " +
+				"ALTER TABLE readings ATTACH PARTITION rd_proved" + bound},
 	}
 
 	for _, testCase := range cases {
@@ -148,5 +180,55 @@ func TestBoundConstants(t *testing.T) {
 		if testCase.ordered {
 			assert.Equal(t, testCase.order, order, testCase.name)
 		}
+	}
+}
+
+func TestGeneratedCheckName(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, "t_at_check", objectName("t", "at", "check"))
+	assert.Equal(t, "t_check", objectName("t", "", "check"))
+	assert.Equal(t, "t_at_check2", objectName("t", "at", "check2"))
+
+	long := strings.Repeat("a", 60)
+	name := objectName(long, "column", "check")
+	assert.Len(t, name, 63)
+	assert.Equal(t, strings.Repeat("a", 50)+"_column_check", name, "the longer name gives way first")
+
+	// A multi-byte character is never split.
+	accented := strings.Repeat("é", 40)
+	assert.True(t, utf8.ValidString(objectName(accented, "", "check")))
+
+	columns := func(sql string) []string {
+		statement := pg_parse.ParseOne("ALTER TABLE t ADD CHECK (" + sql + ")")
+		require.Len(t, statement.Subcommands, 1, sql)
+		return columnsOf(statement.Subcommands[0].Constraint.Expr)
+	}
+	assert.Equal(t, []string{"at"}, columns("at IS NOT NULL AND t.at > 0"))
+	assert.Equal(t, []string{"a", "b"}, columns("a < b"))
+}
+
+// TestBlindStatements checks what lets a DROP CONSTRAINT fall back on guessing: only DDL the file does not spell.
+func TestBlindStatements(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		sql   string
+		blind bool
+	}{
+		{"DO $$ BEGIN END $$", true},
+		{"CALL some_procedure()", true},
+		{"CREATE EXTENSION hstore", true},
+		{"THIS IS NOT SQL", true},
+		{"ALTER TABLE rd_plain ADD CHECK (at > 0)", false},
+		{"CREATE TABLE t_new (a int PRIMARY KEY)", false},
+		{"SELECT 1", false},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.sql, func(t *testing.T) {
+			classifier := NewClassifier(nullableKeyCatalog(t))
+			classifier.Analyze(pg_parse.Parse(testCase.sql))
+			assert.Equal(t, testCase.blind, classifier.checks.blind)
+		})
 	}
 }

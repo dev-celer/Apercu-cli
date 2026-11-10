@@ -520,6 +520,66 @@ func TestShadowCatalogDoesNotShadowARealRelation(t *testing.T) {
 	assert.Equal(t, before.Relation.OID, after.Relation.OID)
 }
 
+func TestShadowCatalogFollowsDropsAndRenames(t *testing.T) {
+	t.Parallel()
+
+	name := func(table string) helper.FullRelationName {
+		return helper.FullRelationName{Schema: "apercu_snapshot_test", Table: table}
+	}
+
+	t.Run("a dropped table created again is the migration's", func(t *testing.T) {
+		catalog := testCatalog(t)
+		run(t, catalog, "DROP TABLE users CASCADE; CREATE TABLE users (a int)")
+		info := catalog.Resolve(name("users"), nil)
+		assert.Equal(t, pg_catalog.OriginCreated, info.Origin)
+		assert.True(t, catalog.CreatedByMigration(name("users")))
+	})
+
+	t.Run("a dropped partitioned table takes its partitions", func(t *testing.T) {
+		catalog := testCatalog(t)
+		events := catalog.Resolve(name("events"), nil)
+		require.NotEmpty(t, catalog.Children(events.Key()))
+		run(t, catalog, "DROP TABLE events")
+		assert.False(t, catalog.Resolve(name("events"), nil).Exists())
+		assert.False(t, catalog.Resolve(name("events_2025"), nil).Exists())
+		assert.Empty(t, catalog.Children(events.Key()))
+	})
+
+	t.Run("a renamed table answers to its new name only", func(t *testing.T) {
+		catalog := testCatalog(t)
+		before := catalog.Resolve(name("users"), nil)
+		run(t, catalog, "ALTER TABLE users RENAME TO members")
+		assert.False(t, catalog.Resolve(name("users"), nil).Exists())
+		after := catalog.Resolve(name("members"), nil)
+		assert.Equal(t, pg_catalog.OriginExisting, after.Origin)
+		assert.Equal(t, before.Relation.OID, after.Relation.OID)
+		byKey, ok := catalog.RelationByKey(after.Key())
+		require.True(t, ok)
+		assert.Equal(t, name("members"), byKey.Name)
+	})
+
+	t.Run("a table moved to another schema", func(t *testing.T) {
+		catalog := testCatalog(t)
+		run(t, catalog, "ALTER TABLE orders SET SCHEMA archive")
+		assert.False(t, catalog.Resolve(name("orders"), nil).Exists())
+		assert.True(t, catalog.Resolve(helper.FullRelationName{Schema: "archive", Table: "orders"}, nil).Exists())
+		assert.True(t, catalog.Resolve(helper.FullRelationName{Schema: "archive", Table: "orders_open_idx"}, nil).Exists(),
+			"its indexes follow it")
+	})
+
+	t.Run("a renamed created table keeps its partitions", func(t *testing.T) {
+		catalog := testCatalog(t)
+		run(t, catalog, "CREATE TABLE p (a int) PARTITION BY RANGE (a); "+
+			"CREATE TABLE p1 PARTITION OF p FOR VALUES FROM (1) TO (2); ALTER TABLE p RENAME TO q")
+		assert.False(t, catalog.Resolve(name("p"), nil).Exists())
+		q := catalog.Resolve(name("q"), nil)
+		require.Equal(t, pg_catalog.OriginCreated, q.Origin)
+		children := catalog.Children(q.Key())
+		require.Len(t, children, 1)
+		assert.Equal(t, catalog.Resolve(name("p1"), nil).Key(), children[0].Child)
+	})
+}
+
 // TestBaselineComesFromTheSnapshot chack that with no SET at all, the context is what the collector's session reported.
 func TestBaselineComesFromTheSnapshot(t *testing.T) {
 	t.Parallel()

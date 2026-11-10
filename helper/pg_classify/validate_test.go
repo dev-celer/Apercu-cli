@@ -528,10 +528,9 @@ func TestIndexRenamedAsTable(t *testing.T) {
 		{"ALTER TABLE no_such_idx RENAME TO i", "", ""},
 	}
 
-	catalog := testCatalog(t)
 	for _, testCase := range cases {
 		t.Run(testCase.sql, func(t *testing.T) {
-			analysis := single(t, catalog, testCase.sql)
+			analysis := single(t, testCatalog(t), testCase.sql)
 			finding := filterV05(analysis)
 			if testCase.index == "" {
 				assert.Nil(t, finding)

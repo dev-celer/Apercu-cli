@@ -38,21 +38,20 @@ func TestTableCreationAndDestruction(t *testing.T) {
 func TestDropTableCarriesEverythingPointingAtIt(t *testing.T) {
 	t.Parallel()
 
-	catalog := testCatalog(t)
-	finding := findingOf(t, single(t, catalog, "DROP TABLE users"), "R-TB-DROP")
+	finding := findingOf(t, single(t, testCatalog(t), "DROP TABLE users"), "R-TB-DROP")
 	for _, referencing := range []string{"apercu_snapshot_test.orders", "apercu_snapshot_test.profiles"} {
 		target := targetOf(t, finding, referencing)
 		assert.Equal(t, pg_contract.LockAccessExclusive, target.Lock, "%s holds a foreign key into users", referencing)
 		assert.Equal(t, pg_contract.TargetRoleImplicit, target.Role)
 	}
-	assert.NotContains(t, codesOf(single(t, catalog, "DROP TABLE users")), pg_contract.Code("R-OB-DROPVIEW"))
+	assert.NotContains(t, codesOf(single(t, testCatalog(t), "DROP TABLE users")), pg_contract.Code("R-OB-DROPVIEW"))
 
 	// CASCADE is what takes the views with it, so it is what names them.
-	plain := findingOf(t, single(t, catalog, "DROP TABLE users"), "R-TB-DROP")
+	plain := findingOf(t, single(t, testCatalog(t), "DROP TABLE users"), "R-TB-DROP")
 	for _, target := range plain.Targets {
 		assert.NotEqual(t, "apercu_snapshot_test.active_users", target.Relation.Name.String())
 	}
-	cascade := findingOf(t, single(t, catalog, "DROP TABLE users CASCADE"), "R-TB-DROP")
+	cascade := findingOf(t, single(t, testCatalog(t), "DROP TABLE users CASCADE"), "R-TB-DROP")
 	assert.Equal(t, pg_contract.LockAccessExclusive, targetOf(t, cascade, "apercu_snapshot_test.active_users").Lock)
 }
 
