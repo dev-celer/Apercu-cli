@@ -1,0 +1,178 @@
+package rules_test
+
+import (
+	"testing"
+
+	"apercu-cli/internal/pgcatalog"
+	"apercu-cli/internal/pgcatalog/snapshot"
+	"apercu-cli/internal/pgclassify/classifytest"
+	"apercu-cli/internal/pgcontract"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestStorageSubcommands(t *testing.T) {
+	t.Parallel()
+
+	cases := []ruleCase{
+		// R-AT-RELOPT.
+		{name: "a vacuum-tunable option needs no more than a vacuum's lock", sql: "ALTER TABLE orders SET (fillfactor = 70)", code: "R-AT-RELOPT", lock: sue, op: meta},
+		{name: "an autovacuum option is matched by prefix", sql: "ALTER TABLE orders SET (autovacuum_vacuum_scale_factor = 0.1)", code: "R-AT-RELOPT", lock: sue, op: meta},
+		{name: "a mixed list takes the stronger lock", sql: "ALTER TABLE orders SET (fillfactor = 70, user_catalog_table = true)", code: "R-AT-RELOPT", lock: ael, op: meta},
+		{name: "an unknown option is assumed to need the stronger lock", sql: "ALTER TABLE orders SET (no_such_option = 1)", code: "R-AT-RELOPT", lock: ael, op: meta},
+		{name: "resetting a vacuum-tunable option is the same clause", sql: "ALTER TABLE orders RESET (fillfactor)", code: "R-AT-RELOPT", lock: sue, op: meta},
+
+		// R-AT-TABLESPACE / R-AT-ACCESSMETHOD / R-AT-LOGGED.
+		{name: "moving a tablespace copies the heap", sql: "ALTER TABLE orders SET TABLESPACE fast", code: "R-AT-TABLESPACE", lock: ael, op: rw},
+		{name: "naming the access method already in use changes nothing", sql: "ALTER TABLE orders SET ACCESS METHOD heap", code: "R-AT-ACCESSMETHOD", lock: ael, op: meta},
+		{name: "naming another one rewrites every tuple", sql: "ALTER TABLE orders SET ACCESS METHOD columnar", code: "R-AT-ACCESSMETHOD", lock: ael, op: rw},
+		{name: "changing persistence rewrites the heap", sql: "ALTER TABLE orders SET UNLOGGED", code: "R-AT-LOGGED", lock: ael, op: rw},
+		{name: "and back again", sql: "ALTER TABLE orders SET LOGGED", code: "R-AT-LOGGED", lock: ael, op: rw},
+
+		// R-AT-CLUSTERON / R-AT-WITHOUTOIDS.
+		{name: "marking an index for CLUSTER clusters nothing now", sql: "ALTER TABLE orders CLUSTER ON orders_pkey", code: "R-AT-CLUSTERON", lock: sue, op: meta},
+		{name: "unmarking it is the same clause", sql: "ALTER TABLE orders SET WITHOUT CLUSTER", code: "R-AT-CLUSTERON", lock: sue, op: meta},
+		{name: "SET WITHOUT OIDS has had nothing to do since PostgreSQL 12", sql: "ALTER TABLE orders SET WITHOUT OIDS", code: "R-AT-WITHOUTOIDS", lock: ael, op: meta},
+
+		// R-AT-OWNER / R-AT-REPLIDENT.
+		{name: "changing owner is catalog only", sql: "ALTER TABLE orders OWNER TO app", code: "R-AT-OWNER", lock: ael, op: meta},
+		{name: "replica identity is catalog only", sql: "ALTER TABLE orders REPLICA IDENTITY FULL", code: "R-AT-REPLIDENT", lock: ael, op: meta},
+		{name: "replica identity by index is too", sql: "ALTER TABLE orders REPLICA IDENTITY USING INDEX orders_pkey", code: "R-AT-REPLIDENT", lock: ael, op: meta},
+
+		// R-AT-INHERIT / R-AT-OF.
+		{name: "an inheritance edge is catalog only", sql: "ALTER TABLE legacy_child NO INHERIT legacy_parent", code: "R-AT-INHERIT", lock: ael, op: meta, table: "apercu_snapshot_test.legacy_child"},
+		{name: "binding a table to a type is catalog only", sql: "ALTER TABLE places NOT OF", code: "R-AT-OF", lock: ael, op: meta, table: "apercu_snapshot_test.places"},
+
+		// R-AT-RENAME / R-AT-SETSCHEMA.
+		{name: "renaming a table is catalog only", sql: "ALTER TABLE orders RENAME TO orders_old", code: "R-AT-RENAME", lock: ael, op: meta},
+		{name: "moving a table between schemas is catalog only", sql: "ALTER TABLE orders SET SCHEMA public", code: "R-AT-SETSCHEMA", lock: ael, op: meta},
+	}
+
+	catalog := classifytest.Catalog(t)
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) { testCase.run(t, catalog) })
+	}
+}
+
+// TestStorageMarksStopAtTheParent validate that storage parameters and a CLUSTER mark never recurse. The server
+// refuses both on a partitioned table and says so itself, so they are read there as if they ran.
+func TestStorageMarksStopAtTheParent(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		sql       string
+		code      pgcontract.Code
+		relations []string
+	}{
+		{name: "storage parameters on a partitioned table", sql: "ALTER TABLE events SET (fillfactor = 70)", code: "R-AT-RELOPT", relations: []string{"apercu_snapshot_test.events"}},
+		{name: "and on a classic inheritance parent", sql: "ALTER TABLE legacy_parent SET (fillfactor = 70)", code: "R-AT-RELOPT", relations: []string{"apercu_snapshot_test.legacy_parent"}},
+		{name: "a CLUSTER mark on a partitioned table", sql: "ALTER TABLE events CLUSTER ON events_at_idx", code: "R-AT-CLUSTERON", relations: []string{"apercu_snapshot_test.events", "apercu_snapshot_test.events_at_idx"}},
+		{name: "and its removal", sql: "ALTER TABLE events SET WITHOUT CLUSTER", code: "R-AT-CLUSTERON", relations: []string{"apercu_snapshot_test.events"}},
+	}
+
+	catalog := classifytest.Catalog(t)
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			analysis := classifytest.Single(t, catalog, testCase.sql)
+			require.Empty(t, analysis.Errors)
+			finding := classifytest.FindingOf(t, analysis, testCase.code)
+			assert.ElementsMatch(t, testCase.relations, classifytest.TargetNames(&finding))
+			assert.Equal(t, pgcontract.LockShareUpdateExclusive, classifytest.TargetOf(t, finding, testCase.relations[0]).Lock)
+			assert.Equal(t, pgcontract.OpKindMetadata, classifytest.TargetOf(t, finding, testCase.relations[0]).OpKind)
+		})
+	}
+}
+
+func TestMoveAllInTablespace(t *testing.T) {
+	t.Parallel()
+
+	catalog := classifytest.Catalog(t)
+
+	t.Run("a named tablespace resolves to the oid the relations carry", func(t *testing.T) {
+		finding := classifytest.FindingOf(t, classifytest.Single(t, catalog, "ALTER TABLE ALL IN TABLESPACE pg_default SET TABLESPACE fast"), "R-AT-002")
+
+		table := classifytest.TargetOf(t, finding, "apercu_snapshot_test.orders")
+		assert.Equal(t, pgcontract.LockAccessExclusive, table.Lock)
+		assert.Equal(t, pgcontract.OpKindRewrite, table.OpKind)
+
+		// A partitioned parent has no file to copy, and it does not carry its partitions along.
+		// They move only when they are in the named tablespace themselves.
+		assert.Equal(t, pgcontract.OpKindMetadata, classifytest.TargetOf(t, finding, "apercu_snapshot_test.events").OpKind)
+		assert.Equal(t, pgcontract.OpKindRewrite, classifytest.TargetOf(t, finding, "apercu_snapshot_test.events_2025").OpKind)
+
+		for _, target := range finding.Targets {
+			assert.Truef(t, target.Relation.Kind.IsTable(), "%s is a %s and ALTER TABLE moves nothing but tables",
+				target.Relation, target.Relation.Kind)
+		}
+	})
+
+	t.Run("each object type moves its own relkinds", func(t *testing.T) {
+		indexes := classifytest.FindingOf(t, classifytest.Single(t, catalog, "ALTER INDEX ALL IN TABLESPACE pg_default SET TABLESPACE fast"), "R-IX-ALLTABLESPACE")
+		assert.Equal(t, pgcontract.LockAccessExclusive, classifytest.TargetOf(t, indexes, "apercu_snapshot_test.orders_open_idx").Lock)
+		for _, target := range indexes.Targets {
+			assert.Truef(t, target.Relation.Kind.IsIndex(), "%s is a %s and ALTER INDEX moves nothing but indexes",
+				target.Relation, target.Relation.Kind)
+		}
+
+		views := classifytest.FindingOf(t, classifytest.Single(t, catalog, "ALTER MATERIALIZED VIEW ALL IN TABLESPACE pg_default SET TABLESPACE fast"), "R-MV-ALLTABLESPACE")
+		assert.Len(t, views.Targets, 1)
+		assert.Equal(t, pgcontract.LockAccessExclusive, classifytest.TargetOf(t, views, "apercu_snapshot_test.order_totals").Lock)
+	})
+
+	t.Run("OWNED BY narrows it to one role", func(t *testing.T) {
+		analysis := classifytest.Single(t, catalog, "ALTER TABLE ALL IN TABLESPACE pg_default OWNED BY nobody SET TABLESPACE fast")
+		assert.Empty(t, classifytest.FindingOf(t, analysis, "R-AT-002").Targets)
+	})
+
+	t.Run("a tablespace the snapshot never saw can only be narrowed to what is not in the default", func(t *testing.T) {
+		finding := classifytest.FindingOf(t, classifytest.Single(t, catalog, "ALTER TABLE ALL IN TABLESPACE slow SET TABLESPACE fast"), "R-AT-002")
+		assert.Contains(t, finding.Message, "no tablespace named")
+		// Every relation in the fixture sits in the default tablespace, so none of them can be in "slow".
+		assert.Empty(t, finding.Targets)
+	})
+}
+
+func TestMoveAllFollowsTheDatabaseDefault(t *testing.T) {
+	t.Parallel()
+
+	catalog := tablespaceCatalog(t)
+
+	t.Run("the database default matches the relations that record none", func(t *testing.T) {
+		finding := classifytest.FindingOf(t, classifytest.Single(t, catalog, "ALTER TABLE ALL IN TABLESPACE slow SET TABLESPACE fast"), "R-AT-002")
+		assert.Len(t, finding.Targets, 1)
+		assert.Equal(t, pgcontract.LockAccessExclusive, classifytest.TargetOf(t, finding, "public.here").Lock)
+	})
+
+	t.Run("pg_default matches the relations that record it explicitly", func(t *testing.T) {
+		finding := classifytest.FindingOf(t, classifytest.Single(t, catalog, "ALTER TABLE ALL IN TABLESPACE pg_default SET TABLESPACE fast"), "R-AT-002")
+		assert.Len(t, finding.Targets, 1)
+		assert.Equal(t, pgcontract.LockAccessExclusive, classifytest.TargetOf(t, finding, "public.there").Lock)
+	})
+}
+
+func tablespaceCatalog(t *testing.T) *pgcatalog.Catalog {
+	t.Helper()
+
+	pre := &snapshot.Snapshot{
+		Source: snapshot.SourcePreview,
+		PIT:    snapshot.PITPre,
+		Header: snapshot.Header{
+			Version: pgcontract.Version17, User: "postgres", SearchPath: "public",
+			DefaultTablespace: 16385,
+		},
+		Tablespaces: []snapshot.Tablespace{
+			{OID: 1663, Name: "pg_default"},
+			{OID: 1664, Name: "pg_global"},
+			{OID: 16385, Name: "slow"},
+		},
+		Relations: []snapshot.Relation{
+			{OID: 1, Namespace: "public", Name: "here", Kind: "r", AccessMethod: "heap", Owner: "postgres", Tablespace: 0},
+			{OID: 2, Namespace: "public", Name: "there", Kind: "r", AccessMethod: "heap", Owner: "postgres", Tablespace: 1663},
+		},
+	}
+	catalog, err := pgcatalog.NewCatalog(pgcatalog.CatalogOptions{Pre: pre})
+	require.NoError(t, err)
+	return catalog
+}

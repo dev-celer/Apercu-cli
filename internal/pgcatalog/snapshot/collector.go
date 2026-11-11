@@ -1,0 +1,158 @@
+package snapshot
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"log/slog"
+	"time"
+
+	"apercu-cli/internal/pgcontract"
+)
+
+// userNS is the filter that exclude all PostgreSQL internal namespace
+const userNS = `n.nspname <> 'information_schema' AND n.nspname NOT LIKE 'pg\_%'`
+
+// CollectOptions says which database is being captured and when.
+type CollectOptions struct {
+	Source Source
+	PIT    PIT
+	// ProdAvailable tells the collector whether the production database can be used.
+	ProdAvailable bool
+}
+
+// sourcePolicy is where an item may be captured from.
+type sourcePolicy uint8
+
+const (
+	fromPreview sourcePolicy = iota
+	fromProd
+	fromProdPreferred
+)
+
+// pitPolicy is when an item is captured. Pre or post migration.
+type pitPolicy uint8
+
+const (
+	preOnly pitPolicy = iota
+	prePost
+)
+
+// item is one S-nn entry.
+type item struct {
+	id      string
+	source  sourcePolicy
+	pit     pitPolicy
+	collect func(ctx context.Context, tx *sql.Tx, snapshot *Snapshot) error
+}
+
+// items contain the list of all snapshot items captured with their S-XX id and their capture policies.
+// S-00 is absent because it is a prerequisite for other items.
+var items = []item{
+	{id: "S-01", source: fromPreview, pit: prePost, collect: collectSchemas},
+	{id: "S-02", source: fromPreview, pit: prePost, collect: collectRelations},
+	{id: "S-03", source: fromPreview, pit: prePost, collect: collectColumns},
+	{id: "S-04", source: fromPreview, pit: prePost, collect: collectDefaults},
+	{id: "S-05", source: fromPreview, pit: prePost, collect: collectConstraints},
+	{id: "S-06", source: fromPreview, pit: prePost, collect: collectIndexes},
+	{id: "S-07", source: fromPreview, pit: prePost, collect: collectInherits},
+	{id: "S-08", source: fromPreview, pit: prePost, collect: collectSequences},
+	{id: "S-09", source: fromPreview, pit: prePost, collect: collectTypes},
+	{id: "S-10", source: fromPreview, pit: prePost, collect: collectTriggersAndPolicies},
+	{id: "S-11", source: fromPreview, pit: prePost, collect: collectViewDeps},
+	{id: "S-12", source: fromPreview, pit: prePost, collect: collectDepends},
+	{id: "S-13", source: fromPreview, pit: prePost, collect: collectProcs},
+	{id: "S-14", source: fromPreview, pit: prePost, collect: collectCastsAndOperators},
+	{id: "S-15", source: fromProdPreferred, pit: preOnly, collect: collectPublications},
+	{id: "S-16", source: fromPreview, pit: preOnly, collect: collectSettings},
+	{id: "S-17", source: fromProd, pit: preOnly, collect: collectTableStats},
+	{id: "S-18", source: fromPreview, pit: prePost, collect: collectRoles},
+	{id: "S-19", source: fromPreview, pit: prePost, collect: collectCollations},
+	{id: "S-20", source: fromPreview, pit: prePost, collect: collectTablespaces},
+	{id: "S-21", source: fromPreview, pit: prePost, collect: collectExtStats},
+}
+
+// wanted reports whether the item should be captured under these options.
+func (i item) wanted(opts CollectOptions) bool {
+	if i.pit == preOnly && opts.PIT != PITPre {
+		return false
+	}
+	switch i.source {
+	case fromProd:
+		return opts.Source == SourceProd
+	case fromProdPreferred:
+		return opts.Source == SourceProd || !opts.ProdAvailable
+	default:
+		return opts.Source == SourcePreview
+	}
+}
+
+// Collect captures one snapshot. Everything run inside a single Read-Only transaction.
+func Collect(ctx context.Context, db *sql.DB, opts CollectOptions) (*Snapshot, error) {
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{
+		Isolation: sql.LevelRepeatableRead,
+		ReadOnly:  true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("Failed to open the snapshot transaction: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	snapshot := &Snapshot{
+		Source:     opts.Source,
+		PIT:        opts.PIT,
+		CapturedAt: time.Now().UTC(),
+		Collected:  []string{"S-00"},
+	}
+
+	if err := collectHeader(ctx, tx, snapshot); err != nil {
+		return nil, err
+	}
+
+	for _, it := range items {
+		if !it.wanted(opts) {
+			continue
+		}
+		started := time.Now()
+		if err := it.collect(ctx, tx, snapshot); err != nil {
+			return nil, fmt.Errorf("Failed to collect snapshot item %s: %v", it.id, err)
+		}
+		slog.Debug("Collected snapshot item", "item", it.id, "source", opts.Source,
+			"pit", opts.PIT, "duration", time.Since(started))
+		snapshot.Collected = append(snapshot.Collected, it.id)
+	}
+
+	return snapshot, nil
+}
+
+// Has reports whether the item was captured for this snapshot.
+func (s *Snapshot) Has(itemID string) bool {
+	for _, id := range s.Collected {
+		if id == itemID {
+			return true
+		}
+	}
+	return false
+}
+
+const headerQuery = `
+SELECT current_setting('server_version_num')::int AS server_version_num,
+       current_database(), current_user, current_setting('search_path') AS search_path,
+       current_setting('TimeZone') AS timezone,
+       pg_is_in_recovery() AS from_replica,
+       (SELECT d.dattablespace FROM pg_database d WHERE d.datname = current_database()) AS default_tablespace`
+
+// collectHeader is S-00.
+func collectHeader(ctx context.Context, tx *sql.Tx, snapshot *Snapshot) error {
+	h := Header{}
+	err := tx.QueryRowContext(ctx, headerQuery).Scan(
+		&h.ServerVersionNum, &h.Database, &h.User, &h.SearchPath, &h.TimeZone, &h.FromReplica,
+		&h.DefaultTablespace,
+	)
+	if err != nil {
+		return fmt.Errorf("Failed to collect snapshot item S-00: %v", err)
+	}
+	h.Version = pgcontract.VersionFromNum(h.ServerVersionNum)
+	snapshot.Header = h
+	return nil
+}

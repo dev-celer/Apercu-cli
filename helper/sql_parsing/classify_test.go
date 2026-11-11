@@ -1,7 +1,7 @@
 package sql_parsing
 
 import (
-	"apercu-cli/helper/pg_contract"
+	"apercu-cli/internal/pgcontract"
 	"testing"
 
 	"apercu-cli/helper"
@@ -12,8 +12,8 @@ import (
 // classify runs ClassifyOperation for a single statement and reports the
 // resulting operation type together
 func classify(sql string) metricshelper.EventOperationType {
-	query := &pg_contract.QueryEventAnalysis{
-		Event:          &pg_contract.QueryEvent{SQL: sql},
+	query := &pgcontract.QueryEventAnalysis{
+		Event:          &pgcontract.QueryEvent{SQL: sql},
 		AffectedTables: []helper.FullRelationName{{Schema: "public", Table: "t"}},
 	}
 	store := warning.NewWarningStore()

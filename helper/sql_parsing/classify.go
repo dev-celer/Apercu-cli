@@ -2,12 +2,12 @@ package sql_parsing
 
 import (
 	metricshelper "apercu-cli/helper/metrics"
-	"apercu-cli/helper/pg_contract"
 	"apercu-cli/helper/warning"
+	"apercu-cli/internal/pgcontract"
 	"strings"
 )
 
-func appendWarnings(w []*warning.LockWarning, warningStore *warning.WarningStore, query *pg_contract.QueryEventAnalysis) {
+func appendWarnings(w []*warning.LockWarning, warningStore *warning.WarningStore, query *pgcontract.QueryEventAnalysis) {
 	for _, i := range w {
 		if warningStore != nil {
 			warningStore.AddWarning(i)
@@ -17,7 +17,7 @@ func appendWarnings(w []*warning.LockWarning, warningStore *warning.WarningStore
 }
 
 // ClassifyOperation inject the operation type and warning if necessary, the warning is also created in the warningStore.
-func ClassifyOperation(query *pg_contract.QueryEventAnalysis, warningStore *warning.WarningStore, prodStats *metricshelper.DatabaseMetrics) {
+func ClassifyOperation(query *pgcontract.QueryEventAnalysis, warningStore *warning.WarningStore, prodStats *metricshelper.DatabaseMetrics) {
 	upper := strings.ToUpper(strings.TrimSpace(query.Event.SQL))
 	if upper == "" {
 		query.Type = metricshelper.EventOperationTypeNonBlocking
@@ -132,7 +132,7 @@ func ClassifyOperation(query *pg_contract.QueryEventAnalysis, warningStore *warn
 	query.Type = metricshelper.EventOperationTypeNonBlocking
 }
 
-func classifyAlterSubcommand(sub string, query *pg_contract.QueryEventAnalysis, warningStore *warning.WarningStore, prodStats *metricshelper.DatabaseMetrics) {
+func classifyAlterSubcommand(sub string, query *pgcontract.QueryEventAnalysis, warningStore *warning.WarningStore, prodStats *metricshelper.DatabaseMetrics) {
 	contains := func(s string) bool { return strings.Contains(sub, s) }
 
 	switch {
@@ -226,7 +226,7 @@ func classifyAlterSubcommand(sub string, query *pg_contract.QueryEventAnalysis, 
 	return
 }
 
-func classifyAddColumn(sub string, query *pg_contract.QueryEventAnalysis, warningStore *warning.WarningStore, prodStats *metricshelper.DatabaseMetrics) {
+func classifyAddColumn(sub string, query *pgcontract.QueryEventAnalysis, warningStore *warning.WarningStore, prodStats *metricshelper.DatabaseMetrics) {
 	contains := func(s string) bool { return strings.Contains(sub, s) }
 
 	switch {
@@ -263,7 +263,7 @@ func classifyAddColumn(sub string, query *pg_contract.QueryEventAnalysis, warnin
 
 // classifyAlterColumn returns ok=false when the subcommand is an ALTER COLUMN
 // shape it does not recognize, so the caller can fall through.
-func classifyAlterColumn(sub string, query *pg_contract.QueryEventAnalysis, warningStore *warning.WarningStore, prodStats *metricshelper.DatabaseMetrics) bool {
+func classifyAlterColumn(sub string, query *pgcontract.QueryEventAnalysis, warningStore *warning.WarningStore, prodStats *metricshelper.DatabaseMetrics) bool {
 	contains := func(s string) bool { return strings.Contains(sub, s) }
 
 	switch {
@@ -323,7 +323,7 @@ func classifyAlterColumn(sub string, query *pg_contract.QueryEventAnalysis, warn
 	return false
 }
 
-func classifyAddConstraint(sub string, query *pg_contract.QueryEventAnalysis, warningStore *warning.WarningStore, prodStats *metricshelper.DatabaseMetrics) {
+func classifyAddConstraint(sub string, query *pgcontract.QueryEventAnalysis, warningStore *warning.WarningStore, prodStats *metricshelper.DatabaseMetrics) {
 	contains := func(s string) bool { return strings.Contains(sub, s) }
 
 	notValid := contains("NOT VALID")

@@ -1,7 +1,7 @@
 package main
 
 import (
-	"apercu-cli/helper/pg_contract"
+	"apercu-cli/internal/pgcontract"
 	"fmt"
 	"os"
 	"strconv"
@@ -49,8 +49,8 @@ func newConnState() *connState {
 }
 
 // flush publishes the queued events the closing function filter.
-func (s *connState) flush(closing func(*pendingEvent) bool) []pg_contract.QueryEvent {
-	events := make([]pg_contract.QueryEvent, 0, len(s.pending))
+func (s *connState) flush(closing func(*pendingEvent) bool) []pgcontract.QueryEvent {
+	events := make([]pgcontract.QueryEvent, 0, len(s.pending))
 	kept := s.pending[:0]
 
 	for _, pending := range s.pending {
@@ -111,8 +111,8 @@ func (p *pendingEvent) reportable() bool {
 }
 
 // event return the output event that the proxy should emit.
-func (p *pendingEvent) event() pg_contract.QueryEvent {
-	ev := pg_contract.QueryEvent{
+func (p *pendingEvent) event() pgcontract.QueryEvent {
+	ev := pgcontract.QueryEvent{
 		SQL:          p.sql,
 		StartedAt:    p.start,
 		Cycle:        p.cycle,
@@ -258,7 +258,7 @@ func observeUpstream(msg pgproto3.BackendMessage, state *connState) {
 }
 
 // observeUpstream advances the state machine and answers with whatever the server just finished.
-func (s *connState) observeUpstream(msg pgproto3.BackendMessage) []pg_contract.QueryEvent {
+func (s *connState) observeUpstream(msg pgproto3.BackendMessage) []pgcontract.QueryEvent {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -273,7 +273,7 @@ func (s *connState) observeUpstream(msg pgproto3.BackendMessage) []pg_contract.Q
 		if !pending.simple {
 			// in extended protocol, one Execute is one statement, so it is finished and reportable on its own.
 			s.pending = append(s.pending[:index], s.pending[index+1:]...)
-			return []pg_contract.QueryEvent{pending.event()}
+			return []pgcontract.QueryEvent{pending.event()}
 		}
 		// A simple Query gets a CommandComplete for each of its statements, so it waits for its ReadyForQuery.
 

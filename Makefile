@@ -18,8 +18,8 @@ LDFLAGS        ?= -s -w
 
 # Package selection.
 PKGS           ?= ./...
-CATALOG_PKG    := ./helper/pg_catalog/
-PARSE_PKG      := ./helper/pg_parse/
+CATALOG_PKG    := ./internal/pgcatalog/snapshot/
+PARSE_PKG      := ./internal/pgparse/
 
 INTEGRATION_TIMEOUT ?= 30m
 
@@ -68,13 +68,13 @@ test-integration:
 ## test-all: run the unit and integration tests
 test-all: test test-integration
 
-## fixtures: regenerate helper/pg_catalog/testdata snapshots from live containers
+## fixtures: regenerate internal/pgcatalog/snapshot/testdata snapshots from live containers
 fixtures:
 	APERCU_UPDATE_FIXTURES=1 $(GO) test $(GOFLAGS) -tags integration \
 		-timeout $(INTEGRATION_TIMEOUT) -count=1 -v \
 		-run TestCollectAgainstServer $(CATALOG_PKG)
 
-## golden: regenerate helper/pg_parse/testdata/corpus.golden.yaml, the expected parser IR (no docker)
+## golden: regenerate internal/pgparse/testdata/corpus.golden.yaml, the expected parser IR (no docker)
 golden:
 	APERCU_UPDATE_FIXTURES=1 $(GO) test $(GOFLAGS) -count=1 \
 		-run TestCorpusMatchesGolden $(PARSE_PKG)

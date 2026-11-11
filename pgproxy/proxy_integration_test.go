@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"apercu-cli/helper/pg_contract"
+	"apercu-cli/internal/pgcontract"
 
 	"github.com/jackc/pgx/v5/pgproto3"
 	"github.com/stretchr/testify/assert"
@@ -34,17 +34,17 @@ func (p *published) Write(b []byte) (int, error) {
 }
 
 // events return all the events the proxy emitted, as QueryEvent structs.
-func (p *published) events(t *testing.T) []pg_contract.QueryEvent {
+func (p *published) events(t *testing.T) []pgcontract.QueryEvent {
 	t.Helper()
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	var events []pg_contract.QueryEvent
+	var events []pgcontract.QueryEvent
 	for _, line := range strings.Split(p.lines.String(), "\n") {
 		if !strings.HasPrefix(line, "{") {
 			continue
 		}
-		ev := pg_contract.QueryEvent{}
+		ev := pgcontract.QueryEvent{}
 		require.NoErrorf(t, json.Unmarshal([]byte(line), &ev), "the proxy published %q", line)
 		events = append(events, ev)
 	}
