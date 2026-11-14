@@ -61,7 +61,7 @@ func (c *Classifier) classify(statement ir.Statement, context session.Context) p
 	}
 
 	ruled := c.scope(statement, context)
-	if classify := rules.Commands[statement.Command]; classify != nil {
+	if classify := rules.For(statement.Command); classify != nil {
 		findings, errors := classify(ruled)
 		analysis.Findings = findings
 		analysis.Errors = errors

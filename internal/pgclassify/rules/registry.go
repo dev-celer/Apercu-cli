@@ -8,7 +8,7 @@ import (
 	"apercu-cli/internal/pgparse/ir"
 )
 
-// Commands is the registry. A command with no entry produces no finding.
+// Commands is the registry. A command with no entry classifies to R-UNKNOWN-COMMAND, unless it is silent.
 var Commands = map[pgcontract.Command]func(engine.Scope) ([]pgcontract.Finding, []pgcontract.Error){
 	// ALTER TABLE.
 	"ALTER TABLE":                               classifyAlterTable,
@@ -96,6 +96,27 @@ var Commands = map[pgcontract.Command]func(engine.Scope) ([]pgcontract.Finding, 
 	"DELETE":     engine.One(ruleDML),
 	"MERGE":      engine.One(ruleDML),
 	"SELECT FOR": engine.One(ruleSelectFor),
+}
+
+// silentCommands are the commands the registry deliberately ignores
+var silentCommands = map[pgcontract.Command]bool{
+	"BEGIN": true, "COMMIT": true, "ROLLBACK": true, "ROLLBACK TO SAVEPOINT": true,
+	"SAVEPOINT": true, "RELEASE SAVEPOINT": true,
+	"PREPARE TRANSACTION": true, "COMMIT PREPARED": true, "ROLLBACK PREPARED": true,
+	"SET": true, "SET LOCAL": true, "RESET": true, "RESET ALL": true, "SHOW": true,
+	"SELECT": true,
+}
+
+// For is the classification of a command: its rule, R-UNKNOWN-COMMAND when the registry has none,
+// and nil when the command is silent.
+func For(command pgcontract.Command) func(engine.Scope) ([]pgcontract.Finding, []pgcontract.Error) {
+	if classify := Commands[command]; classify != nil {
+		return classify
+	}
+	if silentCommands[command] {
+		return nil
+	}
+	return engine.One(ruleUnknownCommand)
 }
 
 // commentedObjects are the objects COMMENT ON names a relation for.

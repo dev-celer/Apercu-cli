@@ -24,3 +24,21 @@ func TestTransactionAndSessionControlClassifyToNothing(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) { testCase.run(t, catalog) })
 	}
 }
+
+// TestUnknownCommandsLockNothing is a command the registry has no rule for: it is reported, and it
+// carries no lock and no operation.
+func TestUnknownCommandsLockNothing(t *testing.T) {
+	t.Parallel()
+
+	cases := []ruleCase{
+		{name: "an anonymous code block", sql: "DO $$ BEGIN PERFORM 1; END $$", code: "R-UNKNOWN-COMMAND", noTargets: true},
+		{name: "a function definition", sql: "CREATE FUNCTION f() RETURNS int LANGUAGE sql AS 'SELECT 1'", code: "R-UNKNOWN-COMMAND", noTargets: true},
+		{name: "a view rename has no rule yet", sql: "ALTER VIEW v RENAME TO w", code: "R-UNKNOWN-COMMAND", noTargets: true},
+		{name: "a show reads a setting", sql: "SHOW lock_timeout"},
+	}
+
+	catalog := classifytest.Catalog(t)
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) { testCase.run(t, catalog) })
+	}
+}

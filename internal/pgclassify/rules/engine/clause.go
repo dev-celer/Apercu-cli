@@ -250,6 +250,9 @@ var clauses = map[pgcontract.Code]clause{
 	"R-OB-EXTENSION": {lock: pgcontract.LockNone, op: pgcontract.OpKindNone, below: Nowhere},
 	"R-OB-SCHEMA":    {lock: pgcontract.LockNone, op: pgcontract.OpKindNone, below: Nowhere},
 
+	// a command the registry has no rule for.
+	"R-UNKNOWN-COMMAND": {lock: pgcontract.LockNone, op: pgcontract.OpKindNone, below: Nowhere},
+
 	// types and domains.
 	"R-TY-ADDVALUE":    {lock: pgcontract.LockAccessExclusive, op: pgcontract.OpKindMetadata, below: Nowhere},
 	"R-TY-RENAMEVALUE": {lock: pgcontract.LockAccessExclusive, op: pgcontract.OpKindMetadata, below: Nowhere},
