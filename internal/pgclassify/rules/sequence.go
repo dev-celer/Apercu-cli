@@ -21,15 +21,15 @@ func sequenceOwner(s engine.Scope, info pgcatalog.RelationInfo) (string, string,
 	if !info.Exists() {
 		return "", "", false
 	}
-	relID, num, owned := s.Catalog.SequenceOwner(info.Relation.OID)
+	relID, num, owned := s.State.SequenceOwner(info.Relation.OID)
 	if !owned {
 		return "", "", false
 	}
-	table, ok := s.Catalog.ByOID(relID)
+	table, ok := s.State.ByOID(relID)
 	if !ok {
 		return "", "", false
 	}
-	for _, column := range s.Catalog.Columns(relID) {
+	for _, column := range s.State.Columns(pgcatalog.KeyFromOID(relID)) {
 		if column.Num == num {
 			return table.RelationName().String(), column.Name, true
 		}

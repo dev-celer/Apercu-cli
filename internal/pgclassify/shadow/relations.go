@@ -10,10 +10,10 @@ import (
 	"apercu-cli/internal/pgparse/ir"
 )
 
-// Relations drives the relation half of the shadow catalog: what each statement creates, links,
+// Relations drives the relation half of the shadow overlay: what each statement creates, links,
 // drops, renames or moves.
 type Relations struct {
-	catalog *pgcatalog.Catalog
+	recorder *pgcatalog.Recorder
 }
 
 // creations maps a command that brings a relation into existence to the position of that relation in the statement's relation list.
@@ -27,9 +27,9 @@ var creations = map[pgcontract.Command]int{
 	"CREATE INDEX":             1,
 }
 
-// declare update the shadow catalog on object creation.
+// declare update the shadow overlay on object creation.
 func (s *Relations) declare(statement ir.Statement, context session.Context) {
-	if s.catalog == nil || !statement.Parsed() {
+	if s.recorder == nil || !statement.Parsed() {
 		return
 	}
 
@@ -45,7 +45,7 @@ func (s *Relations) declare(statement ir.Statement, context session.Context) {
 	if statement.Command == "CREATE INDEX" {
 		// An index lands in its table's schema, not in the first schema of the search path,
 		// and it is partitioned exactly when its table is.
-		table := s.catalog.Resolve(statement.Relations[0].Name, context.SearchPath)
+		table := s.recorder.State().Resolve(statement.Relations[0].Name, context.SearchPath)
 		name.Schema = table.Name.Schema
 		if pgcontract.RelationKindFromRelkind(table.Relation.Kind).IsPartitioned() {
 			kind = pgcontract.RelationKindPartitionedIndex
@@ -60,23 +60,19 @@ func (s *Relations) declare(statement ir.Statement, context session.Context) {
 		}
 	}
 	if relkind := kind.Relkind(); relkind != "" {
-		s.catalog.Declare(helper.FullRelationName{Schema: name.Schema, Table: name.Table}, relkind)
+		s.recorder.Declare(helper.FullRelationName{Schema: name.Schema, Table: name.Table}, relkind)
 	}
 }
 
-// link updates the shadow catalog's parent-child links for the ones a statement draws or breaks,
+// link updates the shadow overlay's parent-child links for the ones a statement draws or breaks,
 // so the statements after it expand through the tree the migration has built so far.
 // The server never combines ATTACH or DETACH with another clause, so the statement's own expansion
 // is the tree before it, and the next one's is the tree after it.
 func (s *Relations) link(statement ir.Statement, context session.Context) {
-	if s.catalog == nil || !statement.Parsed() || len(statement.Relations) == 0 {
+	if s.recorder == nil || !statement.Parsed() || len(statement.Relations) == 0 {
 		return
 	}
-	resolve := func(ref ir.RelationRef) (pgcatalog.RelationInfo, bool) {
-		info := s.catalog.Resolve(ref.Name, context.SearchPath)
-		return info, info.Exists()
-	}
-	named, ok := resolve(statement.Relations[0])
+	named, ok := s.resolve(statement.Relations[0], context)
 	if !ok {
 		return
 	}
@@ -85,26 +81,26 @@ func (s *Relations) link(statement ir.Statement, context session.Context) {
 		if len(sub.Relations) == 0 {
 			continue
 		}
-		other, ok := resolve(sub.Relations[0])
+		other, ok := s.resolve(sub.Relations[0], context)
 		if !ok {
 			continue
 		}
 		switch {
 		case sub.Kind == ir.SubAttachPartition && statement.Command == "CREATE TABLE":
 			// CREATE TABLE … PARTITION OF names the new table first and its parent in the clause.
-			s.catalog.DeclareLink(pgcatalog.Link{Parent: other.Key(), Child: named.Key(),
+			s.recorder.Link(pgcatalog.Link{Parent: other.Key(), Child: named.Key(),
 				ParentIsPartitioned: true, IsDefaultPartition: sub.Value == "DEFAULT"})
 		case sub.Kind == ir.SubAttachPartition:
 			// ALTER TABLE … ATTACH PARTITION, and ALTER INDEX … ATTACH PARTITION for an index tree.
-			s.catalog.DeclareLink(pgcatalog.Link{Parent: named.Key(), Child: other.Key(),
+			s.recorder.Link(pgcatalog.Link{Parent: named.Key(), Child: other.Key(),
 				ParentIsPartitioned: true, IsDefaultPartition: sub.Value == "DEFAULT"})
 		case sub.Kind == ir.SubDetachPartition:
-			s.catalog.RemoveLink(named.Key(), other.Key())
+			s.recorder.Unlink(named.Key(), other.Key())
 		case sub.Kind == ir.SubAddInherit:
 			// INHERITS and ALTER TABLE … INHERIT both name the child first.
-			s.catalog.DeclareLink(pgcatalog.Link{Parent: other.Key(), Child: named.Key()})
+			s.recorder.Link(pgcatalog.Link{Parent: other.Key(), Child: named.Key()})
 		case sub.Kind == ir.SubDropInherit:
-			s.catalog.RemoveLink(other.Key(), named.Key())
+			s.recorder.Unlink(other.Key(), named.Key())
 		}
 	}
 }
@@ -114,79 +110,72 @@ var relationCommands = map[string]bool{
 	"TABLE": true, "INDEX": true, "VIEW": true, "MATERIALIZED VIEW": true, "SEQUENCE": true, "FOREIGN TABLE": true,
 }
 
-// Moved is what a statement did to one relation of the shadow catalog: the key it went by, and the key it goes by
-// now, zero when it was dropped.
-type Moved struct {
-	from, to pgcatalog.RelationKey
-}
-
-// retire updates the shadow catalog for the relations a statement drops, renames or moves to another schema,
-// and reports what it did so the state keyed by relation follows.
-func (s *Relations) retire(statement ir.Statement, context session.Context) []Moved {
-	if s.catalog == nil || !statement.Parsed() || len(statement.Relations) == 0 {
-		return nil
-	}
-	resolve := func(ref ir.RelationRef) (pgcatalog.RelationInfo, bool) {
-		info := s.catalog.Resolve(ref.Name, context.SearchPath)
-		return info, info.Exists()
+// retire updates the shadow overlay for the relations a statement drops, renames or moves to another schema. A
+// renamed relation keeps its key, so nothing keyed by it has to follow.
+func (s *Relations) retire(statement ir.Statement, context session.Context) {
+	if s.recorder == nil || !statement.Parsed() || len(statement.Relations) == 0 {
+		return
 	}
 
 	command := string(statement.Command)
 	if object, ok := strings.CutPrefix(command, "DROP "); ok && relationCommands[object] {
-		var out []Moved
 		for _, ref := range statement.Relations {
-			if info, ok := resolve(ref); ok {
-				out = append(out, s.drop(info.Key(), statement.Flags.Cascade)...)
+			if info, ok := s.resolve(ref, context); ok {
+				s.drop(info.Key(), statement.Flags.Cascade)
 			}
 		}
-		return out
+		return
 	}
 
 	object, _ := strings.CutPrefix(command, "ALTER ")
 	object, renames := strings.CutSuffix(object, " RENAME")
 	object, moves := strings.CutSuffix(object, " SET SCHEMA")
 	if !relationCommands[object] || len(statement.Subcommands) != 1 {
-		return nil
+		return
 	}
 	sub := statement.Subcommands[0]
-	info, ok := resolve(statement.Relations[0])
+	info, ok := s.resolve(statement.Relations[0], context)
 	if !ok {
-		return nil
+		return
 	}
 	switch {
 	case renames && sub.Kind == ir.SubRenameRelation:
-		to := helper.FullRelationName{Schema: info.Name.Schema, Table: sub.NewName}
-		return []Moved{{from: info.Key(), to: s.catalog.Rename(info.Key(), to)}}
+		s.recorder.Rename(info.Key(), helper.FullRelationName{Schema: info.Name.Schema, Table: sub.NewName})
 	case moves && sub.Kind == ir.SubSetSchema:
-		out := []Moved{{from: info.Key(), to: s.catalog.Rename(info.Key(), helper.FullRelationName{Schema: sub.Value, Table: info.Name.Table})}}
+		s.recorder.Rename(info.Key(), helper.FullRelationName{Schema: sub.Value, Table: info.Name.Table})
 		// A table's indexes follow it into the new schema.
-		for _, index := range s.catalog.IndexesOf(info.Relation.OID) {
-			if indexInfo, ok := s.catalog.RelationByKey(pgcatalog.SnapshotKey(index.IndexRelID)); ok {
-				to := helper.FullRelationName{Schema: sub.Value, Table: indexInfo.Name.Table}
-				out = append(out, Moved{from: indexInfo.Key(), to: s.catalog.Rename(indexInfo.Key(), to)})
+		state := s.recorder.State()
+		for _, index := range state.IndexesOf(info.Relation.OID) {
+			if indexInfo, ok := state.RelationByKey(pgcatalog.KeyFromOID(index.IndexRelID)); ok {
+				s.recorder.Rename(indexInfo.Key(), helper.FullRelationName{Schema: sub.Value, Table: indexInfo.Name.Table})
 			}
 		}
-		return out
 	}
-	return nil
 }
 
-// drop removes a relation from the shadow catalog with what goes with it: its partitions, which the server
+// resolve finds the relation a statement names, false when nothing holds it.
+func (s *Relations) resolve(ref ir.RelationRef, context session.Context) (pgcatalog.RelationInfo, bool) {
+	info := s.recorder.State().Resolve(ref.Name, context.SearchPath)
+	return info, info.Exists()
+}
+
+// drop removes a relation from the shadow overlay with what goes with it: its partitions, which the server
 // always drops along, its indexes, and with CASCADE its inheritance children and the views built on it.
-func (s *Relations) drop(key pgcatalog.RelationKey, cascade bool) []Moved {
+func (s *Relations) drop(key pgcatalog.RelationKey, cascade bool) {
+	state := s.recorder.State()
 	dropped := []pgcatalog.RelationKey{key}
 	if cascade {
-		dropped = append(dropped, s.catalog.Descendants(key)...)
+		dropped = append(dropped, state.Descendants(key)...)
 	} else {
-		dropped = append(dropped, s.catalog.PartitionDescendants(key)...)
+		dropped = append(dropped, state.PartitionDescendants(key)...)
 	}
 
-	var out []Moved
+	var out []pgcatalog.RelationKey
 	seen := map[pgcatalog.RelationKey]bool{}
 	add := func(key pgcatalog.RelationKey) {
 		if !seen[key] {
 			seen[key] = true
-			out = append(out, Moved{from: key})
+			out = append(out, key)
 		}
 	}
 	for _, key := range dropped {
@@ -195,22 +184,21 @@ func (s *Relations) drop(key pgcatalog.RelationKey, cascade bool) []Moved {
 		if !ok {
 			continue
 		}
-		for _, index := range s.catalog.IndexesOf(oid) {
-			add(pgcatalog.SnapshotKey(index.IndexRelID))
+		for _, index := range state.IndexesOf(oid) {
+			add(pgcatalog.KeyFromOID(index.IndexRelID))
 		}
 		if cascade {
-			for _, view := range s.catalog.ViewDependents(oid) {
-				add(pgcatalog.SnapshotKey(view.DependentRelID))
+			for _, view := range state.ViewDependents(oid) {
+				add(pgcatalog.KeyFromOID(view.DependentRelID))
 			}
 		}
 	}
-	for _, m := range out {
-		s.catalog.Drop(m.from)
+	for _, key := range out {
+		s.recorder.Drop(key)
 	}
-	return out
 }
 
-// Declare records in the shadow catalog what the statement creates.
+// Declare records in the shadow overlay what the statement creates.
 func (s *Relations) Declare(statement ir.Statement, context session.Context) {
 	s.declare(statement, context)
 }
@@ -220,11 +208,12 @@ func (s *Relations) Link(statement ir.Statement, context session.Context) {
 	s.link(statement, context)
 }
 
-// Retire records the relations a statement that ran drops, renames or moves, and reports what moved.
-func (s *Relations) Retire(statement ir.Statement, context session.Context) []Moved {
-	return s.retire(statement, context)
+// Retire records the relations a statement that ran drops, renames or moves.
+func (s *Relations) Retire(statement ir.Statement, context session.Context) {
+	s.retire(statement, context)
 }
 
-func NewRelations(catalog *pgcatalog.Catalog) *Relations {
-	return &Relations{catalog: catalog}
+// NewRelations records into recorder. A nil recorder records nothing.
+func NewRelations(recorder *pgcatalog.Recorder) *Relations {
+	return &Relations{recorder: recorder}
 }

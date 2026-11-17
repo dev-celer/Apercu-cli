@@ -22,7 +22,7 @@ func ruleStatistics(s engine.Scope) engine.Effect {
 		return e
 	}
 	for _, sub := range s.Statement.Subcommands {
-		table, ok := s.Catalog.ExtStatTable(sub.Object.Schema, sub.Object.Table, s.Context.SearchPath)
+		table, ok := s.State.ExtStatTable(sub.Object.Schema, sub.Object.Table, s.Context.SearchPath)
 		if !ok {
 			e.Message += fmt.Sprintf("; the snapshot holds no statistics object named %s, so the table behind it is unknown", sub.ObjectName())
 			continue

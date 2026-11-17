@@ -44,8 +44,8 @@ func viewDependents(s engine.Scope, info pgcatalog.RelationInfo) []engine.Touch 
 		return nil
 	}
 	var targets []engine.Touch
-	for _, dep := range s.Catalog.ViewDependents(info.Relation.OID) {
-		rel, ok := s.Catalog.ByOID(dep.DependentRelID)
+	for _, dep := range s.State.ViewDependents(info.Relation.OID) {
+		rel, ok := s.State.ByOID(dep.DependentRelID)
 		if !ok {
 			continue
 		}
@@ -92,8 +92,8 @@ func matViewSources(s engine.Scope, info pgcatalog.RelationInfo) []engine.Touch 
 		return nil
 	}
 	var targets []engine.Touch
-	for _, dep := range s.Catalog.ViewSources(info.Relation.OID) {
-		rel, ok := s.Catalog.ByOID(dep.ReferencedRelID)
+	for _, dep := range s.State.ViewSources(info.Relation.OID) {
+		rel, ok := s.State.ByOID(dep.ReferencedRelID)
 		if !ok {
 			continue
 		}

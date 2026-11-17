@@ -27,7 +27,7 @@ func UnboundedQueue(s engine.Scope, findings []pgcontract.Finding) []pgcontract.
 	var targets []pgcontract.Target
 	for _, finding := range findings {
 		for _, target := range finding.Targets {
-			if !target.Lock.IsWriteBlocking() || s.Catalog.CreatedByMigration(target.Relation.Name) {
+			if !target.Lock.IsWriteBlocking() || s.State.CreatedByMigration(target.Relation.Name) {
 				continue
 			}
 			targets = append(targets, pgcontract.Target{
@@ -119,7 +119,7 @@ func UnprovenNullableKey(s engine.Scope, findings []pgcontract.Finding) []pgcont
 		return nil
 	}
 	partition := s.Resolve(attach.Relations[0])
-	if !partition.Exists() || s.Catalog.CreatedByMigration(partition.Name) {
+	if !partition.Exists() || s.State.CreatedByMigration(partition.Name) {
 		return nil
 	}
 
@@ -127,7 +127,7 @@ func UnprovenNullableKey(s engine.Scope, findings []pgcontract.Finding) []pgcont
 	inherited := s.CheckNamesOn(parent)
 	var columns, bounding []string
 	for _, key := range keys {
-		key = s.Checks.CurrentColumn(parent.Key(), key)
+		key = s.State.CurrentColumn(parent.Key(), key)
 		// A key the parent holds NOT NULL has to be NOT NULL on the partition too, or the server refuses the attach.
 		if s.NeverNull(parent, key) || s.NeverNull(partition, key) {
 			continue
@@ -203,7 +203,7 @@ func MaintenanceStatements(s engine.Scope, findings []pgcontract.Finding) []pgco
 
 		var targets []pgcontract.Target
 		for _, target := range finding.Targets {
-			if s.Catalog.CreatedByMigration(target.Relation.Name) {
+			if s.State.CreatedByMigration(target.Relation.Name) {
 				continue
 			}
 			targets = append(targets, pgcontract.Target{
@@ -242,7 +242,7 @@ func IndexRenamedAsTable(s engine.Scope, findings []pgcontract.Finding) []pgcont
 			continue
 		}
 		for _, target := range finding.Targets {
-			if !target.Relation.Kind.IsIndex() || s.Catalog.CreatedByMigration(target.Relation.Name) {
+			if !target.Relation.Kind.IsIndex() || s.State.CreatedByMigration(target.Relation.Name) {
 				continue
 			}
 			targets = append(targets, pgcontract.Target{
@@ -293,7 +293,7 @@ func PartitionCreatedInPlace(s engine.Scope, findings []pgcontract.Finding) []pg
 			if target.Role == pgcontract.TargetRoleImplicit && defaultPartition == "" {
 				defaultPartition = target.Relation.Name.String()
 			}
-			if target.Role != pgcontract.TargetRoleDirect || s.Catalog.CreatedByMigration(target.Relation.Name) {
+			if target.Role != pgcontract.TargetRoleDirect || s.State.CreatedByMigration(target.Relation.Name) {
 				continue
 			}
 			if kind := target.Relation.Kind; kind != pgcontract.RelationKindUnknown && !kind.IsPartitioned() {
@@ -349,7 +349,7 @@ func ExtensionScript(s engine.Scope, findings []pgcontract.Finding) []pgcontract
 		return nil
 	}
 	sub := s.Statement.Subcommands[0]
-	installed, isInstalled := s.Catalog.Extension(sub.Name)
+	installed, isInstalled := s.State.Extension(sub.Name)
 
 	var message string
 	if s.Statement.Command == "ALTER EXTENSION" {

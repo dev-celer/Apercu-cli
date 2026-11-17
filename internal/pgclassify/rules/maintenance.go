@@ -60,7 +60,7 @@ func maintenanceTargets(s engine.Scope, e engine.Effect) engine.Effect {
 
 	e.Message += "; the statement names no relation, so it works through every table in the database in turn"
 	base := e.OnNone()
-	for _, table := range s.Catalog.RelationsInSchema("", everyTableKind) {
+	for _, table := range s.State.RelationsInSchema("", everyTableKind) {
 		base.Touches = append(base.Touches, engine.Touch{
 			Info: s.InfoOf(table),
 			Lock: e.Lock,
@@ -128,8 +128,8 @@ func ownedSequenceTargets(s engine.Scope, info pgcatalog.RelationInfo) []engine.
 		return nil
 	}
 	var targets []engine.Touch
-	for _, sequence := range s.Catalog.SequencesOwnedBy(info.Relation.OID) {
-		rel, ok := s.Catalog.ByOID(sequence.SeqRelID)
+	for _, sequence := range s.State.SequencesOwnedBy(info.Relation.OID) {
+		rel, ok := s.State.ByOID(sequence.SeqRelID)
 		if !ok {
 			continue
 		}

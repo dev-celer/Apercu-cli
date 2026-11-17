@@ -88,26 +88,26 @@ func candidateVolatility(s shadow.Scope, invoked call) (pgcatalog.Volatility, bo
 	case ir.ExprCast:
 		return castVolatility(s, invoked), false
 	case ir.ExprOperator:
-		operators := s.Catalog.OperatorsByName(invoked.schema, invoked.name, s.Context.SearchPath)
+		operators := s.State.OperatorsByName(invoked.schema, invoked.name, s.Context.SearchPath)
 		if len(operators) == 0 {
 			return pgcatalog.VolatilityUnknown, false
 		}
 		worst, agree := pgcatalog.VolatilityImmutable, true
 		for _, operator := range operators {
-			volatility := s.Catalog.OperatorVolatility(operator.OID)
-			agree = agree && (len(operators) == 1 || volatility == s.Catalog.OperatorVolatility(operators[0].OID))
+			volatility := s.State.OperatorVolatility(operator.OID)
+			agree = agree && (len(operators) == 1 || volatility == s.State.OperatorVolatility(operators[0].OID))
 			worst = worst.Worst(volatility)
 		}
 		return worst, !agree
 	default:
-		procs := s.Catalog.ProcsByName(invoked.schema, invoked.name, invoked.args, s.Context.SearchPath)
+		procs := s.State.ProcsByName(invoked.schema, invoked.name, invoked.args, s.Context.SearchPath)
 		if len(procs) == 0 {
 			return pgcatalog.VolatilityUnknown, false
 		}
 		worst, agree := pgcatalog.VolatilityImmutable, true
 		for _, proc := range procs {
-			volatility := s.Catalog.ProcVolatility(proc.OID)
-			agree = agree && volatility == s.Catalog.ProcVolatility(procs[0].OID)
+			volatility := s.State.ProcVolatility(proc.OID)
+			agree = agree && volatility == s.State.ProcVolatility(procs[0].OID)
 			worst = worst.Worst(volatility)
 		}
 		return worst, !agree
@@ -116,13 +116,13 @@ func candidateVolatility(s shadow.Scope, invoked call) (pgcatalog.Volatility, bo
 
 // castVolatility return the volatility of a cast proc.
 func castVolatility(s shadow.Scope, invoked call) pgcatalog.Volatility {
-	target, ok := s.Catalog.TypeByName(invoked.schema, invoked.name, s.Context.SearchPath)
+	target, ok := s.State.TypeByName(invoked.schema, invoked.name, s.Context.SearchPath)
 	if !ok {
 		return pgcatalog.VolatilityUnknown
 	}
-	worst := s.Catalog.TypeInputVolatility(target.OID)
-	for _, cast := range s.Catalog.CastsTo(target.OID) {
-		worst = worst.Worst(s.Catalog.CastVolatility(cast.Source, cast.Target))
+	worst := s.State.TypeInputVolatility(target.OID)
+	for _, cast := range s.State.CastsTo(target.OID) {
+		worst = worst.Worst(s.State.CastVolatility(cast.Source, cast.Target))
 	}
 	return worst
 }
@@ -132,7 +132,7 @@ func resolveFromPostSnapshot(s shadow.Scope, column string, ambiguous []call) (p
 	if column == "" {
 		return pgcatalog.VolatilityUnknown, false
 	}
-	def, ok := s.Catalog.PostDefault(s.Relation().Name, column)
+	def, ok := s.State.PostDefault(s.Relation().Name, column)
 	if !ok || (len(def.ReferencedProcs) == 0 && len(def.ReferencedOperators) == 0) {
 		return pgcatalog.VolatilityUnknown, false
 	}
@@ -145,15 +145,15 @@ func resolveFromPostSnapshot(s shadow.Scope, column string, ambiguous []call) (p
 	worst := pgcatalog.VolatilityImmutable
 	settled := false
 	for _, invoked := range ambiguous {
-		for _, proc := range s.Catalog.ProcsByName(invoked.schema, invoked.name, invoked.args, s.Context.SearchPath) {
+		for _, proc := range s.State.ProcsByName(invoked.schema, invoked.name, invoked.args, s.Context.SearchPath) {
 			if recorded[proc.OID] {
-				worst = worst.Worst(s.Catalog.ProcVolatility(proc.OID))
+				worst = worst.Worst(s.State.ProcVolatility(proc.OID))
 				settled = true
 			}
 		}
 	}
 	for _, oid := range def.ReferencedOperators {
-		worst = worst.Worst(s.Catalog.OperatorVolatility(oid))
+		worst = worst.Worst(s.State.OperatorVolatility(oid))
 		settled = true
 	}
 	return worst, settled

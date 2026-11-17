@@ -20,7 +20,7 @@ func Analyze(catalog *pgcatalog.Catalog, events []pgcontract.QueryEvent) pgcontr
 	for _, source := range intake {
 		statement := classifier.NextInCycle(source.statement, source.cycle)
 		statement.Cycle = source.cycle
-		levelGrading(catalog, statement.Findings)
+		levelGrading(classifier.State(), statement.Findings)
 		analysis.Versions = validate.MigrationVersions(analysis.Versions, source.statement, statement.Errors)
 		analysis.Statements = append(analysis.Statements, statement)
 	}
@@ -75,10 +75,7 @@ func parseEvents(events []pgcontract.QueryEvent) []source {
 }
 
 // levelGrading set the finding level for a relation.
-func levelGrading(catalog *pgcatalog.Catalog, findings []pgcontract.Finding) {
-	if catalog == nil {
-		return
-	}
+func levelGrading(state *pgcatalog.State, findings []pgcontract.Finding) {
 	for i, finding := range findings {
 		// Handle per-finding decided level
 		if finding.Level.Decided() || len(finding.Targets) == 0 {
@@ -87,7 +84,7 @@ func levelGrading(catalog *pgcatalog.Catalog, findings []pgcontract.Finding) {
 		// TODO Handle grading based on prod stats
 		created := true
 		for _, target := range finding.Targets {
-			if !catalog.CreatedByMigration(target.Relation.Name) {
+			if !state.CreatedByMigration(target.Relation.Name) {
 				created = false
 				break
 			}

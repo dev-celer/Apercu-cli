@@ -34,8 +34,10 @@ func TestShadowCatalogRecordsWhatWasCreated(t *testing.T) {
 		t.Run(tc.sql, func(t *testing.T) {
 			t.Parallel()
 
-			catalog := classifytest.Catalog(t)
-			classifytest.Run(t, catalog, tc.sql)
+			base := classifytest.Catalog(t)
+			recorder := pgcatalog.NewRecorder(base)
+			catalog := recorder.State()
+			classifytest.RunRecorded(t, base, recorder, tc.sql)
 
 			info := catalog.Resolve(helper.FullRelationName{Schema: "apercu_snapshot_test", Table: tc.table}, nil)
 			require.Truef(t, info.Exists(), "%s should have been declared", tc.table)
@@ -47,11 +49,13 @@ func TestShadowCatalogRecordsWhatWasCreated(t *testing.T) {
 func TestShadowCatalogDoesNotShadowARealRelation(t *testing.T) {
 	t.Parallel()
 
-	catalog := classifytest.Catalog(t)
+	base := classifytest.Catalog(t)
+	recorder := pgcatalog.NewRecorder(base)
+	catalog := recorder.State()
 	before := catalog.Resolve(helper.FullRelationName{Schema: "apercu_snapshot_test", Table: "users"}, nil)
 	require.Equal(t, pgcatalog.OriginExisting, before.Origin)
 
-	classifytest.Run(t, catalog, "CREATE TEMP TABLE users (a int)")
+	classifytest.RunRecorded(t, base, recorder, "CREATE TEMP TABLE users (a int)")
 
 	after := catalog.Resolve(helper.FullRelationName{Schema: "apercu_snapshot_test", Table: "users"}, nil)
 	assert.Equal(t, pgcatalog.OriginExisting, after.Origin)
@@ -66,27 +70,33 @@ func TestShadowCatalogFollowsDropsAndRenames(t *testing.T) {
 	}
 
 	t.Run("a dropped table created again is the migration's", func(t *testing.T) {
-		catalog := classifytest.Catalog(t)
-		classifytest.Run(t, catalog, "DROP TABLE users CASCADE; CREATE TABLE users (a int)")
+		base := classifytest.Catalog(t)
+		recorder := pgcatalog.NewRecorder(base)
+		catalog := recorder.State()
+		classifytest.RunRecorded(t, base, recorder, "DROP TABLE users CASCADE; CREATE TABLE users (a int)")
 		info := catalog.Resolve(name("users"), nil)
 		assert.Equal(t, pgcatalog.OriginCreated, info.Origin)
 		assert.True(t, catalog.CreatedByMigration(name("users")))
 	})
 
 	t.Run("a dropped partitioned table takes its partitions", func(t *testing.T) {
-		catalog := classifytest.Catalog(t)
+		base := classifytest.Catalog(t)
+		recorder := pgcatalog.NewRecorder(base)
+		catalog := recorder.State()
 		events := catalog.Resolve(name("events"), nil)
 		require.NotEmpty(t, catalog.Children(events.Key()))
-		classifytest.Run(t, catalog, "DROP TABLE events")
+		classifytest.RunRecorded(t, base, recorder, "DROP TABLE events")
 		assert.False(t, catalog.Resolve(name("events"), nil).Exists())
 		assert.False(t, catalog.Resolve(name("events_2025"), nil).Exists())
 		assert.Empty(t, catalog.Children(events.Key()))
 	})
 
 	t.Run("a renamed table answers to its new name only", func(t *testing.T) {
-		catalog := classifytest.Catalog(t)
+		base := classifytest.Catalog(t)
+		recorder := pgcatalog.NewRecorder(base)
+		catalog := recorder.State()
 		before := catalog.Resolve(name("users"), nil)
-		classifytest.Run(t, catalog, "ALTER TABLE users RENAME TO members")
+		classifytest.RunRecorded(t, base, recorder, "ALTER TABLE users RENAME TO members")
 		assert.False(t, catalog.Resolve(name("users"), nil).Exists())
 		after := catalog.Resolve(name("members"), nil)
 		assert.Equal(t, pgcatalog.OriginExisting, after.Origin)
@@ -97,8 +107,10 @@ func TestShadowCatalogFollowsDropsAndRenames(t *testing.T) {
 	})
 
 	t.Run("a table moved to another schema", func(t *testing.T) {
-		catalog := classifytest.Catalog(t)
-		classifytest.Run(t, catalog, "ALTER TABLE orders SET SCHEMA archive")
+		base := classifytest.Catalog(t)
+		recorder := pgcatalog.NewRecorder(base)
+		catalog := recorder.State()
+		classifytest.RunRecorded(t, base, recorder, "ALTER TABLE orders SET SCHEMA archive")
 		assert.False(t, catalog.Resolve(name("orders"), nil).Exists())
 		assert.True(t, catalog.Resolve(helper.FullRelationName{Schema: "archive", Table: "orders"}, nil).Exists())
 		assert.True(t, catalog.Resolve(helper.FullRelationName{Schema: "archive", Table: "orders_open_idx"}, nil).Exists(),
@@ -106,8 +118,10 @@ func TestShadowCatalogFollowsDropsAndRenames(t *testing.T) {
 	})
 
 	t.Run("a renamed created table keeps its partitions", func(t *testing.T) {
-		catalog := classifytest.Catalog(t)
-		classifytest.Run(t, catalog, "CREATE TABLE p (a int) PARTITION BY RANGE (a); "+
+		base := classifytest.Catalog(t)
+		recorder := pgcatalog.NewRecorder(base)
+		catalog := recorder.State()
+		classifytest.RunRecorded(t, base, recorder, "CREATE TABLE p (a int) PARTITION BY RANGE (a); "+
 			"CREATE TABLE p1 PARTITION OF p FOR VALUES FROM (1) TO (2); ALTER TABLE p RENAME TO q")
 		assert.False(t, catalog.Resolve(name("p"), nil).Exists())
 		q := catalog.Resolve(name("q"), nil)

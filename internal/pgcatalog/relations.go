@@ -1,40 +1,81 @@
 package pgcatalog
 
 import (
+	"apercu-cli/helper"
 	"fmt"
 	"regexp"
 	"slices"
+	"strings"
 
-	"apercu-cli/helper"
 	"apercu-cli/internal/pgcatalog/snapshot"
 )
 
-// RelationKey is a node of the partition and inheritance graph: a relation a snapshot holds, by
-// OID, or one the migration declared, by the qualified name it was declared under. Exactly one of
-// the two is set, so a declared relation never carries an OID it could be mistaken for.
+// CreatedKey is a synthetic incremental OID.
+type CreatedKey uint32
+
+// RelationKey point to a relation in either the catalog or the shadow overlay.
 type RelationKey struct {
-	oid      snapshot.OID
-	declared helper.FullRelationName
+	oid     snapshot.OID
+	created CreatedKey
 }
 
-// SnapshotKey is the key of a relation the pre-migration snapshot holds.
-func SnapshotKey(oid snapshot.OID) RelationKey { return RelationKey{oid: oid} }
+// KeyFromOID is the key of a relation the pre-migration snapshot holds.
+func KeyFromOID(oid snapshot.OID) RelationKey { return RelationKey{oid: oid} }
 
-// DeclaredKey is the key of a relation the migration declared, by its qualified name.
-func DeclaredKey(name helper.FullRelationName) RelationKey { return RelationKey{declared: name} }
+// KeyFromCreatedKey is the key of a relation the migration created. Only the overlay hands them out.
+func KeyFromCreatedKey(key CreatedKey) RelationKey { return RelationKey{created: key} }
 
-// OID is the snapshot OID behind the key, false for a declared relation.
 func (k RelationKey) OID() (snapshot.OID, bool) { return k.oid, k.oid != 0 }
+
+func (k RelationKey) Created() (CreatedKey, bool) { return k.created, k.created != 0 }
 
 func (k RelationKey) String() string {
 	if k.oid != 0 {
 		return fmt.Sprintf("oid %d", k.oid)
 	}
-	return k.declared.String()
+	return fmt.Sprintf("created #%d", k.created)
 }
 
-// Link is one parent-child edge of the partition and inheritance graph, between relations the
-// snapshot holds or relations the migration declared.
+// RelationInfo if a wrapper for Relation that include lookup and size information.
+type RelationInfo struct {
+	// Name is the qualified name that was used to find this relation.
+	Name     helper.FullRelationName
+	Relation snapshot.Relation
+	Origin   Origin
+	// PreviewBytes represent the relation size in bytes, or, for partitioned parent the sum of it children size.
+	// This is taken on the preview database.
+	PreviewBytes int64
+	// ProdBytes represent the relation size in bytes, or, for partitioned parent the sum of it children size.
+	// This is taken on the production database, -1 if unavailable.
+	ProdBytes int64
+
+	key RelationKey
+}
+
+// Exists reports whether the relation is found from the snapshot or the shadow overlay.
+func (r RelationInfo) Exists() bool { return r.Origin != OriginUnknown }
+
+func (r RelationInfo) Key() RelationKey { return r.key }
+
+// describe is a debugging aid.
+func (r RelationInfo) String() string {
+	if !r.Exists() {
+		return fmt.Sprintf("%s (unknown)", r.Name)
+	}
+	size := fmt.Sprintf("%d bytes preview", r.PreviewBytes)
+	if r.ProdBytes >= 0 {
+		size += fmt.Sprintf(", %d bytes prod", r.ProdBytes)
+	}
+	return fmt.Sprintf("%s %s/%s %s", r.Name, r.Relation.Kind, strings.ToLower(r.Origin.String()), size)
+}
+
+// LinkKey is one parent-child edge.
+type LinkKey struct {
+	Parent RelationKey
+	Child  RelationKey
+}
+
+// Link is one parent-child edge of the partition and inheritance graph.
 type Link struct {
 	Parent RelationKey
 	Child  RelationKey
@@ -45,11 +86,13 @@ type Link struct {
 	ParentIsPartitioned bool
 }
 
+func (l Link) Key() LinkKey { return LinkKey{Parent: l.Parent, Child: l.Child} }
+
 // linkOf is a snapshot edge as a node of the graph.
 func linkOf(edge snapshot.InheritEdge) Link {
 	return Link{
-		Parent:              SnapshotKey(edge.Parent),
-		Child:               SnapshotKey(edge.Child),
+		Parent:              KeyFromOID(edge.Parent),
+		Child:               KeyFromOID(edge.Child),
 		DetachPending:       edge.DetachPending,
 		IsDefaultPartition:  edge.IsDefaultPartition,
 		ParentIsPartitioned: edge.ParentIsPartitioned,
@@ -62,7 +105,7 @@ type columnKey struct {
 	name  string
 }
 
-// relationIndex holds the lookups that are keyed on a relation
+// relationIndex holds the lookups that are keyed on a relation.
 type relationIndex struct {
 	indexes        map[snapshot.OID]snapshot.Index        // All Index, keyed by index OID
 	indexesOfTable map[snapshot.OID][]snapshot.Index      // All Index for a table, keyed by table OID
@@ -154,19 +197,20 @@ func (r *relationIndex) columnAt(relID snapshot.OID, num int16) (snapshot.Column
 	return snapshot.Column{}, false
 }
 
-// partitionDescendants return all the partition child of a partitioned table
+// partitionDescendants return all the partition child of a partitioned table.
 func (r *relationIndex) partitionDescendants(parent RelationKey) []RelationKey {
-	return r.descend(parent, func(link Link) bool { return link.ParentIsPartitioned })
+	return descend(parent, func(key RelationKey) []Link { return r.children[key] }, func(link Link) bool { return link.ParentIsPartitioned })
 }
 
-func (r *relationIndex) descend(parent RelationKey, keep func(Link) bool) []RelationKey {
+// descend walks a tree with the children function provided, filter and return the list of relation encountered.
+func descend(parent RelationKey, children func(RelationKey) []Link, keep func(Link) bool) []RelationKey {
 	var out []RelationKey
 	seen := map[RelationKey]bool{parent: true}
 	queue := []RelationKey{parent}
 	for len(queue) > 0 {
 		current := queue[0]
 		queue = queue[1:]
-		for _, link := range r.children[current] {
+		for _, link := range children(current) {
 			if !keep(link) || seen[link.Child] {
 				continue
 			}
@@ -178,150 +222,40 @@ func (r *relationIndex) descend(parent RelationKey, keep func(Link) bool) []Rela
 	return out
 }
 
-// Index returns one index by its own relid.
-func (c *Catalog) Index(indexRelID snapshot.OID) (snapshot.Index, bool) {
+// index returns one index by its own relid.
+func (c *Catalog) index(indexRelID snapshot.OID) (snapshot.Index, bool) {
 	index, ok := c.relations.indexes[indexRelID]
 	return index, ok
 }
 
-// TableOfIndex return the table an index is defined on.
-func (c *Catalog) TableOfIndex(indexRelID snapshot.OID) (snapshot.Relation, bool) {
-	index, ok := c.relations.indexes[indexRelID]
-	if !ok {
-		return snapshot.Relation{}, false
-	}
-	return c.ByOID(index.RelID)
-}
-
-// IndexesOf lists the indexes on a table.
-func (c *Catalog) IndexesOf(relID snapshot.OID) []snapshot.Index {
+// indexesOf lists the indexes on a table.
+func (c *Catalog) indexesOf(relID snapshot.OID) []snapshot.Index {
 	return c.relations.indexesOfTable[relID]
 }
 
-// InvalidIndexes lists the indexes on a table left behind by a failed CREATE INDEX CONCURRENTLY.
-func (c *Catalog) InvalidIndexes(relID snapshot.OID) []snapshot.Index {
-	var invalid []snapshot.Index
-	for _, index := range c.relations.indexesOfTable[relID] {
-		if !index.IsValid || !index.IsReady {
-			invalid = append(invalid, index)
-		}
-	}
-	return invalid
-}
-
-// ConstraintsInSchema lists the constraints a schema holds at this point of the migration, those of its relations and
-// those of its domains: the namespace the server keeps generated constraint names unique in.
-func (c *Catalog) ConstraintsInSchema(schema string) []snapshot.Constraint {
-	var constraints []snapshot.Constraint
-	for _, constraint := range c.pre.Constraints {
-		if constraint.RelID == 0 {
-			if domain, ok := c.Type(constraint.TypeID); ok && domain.Namespace == schema {
-				constraints = append(constraints, constraint)
-			}
-			continue
-		}
-		if _, dropped := c.droppedOIDs[constraint.RelID]; dropped || c.nameOf(constraint.RelID).Schema != schema {
-			continue
-		}
-		constraints = append(constraints, constraint)
-	}
-	return constraints
-}
-
-// ConstraintsOf lists every constraint on a table.
-func (c *Catalog) ConstraintsOf(relID snapshot.OID) []snapshot.Constraint {
+// constraintsOf lists every constraint on a table.
+func (c *Catalog) constraintsOf(relID snapshot.OID) []snapshot.Constraint {
 	return c.relations.constraints[relID]
 }
 
-// ConstraintByName finds one named constraint on a table.
-func (c *Catalog) ConstraintByName(relID snapshot.OID, name string) (snapshot.Constraint, bool) {
+// constraintByOID finds one constraint of a table by its OID.
+func (c *Catalog) constraintByOID(relID, oid snapshot.OID) (snapshot.Constraint, bool) {
 	for _, constraint := range c.relations.constraints[relID] {
-		if constraint.Name == name {
+		if constraint.OID == oid {
 			return constraint, true
 		}
 	}
 	return snapshot.Constraint{}, false
 }
 
-// ForeignKeysFrom lists the foreign keys starting from this table.
-func (c *Catalog) ForeignKeysFrom(relID snapshot.OID) []snapshot.Constraint {
-	return c.relations.fkFrom[relID]
-}
-
-// ForeignKeysTo lists the foreign keys targeting this table.
-func (c *Catalog) ForeignKeysTo(relID snapshot.OID) []snapshot.Constraint {
-	return c.relations.fkTo[relID]
-}
-
-// SequenceOwner return the table and column a sequence belongs to, if it isn't a standalone sequence
-// return value (Table OID, Column Num, isLinkedToATable)
-func (c *Catalog) SequenceOwner(seqRelID snapshot.OID) (snapshot.OID, int16, bool) {
-	sequence, ok := c.relations.sequences[seqRelID]
-	if !ok || sequence.OwnerTable == 0 {
-		return 0, 0, false
-	}
-	return sequence.OwnerTable, sequence.OwnerAttNum, true
-}
-
-// SequencesOwnedBy lists the sequences a table's identity and serial columns draw from.
-func (c *Catalog) SequencesOwnedBy(relID snapshot.OID) []snapshot.Sequence {
-	return c.relations.sequencesOwned[relID]
-}
-
-// Children lists the direct children of a relation.
-func (c *Catalog) Children(key RelationKey) []Link {
-	return c.relations.children[key]
-}
-
-// Parents lists the direct parents of a relation.
-func (c *Catalog) Parents(key RelationKey) []Link {
-	return c.relations.parents[key]
-}
-
-// Descendants return all children recursively from a relation.
-func (c *Catalog) Descendants(key RelationKey) []RelationKey {
-	return c.relations.descend(key, func(Link) bool { return true })
-}
-
-// PartitionDescendants return all the partition child of a partitioned table
-func (c *Catalog) PartitionDescendants(key RelationKey) []RelationKey {
-	return c.relations.partitionDescendants(key)
-}
-
-// DefaultPartition return the default partition of a partitioned table, or false if no default partition exist
-func (c *Catalog) DefaultPartition(key RelationKey) (RelationKey, bool) {
-	for _, link := range c.relations.children[key] {
-		if link.IsDefaultPartition {
-			return link.Child, true
+// constraintByName finds one named constraint on a table.
+func (c *Catalog) constraintByName(relID snapshot.OID, name string) (snapshot.Constraint, bool) {
+	for _, constraint := range c.relations.constraints[relID] {
+		if constraint.Name == name {
+			return constraint, true
 		}
 	}
-	return RelationKey{}, false
-}
-
-// TriggerByName resolves a user trigger by its table and name.
-func (c *Catalog) TriggerByName(relID snapshot.OID, name string) (snapshot.Trigger, bool) {
-	for _, trigger := range c.relations.triggers[relID] {
-		if trigger.Name == name {
-			return trigger, true
-		}
-	}
-	return snapshot.Trigger{}, false
-}
-
-// TriggersOf lists the user triggers of a relation.
-func (c *Catalog) TriggersOf(relID snapshot.OID) []snapshot.Trigger {
-	return c.relations.triggers[relID]
-}
-
-// PendingDetach lists the children of a partitioned table left pending by an interrupted DETACH CONCURRENTLY.
-func (c *Catalog) PendingDetach(key RelationKey) []RelationKey {
-	var pending []RelationKey
-	for _, link := range c.relations.children[key] {
-		if link.DetachPending {
-			pending = append(pending, link.Child)
-		}
-	}
-	return pending
+	return snapshot.Constraint{}, false
 }
 
 // ColumnInfo groups all information about a column
@@ -332,8 +266,8 @@ type ColumnInfo struct {
 	Collation  snapshot.Collation
 }
 
-// Column resolves one column by table OID and Column name.
-func (c *Catalog) Column(relID snapshot.OID, name string) (ColumnInfo, bool) {
+// column resolves one column by table OID and column name, as the snapshot names it.
+func (c *Catalog) column(relID snapshot.OID, name string) (ColumnInfo, bool) {
 	column, ok := c.relations.columnByName[columnKey{relID, name}]
 	if !ok {
 		return ColumnInfo{}, false
@@ -342,11 +276,6 @@ func (c *Catalog) Column(relID snapshot.OID, name string) (ColumnInfo, bool) {
 	info.Default, info.HasDefault = c.relations.defaults[columnKey{relID, name}]
 	info.Collation = c.relations.collations[column.Collation]
 	return info, true
-}
-
-// Columns lists a relation's columns.
-func (c *Catalog) Columns(relID snapshot.OID) []snapshot.Column {
-	return c.relations.columns[relID]
 }
 
 // Collation resolves a collation from it's OID.
@@ -385,8 +314,8 @@ func (p NotNullProof) String() string {
 // Proven reports whether the column is provably never null.
 func (p NotNullProof) Proven() bool { return p != NotNullUnproven }
 
-// NotNullProof return the NotNullProof for this column
-func (c *Catalog) NotNullProof(relID snapshot.OID, name string) NotNullProof {
+// notNullProof return the NotNullProof for a snapshot column, as the snapshot names it.
+func (c *Catalog) notNullProof(relID snapshot.OID, name string) NotNullProof {
 	column, ok := c.relations.columnByName[columnKey{relID, name}]
 	if !ok {
 		return NotNullUnproven
@@ -440,25 +369,4 @@ func checkProvesNotNull(def, column string) bool {
 		}
 	}
 	return false
-}
-
-// ViewDependents lists the views and matviews built on a relation.
-func (c *Catalog) ViewDependents(relID snapshot.OID) []snapshot.ViewDep {
-	return c.relations.viewDeps[relID]
-}
-
-// ViewSources lists the relations a view or a materialized view reads.
-func (c *Catalog) ViewSources(relID snapshot.OID) []snapshot.ViewDep {
-	return c.relations.viewSources[relID]
-}
-
-// ViewDependentsOfColumn lists the views and matviews built on a relation that read one particular column.
-func (c *Catalog) ViewDependentsOfColumn(relID snapshot.OID, num int16) []snapshot.ViewDep {
-	var deps []snapshot.ViewDep
-	for _, dep := range c.relations.viewDeps[relID] {
-		if dep.ReferencedAttNum == num {
-			deps = append(deps, dep)
-		}
-	}
-	return deps
 }

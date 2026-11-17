@@ -14,15 +14,19 @@ import (
 
 // Classifier walks a migration in order and produces one record per statement.
 type Classifier struct {
-	catalog   *pgcatalog.Catalog
+	recorder  *pgcatalog.Recorder
 	session   *session.Session
 	relations *shadow.Relations
 	checks    *shadow.Checks
 }
 
 func NewClassifier(catalog *pgcatalog.Catalog) *Classifier {
-	return &Classifier{catalog: catalog, session: session.NewSession(catalog), relations: shadow.NewRelations(catalog), checks: shadow.NewChecks()}
+	recorder := pgcatalog.NewRecorder(catalog)
+	return &Classifier{recorder: recorder, session: session.NewSession(catalog), relations: shadow.NewRelations(recorder), checks: shadow.NewChecks(recorder)}
 }
+
+// State is the database as the statements classified so far left it.
+func (c *Classifier) State() *pgcatalog.State { return c.recorder.State() }
 
 // Analyze classifies a whole migration.
 func (c *Classifier) Analyze(statements []ir.Statement) []pgcontract.StatementAnalysis {
@@ -56,7 +60,7 @@ func (c *Classifier) classify(statement ir.Statement, context session.Context) p
 	}
 	if !statement.Parsed() {
 		c.relations.Declare(statement, context)
-		c.checks.Blind = true
+		c.recorder.MarkBlind()
 		return analysis
 	}
 
@@ -69,7 +73,7 @@ func (c *Classifier) classify(statement ir.Statement, context session.Context) p
 	c.relations.Declare(statement, context)
 
 	// Server refusal checks
-	refusals := validate.VersionGate(c.catalog.Version(), statement)
+	refusals := validate.VersionGate(c.State().Version(), statement)
 	analysis.Errors = append(analysis.Errors, refusals...)
 	if len(refusals) > 0 {
 		analysis.Findings = nil
@@ -91,7 +95,7 @@ func (c *Classifier) classify(statement ir.Statement, context session.Context) p
 
 	// Drops and renames come last: everything above reads the relations under the names the statement used.
 	if ran {
-		c.checks.Forget(c.catalog, c.relations.Retire(statement, context))
+		c.relations.Retire(statement, context)
 	}
 	return analysis
 }
@@ -112,5 +116,5 @@ func collapseStatementLocks(findings []pgcontract.Finding) {
 }
 
 func (c *Classifier) scope(statement ir.Statement, context session.Context) engine.Scope {
-	return engine.Scope{Scope: shadow.Scope{View: stmt.New(c.catalog, context, statement), Checks: c.checks}}
+	return engine.Scope{Scope: shadow.Scope{View: stmt.New(c.State(), context, statement)}}
 }

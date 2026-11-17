@@ -7,6 +7,7 @@ import (
 	"apercu-cli/internal/pgclassify"
 	"apercu-cli/internal/pgclassify/classifytest"
 	"apercu-cli/internal/pgcontract"
+	"apercu-cli/internal/pgparse"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -46,8 +47,9 @@ func TestShadowCatalogInAnalyze(t *testing.T) {
 	))
 
 	require.Len(t, analysis.Statements, 2)
-	assert.True(t, catalog.CreatedByMigration(relationName("fresh")))
 	assert.Equal(t, pgcontract.LockAccessExclusive, analysis.Statements[1].LockOn(relationName("fresh")))
+	finding := classifytest.FindingOf(t, analysis.Statements[1], "R-AT-ADDCOL")
+	assert.Equal(t, pgcontract.LevelLow, finding.Level, "the table is known as the migration's own")
 }
 
 func TestAnalyzeWithoutEvents(t *testing.T) {
@@ -72,15 +74,16 @@ func TestLevelGradingOnFindingWithoutRelation(t *testing.T) {
 func TestLevelGradingPerFinding(t *testing.T) {
 	t.Parallel()
 
-	catalog := classifytest.Catalog(t)
-	pgclassify.Analyze(catalog, []pgcontract.QueryEvent{classifytest.Event("CREATE TABLE fresh (id bigint)")})
-	require.True(t, catalog.CreatedByMigration(relationName("fresh")))
+	classifier := pgclassify.NewClassifier(classifytest.Catalog(t))
+	classifier.Analyze(pgparse.Parse("CREATE TABLE fresh (id bigint)"))
+	state := classifier.State()
+	require.True(t, state.CreatedByMigration(relationName("fresh")))
 
 	findings := []pgcontract.Finding{
 		{Code: "fixed", Level: pgcontract.LevelHigh, Targets: []pgcontract.Target{{Relation: pgcontract.Relation{Name: relationName("fresh")}}}},
 		{Code: "unset", Targets: []pgcontract.Target{{Relation: pgcontract.Relation{Name: relationName("fresh")}}}},
 	}
-	pgclassify.LevelGrading(catalog, findings)
+	pgclassify.LevelGrading(state, findings)
 
 	assert.Equal(t, pgcontract.LevelHigh, findings[0].Level)
 	assert.Equal(t, pgcontract.LevelLow, findings[1].Level)

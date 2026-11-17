@@ -77,22 +77,22 @@ func levelConstraint(s shadow.Scope, parent pgcatalog.RelationInfo, bound *ir.Pa
 	if len(keys) != 1 || strategy != bound.Strategy {
 		return nil, "", valueDomain{}, false
 	}
-	column, ok := s.Catalog.Column(parent.Relation.OID, keys[0])
+	key := s.State.CurrentColumn(parent.Key(), keys[0])
+	column, ok := s.State.Column(parent.Key(), key)
 	if !ok {
 		return nil, "", valueDomain{}, false
 	}
 	domain := domainOf(column.FormattedType, s.Context.Zone())
-	key := s.Checks.CurrentColumn(parent.Key(), keys[0])
 	terms, ok := partitionConstraint(key, domain, bound)
 	return terms, key, domain, ok
 }
 
 func partitionParent(s shadow.Scope, child pgcatalog.RelationInfo) (pgcatalog.RelationInfo, bool) {
-	for _, link := range s.Catalog.Parents(child.Key()) {
+	for _, link := range s.State.Parents(child.Key()) {
 		if !link.ParentIsPartitioned {
 			continue
 		}
-		return s.Catalog.RelationByKey(link.Parent)
+		return s.State.RelationByKey(link.Parent)
 	}
 	return pgcatalog.RelationInfo{}, false
 }

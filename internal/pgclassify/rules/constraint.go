@@ -3,7 +3,7 @@ package rules
 import (
 	"fmt"
 
-	"apercu-cli/internal/pgcatalog/snapshot"
+	"apercu-cli/internal/pgcatalog"
 	"apercu-cli/internal/pgclassify/rules/engine"
 	"apercu-cli/internal/pgcontract"
 	"apercu-cli/internal/pgparse/ir"
@@ -126,8 +126,8 @@ func ruleValidateConstraint(s engine.Scope, sub ir.Subcommand) engine.Effect {
 		e.Op = pgcontract.OpKindMetadata
 		e.Message = fmt.Sprintf("constraint %q is already validated, so the statement is a no-op", sub.Name)
 	}
-	if constraint.Type == "f" {
-		if referenced, ok := s.RelationByOID(constraint.ForeignRelID); ok {
+	if constraint.Kind == "f" {
+		if referenced, ok := s.State.RelationByKey(constraint.References); ok {
 			e.Touches = append(e.Touches, s.ValidateForeignKey(referenced))
 		}
 	}
@@ -138,8 +138,8 @@ func ruleValidateConstraint(s engine.Scope, sub ir.Subcommand) engine.Effect {
 func ruleDropConstraint(s engine.Scope, sub ir.Subcommand) engine.Effect {
 	e := engine.NewEffect(s, "R-AT-DROPCON", fmt.Sprintf("constraint %q is removed from the catalog", sub.Name))
 
-	if constraint, ok := namedConstraint(s, sub.Name); ok && constraint.Type == "f" {
-		if referenced, ok := s.RelationByOID(constraint.ForeignRelID); ok {
+	if constraint, ok := namedConstraint(s, sub.Name); ok && constraint.Kind == "f" {
+		if referenced, ok := s.State.RelationByKey(constraint.References); ok {
 			e.Touches = append(e.Touches, s.RemoveTrigger(referenced))
 			e.Message += "; the referenced table is locked with it, because the key's trigger lives on that side too"
 		}
@@ -176,8 +176,8 @@ func alterEnforcement(s engine.Scope, sub ir.Subcommand, constraint ir.Constrain
 	}
 
 	// Enforcing a foreign key puts its triggers back on the referenced table, not enforcing it takes them off.
-	if existing, ok := namedConstraint(s, sub.Name); ok && existing.Type == "f" {
-		if referenced, ok := s.RelationByOID(existing.ForeignRelID); ok {
+	if existing, ok := namedConstraint(s, sub.Name); ok && existing.Kind == "f" {
+		if referenced, ok := s.State.RelationByKey(existing.References); ok {
 			if constraint.NotEnforced {
 				e.Touches = append(e.Touches, s.RemoveTrigger(referenced))
 			} else {
@@ -193,10 +193,10 @@ func ruleRenameConstraint(s engine.Scope, sub ir.Subcommand) engine.Effect {
 	return engine.NewEffect(s, "R-AT-RENAMECON", fmt.Sprintf("constraint %q is renamed to %q in the catalog", sub.Name, sub.NewName))
 }
 
-// namedConstraint resolves one named constraint of the table.
-func namedConstraint(s engine.Scope, name string) (snapshot.Constraint, bool) {
+// namedConstraint resolves one named constraint of the table, as the migration left it.
+func namedConstraint(s engine.Scope, name string) (pgcatalog.ConstraintInfo, bool) {
 	if !s.Relation().Exists() || name == "" {
-		return snapshot.Constraint{}, false
+		return pgcatalog.ConstraintInfo{}, false
 	}
-	return s.Catalog.ConstraintByName(s.Relation().Relation.OID, name)
+	return s.State.ConstraintByName(s.Relation().Key(), name)
 }

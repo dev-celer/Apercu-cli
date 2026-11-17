@@ -79,7 +79,7 @@ func carriedToTypedTables(e engine.Effect, s engine.Scope, sub ir.Subcommand) en
 	}
 
 	for _, table := range typedTables {
-		rel, ok := s.Catalog.ByOID(table)
+		rel, ok := s.State.ByOID(table)
 		if !ok {
 			continue
 		}
@@ -99,16 +99,16 @@ func typeDependents(s engine.Scope, info pgcatalog.RelationInfo) ([]pgcatalog.Co
 	if !info.Exists() {
 		return nil, nil
 	}
-	composite, ok := s.Catalog.TypeByName(info.Name.Schema, info.Name.Table, s.Context.SearchPath)
+	composite, ok := s.State.TypeByName(info.Name.Schema, info.Name.Table, s.Context.SearchPath)
 	if !ok {
 		return nil, nil
 	}
-	return s.Catalog.TypeDependents(composite.OID)
+	return s.State.TypeDependents(composite.OID)
 }
 
 // relationOf names the table a column reference points at.
 func relationOf(s engine.Scope, column pgcatalog.ColumnRef) string {
-	if rel, ok := s.Catalog.ByOID(column.RelID); ok {
+	if rel, ok := s.State.ByOID(column.RelID); ok {
 		return rel.RelationName().String()
 	}
 	return "an unknown relation"
@@ -137,20 +137,20 @@ func ruleDomainAddConstraint(s engine.Scope, sub ir.Subcommand) engine.Effect {
 
 // domainColumnTargets is the tables holding a column of a type.
 func domainColumnTargets(s engine.Scope, name helper.FullRelationName, lock pgcontract.Lock, op pgcontract.OpKind) []engine.Touch {
-	domain, ok := s.Catalog.TypeByName(name.Schema, name.Table, s.Context.SearchPath)
+	domain, ok := s.State.TypeByName(name.Schema, name.Table, s.Context.SearchPath)
 	if !ok {
 		return nil
 	}
-	columns, typedTables := s.Catalog.TypeDependents(domain.OID)
+	columns, typedTables := s.State.TypeDependents(domain.OID)
 
 	var targets []engine.Touch
 	for _, column := range columns {
-		if rel, ok := s.Catalog.ByOID(column.RelID); ok {
+		if rel, ok := s.State.ByOID(column.RelID); ok {
 			targets = append(targets, engine.Touch{Info: s.InfoOf(rel), Lock: lock, Op: op, Role: pgcontract.TargetRoleImplicit})
 		}
 	}
 	for _, oid := range typedTables {
-		if rel, ok := s.Catalog.ByOID(oid); ok {
+		if rel, ok := s.State.ByOID(oid); ok {
 			targets = append(targets, engine.Touch{Info: s.InfoOf(rel), Lock: lock, Op: op, Role: pgcontract.TargetRoleImplicit})
 		}
 	}

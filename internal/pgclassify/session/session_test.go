@@ -21,7 +21,11 @@ func runCycles(t *testing.T, catalog *pgcatalog.Catalog, cycles ...string) ([]ir
 	t.Helper()
 
 	sess := session.NewSession(catalog)
-	relations := shadow.NewRelations(catalog)
+	var recorder *pgcatalog.Recorder
+	if catalog != nil {
+		recorder = pgcatalog.NewRecorder(catalog)
+	}
+	relations := shadow.NewRelations(recorder)
 	var statements []ir.Statement
 	var contexts []session.Context
 	for cycle, script := range cycles {
@@ -439,13 +443,14 @@ func TestSearchPathMovesWithTheFile(t *testing.T) {
 	assert.Equal(t, []string{"public"}, contexts[2].SearchPath)
 	assert.Equal(t, []string{"apercu_snapshot_test"}, contexts[4].SearchPath)
 
+	state := pgcatalog.NewRecorder(catalog).State()
 	unqualified := statements[0].Relations[0].Name
-	assert.True(t, catalog.Resolve(unqualified, contexts[0].SearchPath).Exists())
-	assert.Equal(t, helper.FullRelationName{Schema: "apercu_snapshot_test", Table: "users"}, catalog.Resolve(unqualified, contexts[0].SearchPath).Name)
-	assert.False(t, catalog.Resolve(unqualified, contexts[2].SearchPath).Exists())
-	assert.Equal(t, helper.FullRelationName{Schema: "public", Table: "users"}, catalog.Resolve(unqualified, contexts[2].SearchPath).Name)
-	assert.True(t, catalog.Resolve(unqualified, contexts[4].SearchPath).Exists())
-	assert.Equal(t, helper.FullRelationName{Schema: "apercu_snapshot_test", Table: "users"}, catalog.Resolve(unqualified, contexts[4].SearchPath).Name)
+	assert.True(t, state.Resolve(unqualified, contexts[0].SearchPath).Exists())
+	assert.Equal(t, helper.FullRelationName{Schema: "apercu_snapshot_test", Table: "users"}, state.Resolve(unqualified, contexts[0].SearchPath).Name)
+	assert.False(t, state.Resolve(unqualified, contexts[2].SearchPath).Exists())
+	assert.Equal(t, helper.FullRelationName{Schema: "public", Table: "users"}, state.Resolve(unqualified, contexts[2].SearchPath).Name)
+	assert.True(t, state.Resolve(unqualified, contexts[4].SearchPath).Exists())
+	assert.Equal(t, helper.FullRelationName{Schema: "apercu_snapshot_test", Table: "users"}, state.Resolve(unqualified, contexts[4].SearchPath).Name)
 }
 
 // TestSearchPathSubstitutesUser covers the one entry that is not a schema name.

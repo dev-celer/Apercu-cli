@@ -15,11 +15,11 @@ import (
 
 // typeOf resolves a type as the statement spelled it, arrays included.
 func typeOf(s engine.Scope, ref ir.TypeRef) (snapshot.Type, bool) {
-	base, ok := s.Catalog.TypeByName(ref.Schema(), ref.Base(), s.Context.SearchPath)
+	base, ok := s.State.TypeByName(ref.Schema(), ref.Base(), s.Context.SearchPath)
 	if !ok || ref.ArrayBounds == 0 {
 		return base, ok
 	}
-	return s.Catalog.ArrayOf(base.OID)
+	return s.State.ArrayOf(base.OID)
 }
 
 // ruleAddColumn is R-AT-ADDCOL.
@@ -62,7 +62,7 @@ func domainIsConstrained(s engine.Scope, ref ir.TypeRef) bool {
 	if !ok {
 		return false
 	}
-	return s.Catalog.DomainHasConstraints(typ.OID)
+	return s.State.DomainHasConstraints(typ.OID)
 }
 
 // defaultMayBeVolatile walks the DEFAULT expression. A volatile default is the one shape that
@@ -99,12 +99,12 @@ func ruleDropColumn(s engine.Scope, sub ir.Subcommand) engine.Effect {
 	if !ok {
 		return e
 	}
-	dependents := s.Catalog.ViewDependentsOfColumn(s.Relation().Relation.OID, column.Num)
+	dependents := s.State.ViewDependentsOfColumn(s.Relation().Relation.OID, column.Num)
 	if len(dependents) == 0 {
 		return e
 	}
 	for _, dep := range dependents {
-		rel, ok := s.Catalog.ByOID(dep.DependentRelID)
+		rel, ok := s.State.ByOID(dep.DependentRelID)
 		if !ok {
 			continue
 		}
@@ -131,7 +131,7 @@ func ruleAlterColumnType(s engine.Scope, sub ir.Subcommand) engine.Effect {
 
 	old, hasOld := s.Column(def.Name)
 	target, hasTarget := typeOf(s, def.Type)
-	oldType, _ := s.Catalog.Type(old.TypeID)
+	oldType, _ := s.State.Type(old.TypeID)
 
 	switch {
 	case def.Using != nil && !def.Using.IsColumnRef(def.Name):
@@ -146,11 +146,11 @@ func ruleAlterColumnType(s engine.Scope, sub ir.Subcommand) engine.Effect {
 			e.Message = fmt.Sprintf("converting between timestamp and timestamptz under TimeZone %q shifts every stored value", s.Context.TimeZone)
 		}
 	default:
-		mod, packable := s.Catalog.EncodeTypmod(target.OID, def.Type.Typmods)
+		mod, packable := s.State.EncodeTypmod(target.OID, def.Type.Typmods)
 		switch {
 		case !packable:
 			e.Message = fmt.Sprintf("the modifier of %s cannot be compared against the one the column carries, so a rewrite is assumed", def.Type)
-		case s.Catalog.TypeChangeRequiresRewrite(old.TypeID, old.TypeMod, target.OID, mod):
+		case s.State.TypeChangeRequiresRewrite(old.TypeID, old.TypeMod, target.OID, mod):
 			e.Message = fmt.Sprintf("%s to %s is not reachable without rebuilding every tuple", old.FormattedType, def.Type)
 		default:
 			e.Op = pgcontract.OpKindMetadata
@@ -160,7 +160,7 @@ func ruleAlterColumnType(s engine.Scope, sub ir.Subcommand) engine.Effect {
 
 	// Check 2 — the indexes over the column are dropped and rebuilt whatever happens to the heap.
 	for _, index := range indexesOn(s, old) {
-		rel, ok := s.Catalog.ByOID(index.IndexRelID)
+		rel, ok := s.State.ByOID(index.IndexRelID)
 		if !ok {
 			continue
 		}
@@ -183,7 +183,7 @@ func indexesOn(s engine.Scope, column pgcatalog.ColumnInfo) []snapshot.Index {
 		return nil
 	}
 	var out []snapshot.Index
-	for _, index := range s.Catalog.IndexesOf(s.Relation().Relation.OID) {
+	for _, index := range s.State.IndexesOf(s.Relation().Relation.OID) {
 		if slices.Contains(index.Columns, column.Num) {
 			out = append(out, index)
 		}
@@ -219,12 +219,12 @@ func ruleSetNotNull(s engine.Scope, sub ir.Subcommand) engine.Effect {
 	}
 	// Every table below is verified on its own: a CHECK of its own spares it the scan the parent needs.
 	e.LeafOp = func(leaf pgcatalog.RelationInfo) pgcontract.OpKind {
-		if s.Catalog.NotNullProof(leaf.Relation.OID, sub.Name).Proven() {
+		if s.State.NotNullProof(leaf.Key(), sub.Name).Proven() {
 			return pgcontract.OpKindMetadata
 		}
 		return pgcontract.OpKindScan
 	}
-	proof := s.Catalog.NotNullProof(s.Relation().Relation.OID, sub.Name)
+	proof := s.State.NotNullProof(s.Relation().Key(), sub.Name)
 	if proof.Proven() {
 		e.Message = fmt.Sprintf("%s already rules out NULL, so the server skips the verifying scan", proof)
 		return e

@@ -1,5 +1,6 @@
-// Package pgcatalog is the derived lookup layer built on top of the snapshots, and the shadow
-// overlay the classifier updates as the migration goes.
+// Package pgcatalog is the database as the classifier sees it: the read-only Catalog built from the snapshots, the
+// shadow overlay that records what the migration changes, State, the lookups that read the two together, and
+// Recorder, the only way to write to the overlay. The overlay itself is never visible outside the package.
 package pgcatalog
 
 import (
@@ -7,37 +8,18 @@ import (
 	"apercu-cli/internal/pgcatalog/snapshot"
 	"apercu-cli/internal/pgcontract"
 	"fmt"
-	"slices"
 	"strings"
 )
 
-// Catalog is the derived lookup layer, P-01…P-20. It is built once from the snapshots
-// and then answers every question the rules ask.
+// Catalog is the derived lookup layer, P-01…P-20, over the pre-migration snapshot. It is built once and never
+// written after: what the migration changes lives in the shadow overlay, and the rules read both through State.
 type Catalog struct {
 	pre  *snapshot.Snapshot
-	post *snapshot.Snapshot
 	prod *snapshot.Snapshot
 
 	// byName resolves a namespace-qualified name to its Relation.
 	byName map[helper.FullRelationName]snapshot.Relation
 	byOID  map[snapshot.OID]snapshot.Relation
-
-	// Shadow Catalog. Record change made by the migration
-	// createdByMigration holds the Relation the migration itself create.
-	createdByMigration map[helper.FullRelationName]snapshot.Relation
-	// postOnly holds the names createdByMigration knows from the post-migration snapshot alone, until a statement creates them.
-	postOnly map[helper.FullRelationName]struct{}
-
-	// retired holds the snapshot names that no longer resolve to their snapshot row: dropped or renamed away.
-	retired map[helper.FullRelationName]struct{}
-	// droppedOIDs holds the snapshot relations the migration dropped.
-	droppedOIDs map[snapshot.OID]struct{}
-	// renamed resolves the name a snapshot relation was renamed to, and currentName is the reverse.
-	renamed     map[helper.FullRelationName]snapshot.OID
-	currentName map[snapshot.OID]helper.FullRelationName
-
-	// unresolved counts the distinct names no snapshot could found.
-	unresolved map[helper.FullRelationName]struct{}
 
 	previewSizes map[snapshot.OID]int64            // Relation size in bytes on the preview database.
 	prodSizes    map[helper.FullRelationName]int64 // Relation size in bytes on the production database.
@@ -54,7 +36,7 @@ type Catalog struct {
 type CatalogOptions struct {
 	// Pre is the preview captured before the migration.
 	Pre *snapshot.Snapshot
-	// Post is the preview captured after the migration.
+	// Post is the preview captured after the migration. Only the column defaults are read from it.
 	Post *snapshot.Snapshot
 	// Prod is the production capture. If missing the catalog will work in degraded mode
 	// (no known version, no classification by activity/size)
@@ -76,37 +58,20 @@ func NewCatalog(opts CatalogOptions) (*Catalog, error) {
 	}
 
 	c := &Catalog{
-		pre:                opts.Pre,
-		post:               opts.Post,
-		prod:               opts.Prod,
-		byName:             make(map[helper.FullRelationName]snapshot.Relation, len(opts.Pre.Relations)),
-		byOID:              make(map[snapshot.OID]snapshot.Relation, len(opts.Pre.Relations)),
-		createdByMigration: map[helper.FullRelationName]snapshot.Relation{},
-		postOnly:           map[helper.FullRelationName]struct{}{},
-		retired:            map[helper.FullRelationName]struct{}{},
-		droppedOIDs:        map[snapshot.OID]struct{}{},
-		renamed:            map[helper.FullRelationName]snapshot.OID{},
-		currentName:        map[snapshot.OID]helper.FullRelationName{},
-		unresolved:         map[helper.FullRelationName]struct{}{},
-		settings:           map[string]snapshot.Setting{},
-		extensions:         map[string]snapshot.Extension{},
-		tableStats:         map[helper.FullRelationName]snapshot.TableStat{},
-		previewSizes:       make(map[snapshot.OID]int64, len(opts.Pre.Relations)),
-		prodSizes:          map[helper.FullRelationName]int64{},
+		pre:          opts.Pre,
+		prod:         opts.Prod,
+		byName:       make(map[helper.FullRelationName]snapshot.Relation, len(opts.Pre.Relations)),
+		byOID:        make(map[snapshot.OID]snapshot.Relation, len(opts.Pre.Relations)),
+		settings:     map[string]snapshot.Setting{},
+		extensions:   map[string]snapshot.Extension{},
+		tableStats:   map[helper.FullRelationName]snapshot.TableStat{},
+		previewSizes: make(map[snapshot.OID]int64, len(opts.Pre.Relations)),
+		prodSizes:    map[helper.FullRelationName]int64{},
 	}
 
 	for _, rel := range opts.Pre.Relations {
 		c.byName[rel.RelationName()] = rel
 		c.byOID[rel.OID] = rel
-	}
-	if opts.Post != nil {
-		for _, rel := range opts.Post.Relations {
-			name := rel.RelationName()
-			if _, existed := c.byName[name]; !existed {
-				c.createdByMigration[name] = rel
-				c.postOnly[name] = struct{}{}
-			}
-		}
 	}
 
 	for _, setting := range opts.Pre.Settings {
@@ -143,7 +108,7 @@ func NewCatalog(opts CatalogOptions) (*Catalog, error) {
 type Origin uint8
 
 const (
-	// OriginUnknown is a name no snapshot explains.
+	// OriginUnknown is a name nothing explains.
 	OriginUnknown Origin = iota
 	// OriginExisting is a relation that was already there before the migration.
 	OriginExisting
@@ -162,80 +127,6 @@ func (o Origin) String() string {
 	}
 }
 
-// RelationInfo group all the information about a relation
-type RelationInfo struct {
-	// Name is the qualified name the lookup settled on.
-	Name     helper.FullRelationName
-	Relation snapshot.Relation
-	Origin   Origin
-	// PreviewBytes represent the relation size in bytes, or, for partitioned parent the sum of it children size.
-	// This is taken on the preview database.
-	PreviewBytes int64
-	// ProdBytes represent the relation size in bytes, or, for partitioned parent the sum of it children size.
-	// This is taken on the production database, -1 if unavailable.
-	ProdBytes int64
-}
-
-// Exists reports whether the relation is found from the snapshot or the shadow catalog.
-func (r RelationInfo) Exists() bool { return r.Origin != OriginUnknown }
-
-// Key is the relation's node in the partition and inheritance graph: its OID when the pre-migration
-// snapshot holds it, its qualified name when the migration created it, nothing when it is unknown.
-func (r RelationInfo) Key() RelationKey {
-	switch r.Origin {
-	case OriginExisting:
-		return SnapshotKey(r.Relation.OID)
-	case OriginCreated:
-		return DeclaredKey(r.Name)
-	default:
-		return RelationKey{}
-	}
-}
-
-// Resolve turns a name from a statement into a relation.
-//
-// An unqualified name is looked up through the search path.
-// searchPath is optional, if provided it will override the catalog current recorded search path
-func (c *Catalog) Resolve(name helper.FullRelationName, searchPath []string) RelationInfo {
-	if name.Schema != "" {
-		return c.lookup(name)
-	}
-
-	if searchPath == nil {
-		searchPath = c.SearchPath()
-	}
-	for _, schema := range searchPath {
-		candidate := helper.FullRelationName{Schema: schema, Table: name.Table}
-		if info := c.lookup(candidate); info.Exists() {
-			return info
-		}
-	}
-
-	// Nothing on the path holds it. Report it against the first schema on the path, which is where the statement would have created or expected it.
-	unqualified := name
-	if len(searchPath) > 0 {
-		unqualified.Schema = searchPath[0]
-	}
-	c.unresolved[unqualified] = struct{}{}
-	return RelationInfo{Name: unqualified, ProdBytes: -1}
-}
-
-// lookup find a relation in the catalog / shadow catalog from it's qualified name.
-func (c *Catalog) lookup(name helper.FullRelationName) RelationInfo {
-	if oid, ok := c.renamed[name]; ok {
-		return c.existing(name, c.byOID[oid])
-	}
-	if rel, ok := c.byName[name]; ok && !c.isRetired(name) {
-		return c.existing(name, rel)
-	}
-	// Created by the migration.
-	if rel, ok := c.createdByMigration[name]; ok {
-		return RelationInfo{Name: name, Relation: rel, Origin: OriginCreated, ProdBytes: -1}
-	}
-	c.unresolved[name] = struct{}{}
-	return RelationInfo{Name: name, ProdBytes: -1}
-}
-
 // existing is a snapshot relation under the name it currently goes by. Its sizes are keyed by its snapshot name.
 func (c *Catalog) existing(name helper.FullRelationName, rel snapshot.Relation) RelationInfo {
 	prodBytes := int64(-1)
@@ -248,50 +139,8 @@ func (c *Catalog) existing(name helper.FullRelationName, rel snapshot.Relation) 
 		Origin:       OriginExisting,
 		PreviewBytes: c.previewSizes[rel.OID],
 		ProdBytes:    prodBytes,
+		key:          KeyFromOID(rel.OID),
 	}
-}
-
-// RelationByKey resolves a node of the partition and inheritance graph back to its relation.
-func (c *Catalog) RelationByKey(key RelationKey) (RelationInfo, bool) {
-	if oid, ok := key.OID(); ok {
-		if _, found := c.byOID[oid]; !found {
-			return RelationInfo{}, false
-		}
-		if _, dropped := c.droppedOIDs[oid]; dropped {
-			return RelationInfo{}, false
-		}
-		return c.lookup(c.nameOf(oid)), true
-	}
-	if _, declared := c.createdByMigration[key.declared]; !declared {
-		return RelationInfo{}, false
-	}
-	return c.lookup(key.declared), true
-}
-
-// ByOID resolves a relation the catalog already handed out an OID for.
-func (c *Catalog) ByOID(oid snapshot.OID) (snapshot.Relation, bool) {
-	rel, ok := c.byOID[oid]
-	return rel, ok
-}
-
-// RelationsInSchema lists the relations of a schema, filtered by RelationKind.
-// An empty schema name answers with every relation the snapshot holds, which is the target set of
-// a database-wide statement.
-func (c *Catalog) RelationsInSchema(schema string, kinds []pgcontract.RelationKind) []snapshot.Relation {
-	var relations []snapshot.Relation
-	for _, rel := range c.pre.Relations {
-		if _, dropped := c.droppedOIDs[rel.OID]; dropped {
-			continue
-		}
-		if schema != "" && c.nameOf(rel.OID).Schema != schema {
-			continue
-		}
-		if !slices.Contains(kinds, pgcontract.RelationKindFromRelkind(rel.Kind)) {
-			continue
-		}
-		relations = append(relations, rel)
-	}
-	return relations
 }
 
 // buildSize will build the previewSizes map and, if available, the prodSizes map.
@@ -315,7 +164,7 @@ func (c *Catalog) previewSizeOf(rel snapshot.Relation) int64 {
 		return storageBytes(rel)
 	}
 	var total int64
-	for _, leaf := range c.relations.partitionDescendants(SnapshotKey(rel.OID)) {
+	for _, leaf := range c.relations.partitionDescendants(KeyFromOID(rel.OID)) {
 		if child, ok := c.byOID[leaf.oid]; ok {
 			total += storageBytes(child)
 		}
@@ -341,7 +190,7 @@ func (c *Catalog) prodSizeOf(rel snapshot.Relation, rawProdSize map[helper.FullR
 
 	var total int64
 	var known bool
-	for _, leaf := range c.relations.partitionDescendants(SnapshotKey(rel.OID)) {
+	for _, leaf := range c.relations.partitionDescendants(KeyFromOID(rel.OID)) {
 		child, ok := c.byOID[leaf.oid]
 		if !ok {
 			continue
@@ -427,16 +276,4 @@ func (c *Catalog) Heat(name helper.FullRelationName) (snapshot.TableStat, bool) 
 // HasProdActivity reports whether production activity can be relied on for severity grading.
 func (c *Catalog) HasProdActivity() bool {
 	return c.prod != nil && !c.prod.Header.FromReplica && len(c.tableStats) > 0
-}
-
-// describe is a debugging aid, not an output format.
-func (r RelationInfo) String() string {
-	if !r.Exists() {
-		return fmt.Sprintf("%s (unknown)", r.Name)
-	}
-	size := fmt.Sprintf("%d bytes preview", r.PreviewBytes)
-	if r.ProdBytes >= 0 {
-		size += fmt.Sprintf(", %d bytes prod", r.ProdBytes)
-	}
-	return fmt.Sprintf("%s %s/%s %s", r.Name, r.Relation.Kind, strings.ToLower(r.Origin.String()), size)
 }

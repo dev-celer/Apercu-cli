@@ -196,11 +196,17 @@ func Apart(events ...pgcontract.QueryEvent) []pgcontract.QueryEvent {
 // Run walks a script statement by statement, each one handed to the session as if the client had sent it in a message of its own.
 func Run(t *testing.T, catalog *pgcatalog.Catalog, script string) ([]ir.Statement, []session.Context) {
 	t.Helper()
+	return RunRecorded(t, catalog, recorderOf(catalog), script)
+}
+
+// RunRecorded is Run recording the relations with a recorder whose state the test reads back.
+func RunRecorded(t *testing.T, catalog *pgcatalog.Catalog, recorder *pgcatalog.Recorder, script string) ([]ir.Statement, []session.Context) {
+	t.Helper()
 
 	statements := pgparse.Parse(script)
 	require.NotEmpty(t, statements)
 	sess := session.NewSession(catalog)
-	relations := shadow.NewRelations(catalog)
+	relations := shadow.NewRelations(recorder)
 	contexts := make([]session.Context, 0, len(statements))
 	for _, statement := range statements {
 		context := sess.Next(statement)
@@ -222,4 +228,12 @@ func TargetNames(finding *pgcontract.Finding) []string {
 		names = append(names, target.Relation.Name.String())
 	}
 	return names
+}
+
+// recorderOf records a classification on top of the catalog, nil without a catalog.
+func recorderOf(catalog *pgcatalog.Catalog) *pgcatalog.Recorder {
+	if catalog == nil {
+		return nil
+	}
+	return pgcatalog.NewRecorder(catalog)
 }

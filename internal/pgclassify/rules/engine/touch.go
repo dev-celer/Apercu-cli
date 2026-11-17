@@ -55,7 +55,7 @@ func (s Scope) walk(t Touch, parent pgcatalog.RelationInfo, seen map[pgcatalog.R
 	if !parent.Exists() {
 		return targets
 	}
-	for _, link := range s.Catalog.Children(parent.Key()) {
+	for _, link := range s.State.Children(parent.Key()) {
 		reaches := t.Below.Children
 		if link.ParentIsPartitioned {
 			reaches = t.Below.Partitions
@@ -64,7 +64,7 @@ func (s Scope) walk(t Touch, parent pgcatalog.RelationInfo, seen map[pgcatalog.R
 			continue
 		}
 		seen[link.Child] = true
-		child, ok := s.Catalog.RelationByKey(link.Child)
+		child, ok := s.State.RelationByKey(link.Child)
 		if !ok {
 			continue
 		}
@@ -109,7 +109,7 @@ func (s Scope) owningTable(t Touch, index pgcatalog.RelationInfo, role pgcontrac
 	if !pgcontract.RelationKindFromRelkind(index.Relation.Kind).IsIndex() {
 		return nil
 	}
-	table, ok := s.Catalog.TableOfIndex(index.Relation.OID)
+	table, ok := s.State.TableOfIndex(index.Relation.OID)
 	if !ok {
 		return nil
 	}
@@ -126,7 +126,7 @@ func (s Scope) hasPartitions(info pgcatalog.RelationInfo) bool {
 	if !info.Exists() {
 		return false
 	}
-	for _, link := range s.Catalog.Children(info.Key()) {
+	for _, link := range s.State.Children(info.Key()) {
 		if link.ParentIsPartitioned {
 			return true
 		}

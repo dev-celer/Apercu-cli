@@ -44,7 +44,7 @@ func scopeOf(t *testing.T, catalog *pgcatalog.Catalog, sql string) Scope {
 	statements := pgparse.Parse(sql)
 	require.Len(t, statements, 1)
 	context := session.NewSession(catalog).Next(statements[0])
-	return Scope{Scope: shadow.Scope{View: stmt.New(catalog, context, statements[0]), Checks: shadow.NewChecks()}}
+	return Scope{Scope: shadow.Scope{View: stmt.New(pgcatalog.NewRecorder(catalog).State(), context, statements[0])}}
 }
 
 func TestExpandWalksEveryLevelAtTheTouchLock(t *testing.T) {
@@ -52,7 +52,7 @@ func TestExpandWalksEveryLevelAtTheTouchLock(t *testing.T) {
 
 	catalog := testCatalogOn(t, pgcontract.Version17)
 	s := scopeOf(t, catalog, "SELECT 1")
-	metrics := catalog.Resolve(helper.FullRelationName{Schema: "apercu_snapshot_test", Table: "metrics"}, nil)
+	metrics := s.State.Resolve(helper.FullRelationName{Schema: "apercu_snapshot_test", Table: "metrics"}, nil)
 	require.True(t, metrics.Exists())
 
 	targets := s.Expand([]Touch{{
@@ -78,7 +78,7 @@ func TestExpandReachVariants(t *testing.T) {
 
 	catalog := testCatalogOn(t, pgcontract.Version17)
 	s := scopeOf(t, catalog, "SELECT 1")
-	metrics := catalog.Resolve(helper.FullRelationName{Schema: "apercu_snapshot_test", Table: "metrics"}, nil)
+	metrics := s.State.Resolve(helper.FullRelationName{Schema: "apercu_snapshot_test", Table: "metrics"}, nil)
 	leaf := func(targets []pgcontract.Target) pgcontract.Target {
 		for _, target := range targets {
 			if target.Relation.Name.Table == "metrics_default_a" {

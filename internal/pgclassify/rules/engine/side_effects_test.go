@@ -5,8 +5,10 @@ import (
 
 	"apercu-cli/helper"
 	"apercu-cli/internal/pgcatalog"
+	"apercu-cli/internal/pgclassify"
 	"apercu-cli/internal/pgclassify/classifytest"
 	"apercu-cli/internal/pgcontract"
+	"apercu-cli/internal/pgparse"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -121,12 +123,13 @@ func TestExpandFollowsTheLinksTheMigrationDraws(t *testing.T) {
 	t.Parallel()
 
 	catalog := classifytest.CatalogOn(t, pgcontract.Version17)
-	analyses := classifytest.Analyze(t, catalog, `
+	classifier := pgclassify.NewClassifier(catalog)
+	analyses := classifier.Analyze(pgparse.Parse(`
 CREATE TABLE np (id bigint, user_id bigint, total numeric(10,2), status text, code text) PARTITION BY RANGE (id);
 ALTER TABLE np ATTACH PARTITION orders FOR VALUES FROM (0) TO (1000);
 ALTER TABLE np ADD COLUMN z text DEFAULT gen_random_uuid()::text;
 ALTER TABLE np DETACH PARTITION orders;
-ALTER TABLE np ADD COLUMN y text DEFAULT gen_random_uuid()::text;`)
+ALTER TABLE np ADD COLUMN y text DEFAULT gen_random_uuid()::text;`))
 	require.Len(t, analyses, 5)
 
 	attached := classifytest.TargetOf(t, classifytest.FindingOf(t, analyses[2], "R-AT-ADDCOL"), fixtureName("orders"))
@@ -138,7 +141,7 @@ ALTER TABLE np ADD COLUMN y text DEFAULT gen_random_uuid()::text;`)
 		assert.NotEqual(t, "orders", target.Relation.Name.Table, "a detached table is no longer reached")
 	}
 
-	np := catalog.Resolve(helper.FullRelationName{Schema: "apercu_snapshot_test", Table: "np"}, nil)
+	np := classifier.State().Resolve(helper.FullRelationName{Schema: "apercu_snapshot_test", Table: "np"}, nil)
 	require.Equal(t, pgcatalog.OriginCreated, np.Origin)
 	assert.Zero(t, np.Relation.OID, "a relation the migration creates carries no OID")
 }

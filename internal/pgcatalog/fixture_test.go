@@ -25,3 +25,17 @@ func loadFixture(t *testing.T, version int, source snapshot.Source) *snapshot.Sn
 	require.NoError(t, err)
 	return loaded
 }
+
+// buildState is NewCatalog with an empty overlay on top, which is how everything outside the package reads it.
+func buildState(opts CatalogOptions) (*State, error) {
+	catalog, err := NewCatalog(opts)
+	if err != nil {
+		return nil, err
+	}
+	return NewRecorder(catalog).State(), nil
+}
+
+// recorderOf writes to a state a test built. Outside the package, only whoever built the state holds its recorder.
+func recorderOf(state *State) *Recorder {
+	return &Recorder{state: state}
+}

@@ -193,9 +193,9 @@ func (n *nameIndex) tablespaceOID(name string) (snapshot.OID, bool) {
 	return oid, true
 }
 
-// ExtStatTable is the table an extended statistics object is built on. The name is resolved
+// extStatTable is the table an extended statistics object is built on. The name is resolved
 // through the search path the way a relation's is, because that is how the statement writes it.
-func (c *Catalog) ExtStatTable(schema, name string, searchPath []string) (snapshot.Relation, bool) {
+func (c *Catalog) extStatTable(schema, name string, searchPath []string) (snapshot.Relation, bool) {
 	schemas := []string{schema}
 	if schema == "" {
 		schemas = searchPath
@@ -203,18 +203,19 @@ func (c *Catalog) ExtStatTable(schema, name string, searchPath []string) (snapsh
 	for _, candidate := range schemas {
 		for _, stat := range c.pre.ExtStats {
 			if stat.Namespace == candidate && stat.Name == name {
-				return c.ByOID(stat.RelID)
+				rel, ok := c.byOID[stat.RelID]
+				return rel, ok
 			}
 		}
 	}
 	return snapshot.Relation{}, false
 }
 
-// RelationsInTablespace lists the relations in a tablespace filtered by RelationKind and, optionally, owner
+// relationsInTablespace lists the relations in a tablespace filtered by RelationKind and, optionally, owner
 //
 // exact is false when the name cannot be resolved.
 // The answer is then every relation that is not in the default one.
-func (c *Catalog) RelationsInTablespace(name, owner string, kinds []pgcontract.RelationKind) (relations []snapshot.Relation, exact bool) {
+func (c *Catalog) relationsInTablespace(name, owner string, kinds []pgcontract.RelationKind) (relations []snapshot.Relation, exact bool) {
 	target, exact := c.names.tablespaceOID(name)
 	for _, rel := range c.pre.Relations {
 		if !slices.Contains(kinds, pgcontract.RelationKindFromRelkind(rel.Kind)) {

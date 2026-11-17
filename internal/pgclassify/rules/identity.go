@@ -14,8 +14,8 @@ func ruleOwner(s engine.Scope, sub ir.Subcommand) engine.Effect {
 	if !s.Relation().Exists() {
 		return e
 	}
-	for _, index := range s.Catalog.IndexesOf(s.Relation().Relation.OID) {
-		rel, ok := s.Catalog.ByOID(index.IndexRelID)
+	for _, index := range s.State.IndexesOf(s.Relation().Relation.OID) {
+		rel, ok := s.State.ByOID(index.IndexRelID)
 		if !ok {
 			continue
 		}

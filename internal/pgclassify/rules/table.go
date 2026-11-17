@@ -142,7 +142,7 @@ func referencedTables(s engine.Scope, info pgcatalog.RelationInfo) []engine.Touc
 		return nil
 	}
 	var targets []engine.Touch
-	for _, key := range s.Catalog.ForeignKeysFrom(info.Relation.OID) {
+	for _, key := range s.State.ForeignKeysFrom(info.Relation.OID) {
 		if key.ParentID != 0 {
 			continue
 		}
@@ -160,11 +160,11 @@ func partitionParents(s engine.Scope, info pgcatalog.RelationInfo) []engine.Touc
 		return nil
 	}
 	var targets []engine.Touch
-	for _, link := range s.Catalog.Parents(info.Key()) {
+	for _, link := range s.State.Parents(info.Key()) {
 		if !link.ParentIsPartitioned {
 			continue
 		}
-		parent, ok := s.Catalog.RelationByKey(link.Parent)
+		parent, ok := s.State.RelationByKey(link.Parent)
 		if !ok {
 			continue
 		}

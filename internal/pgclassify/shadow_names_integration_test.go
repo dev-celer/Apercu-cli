@@ -13,8 +13,6 @@ import (
 
 	"apercu-cli/internal/pgclassify"
 	"apercu-cli/internal/pgclassify/classifytest"
-	"apercu-cli/internal/pgclassify/shadow"
-	"apercu-cli/internal/pgclassify/stmt"
 	"apercu-cli/internal/pgcontract"
 	"apercu-cli/internal/pgparse"
 
@@ -186,7 +184,7 @@ func TestConstraintNamesOracle(t *testing.T) {
 						catalog := catalogs()
 						classifier := pgclassify.NewClassifier(catalog)
 						classifier.Analyze(pgparse.Parse("SET search_path TO " + classifytest.OracleSchema + "; " + script))
-						known := classifier.Checks().NamesInSchema(shadow.Scope{View: stmt.View{Catalog: catalog, Version: catalog.Version()}, Checks: classifier.Checks()}, classifytest.OracleSchema)
+						known := classifier.State().ConstraintNamesInSchema(classifytest.OracleSchema)
 
 						var ours []string
 						for name := range known {

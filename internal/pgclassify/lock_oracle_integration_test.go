@@ -386,7 +386,8 @@ func replayLocks(t *testing.T, db *sql.DB, catalog *pgcatalog.Catalog, script lo
 
 	statements := pgparse.Parse(script.sql)
 	require.Len(t, statements, 1)
-	analysis := pgclassify.NewClassifier(catalog).Next(statements[0])
+	classifier := pgclassify.NewClassifier(catalog)
+	analysis := classifier.Next(statements[0])
 
 	observed, execErr := classifytest.RunObserved(t, db, script.sql, script.outsideTransaction)
 
@@ -400,7 +401,7 @@ func replayLocks(t *testing.T, db *sql.DB, catalog *pgcatalog.Catalog, script lo
 		mismatches = append(mismatches, fmt.Sprintf("the classifier %s %q, the server %s it", classifierVerdict(analysis), script.sql, classifytest.Accepted(execErr)))
 	}
 	if execErr == nil && !script.outsideTransaction {
-		mismatches = append(mismatches, compareLocks(catalog, analysis, observed)...)
+		mismatches = append(mismatches, compareLocks(classifier.State(), analysis, observed)...)
 	}
 	reportMismatches(t, script.sql, script.gap, script.gapped(version), mismatches)
 }
@@ -432,12 +433,12 @@ var workExempt = map[pgcontract.Command]bool{
 }
 
 // compareLocks lists every disagreement between the classifier's targets and what the server did.
-func compareLocks(catalog *pgcatalog.Catalog, analysis pgcontract.StatementAnalysis, observed classifytest.Observation) []string {
+func compareLocks(state *pgcatalog.State, analysis pgcontract.StatementAnalysis, observed classifytest.Observation) []string {
 	var mismatches []string
 	predicted := predictedTargets(analysis)
 
 	for _, held := range observed.Locks {
-		if catalog.Resolve(held.Name, nil).Origin != pgcatalog.OriginExisting {
+		if state.Resolve(held.Name, nil).Origin != pgcatalog.OriginExisting {
 			// A relation the statement creates is locked at ACCESS EXCLUSIVE under a name no
 			// other session can reach yet, so it blocks nobody and no rule names it.
 			continue
@@ -492,7 +493,8 @@ func replayScenario(t *testing.T, db *sql.DB, catalog *pgcatalog.Catalog, scenar
 
 	statements := pgparse.Parse(strings.Join(append(slices.Clone(scenario.setup), scenario.sql), ";\n"))
 	require.Len(t, statements, len(scenario.setup)+1)
-	analyses := pgclassify.NewClassifier(catalog).Analyze(statements)
+	classifier := pgclassify.NewClassifier(catalog)
+	analyses := classifier.Analyze(statements)
 
 	for _, statement := range scenario.setup {
 		_, err := db.Exec("SET search_path TO " + classifytest.OracleSchema + "; " + statement)
@@ -503,7 +505,7 @@ func replayScenario(t *testing.T, db *sql.DB, catalog *pgcatalog.Catalog, scenar
 
 	last := analyses[len(analyses)-1]
 	require.False(t, last.HasErrors(), "%v", last.Errors)
-	reportMismatches(t, scenario.sql, scenario.gap, scenario.gap != "", compareLocks(catalog, last, observed))
+	reportMismatches(t, scenario.sql, scenario.gap, scenario.gap != "", compareLocks(classifier.State(), last, observed))
 }
 
 func classifierVerdict(analysis pgcontract.StatementAnalysis) string {

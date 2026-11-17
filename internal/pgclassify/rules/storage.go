@@ -141,7 +141,7 @@ func classifyMoveAll(s engine.Scope) ([]pgcontract.Finding, []pgcontract.Error) 
 	}
 
 	form := moveAllForms[s.Statement.Command]
-	relations, exact := s.Catalog.RelationsInTablespace(sub.Name, owner, form.kinds)
+	relations, exact := s.State.RelationsInTablespace(sub.Name, owner, form.kinds)
 	message := fmt.Sprintf("every %s in tablespace %q is copied to %q under ACCESS EXCLUSIVE; nothing else in %q moves", form.noun, sub.Name, sub.Value, sub.Name)
 	if !exact {
 		message += fmt.Sprintf(" — the snapshot has no tablespace named %q, so this is every %s that is not in the database's default one", sub.Name, form.noun)

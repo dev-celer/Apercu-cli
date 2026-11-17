@@ -144,8 +144,8 @@ func indexesOf(s engine.Scope, table pgcatalog.RelationInfo, lock pgcontract.Loc
 		return nil
 	}
 	var targets []engine.Touch
-	for _, index := range s.Catalog.IndexesOf(table.Relation.OID) {
-		rel, ok := s.Catalog.ByOID(index.IndexRelID)
+	for _, index := range s.State.IndexesOf(table.Relation.OID) {
+		rel, ok := s.State.ByOID(index.IndexRelID)
 		if !ok {
 			continue
 		}
@@ -178,12 +178,12 @@ func ruleReindexWide(s engine.Scope) engine.Effect {
 	tableLock := e.Lock
 	e = e.OnNone()
 
-	for _, table := range s.Catalog.RelationsInSchema(schema, []pgcontract.RelationKind{
+	for _, table := range s.State.RelationsInSchema(schema, []pgcontract.RelationKind{
 		pgcontract.RelationKindTable, pgcontract.RelationKindMaterializedView,
 	}) {
-		info := pgcatalog.RelationInfo{Name: table.RelationName(), Relation: table, Origin: pgcatalog.OriginExisting}
+		info := s.InfoOf(table)
 		e.Touches = append(e.Touches, engine.Touch{
-			Info: s.InfoOf(table),
+			Info: info,
 			Lock: tableLock,
 			Op:   e.Op,
 			Role: pgcontract.TargetRoleExpanded,

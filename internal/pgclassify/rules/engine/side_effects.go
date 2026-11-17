@@ -64,11 +64,11 @@ func (s Scope) DefaultPartitionOf(parent pgcatalog.RelationInfo) (pgcatalog.Rela
 	if !parent.Exists() {
 		return pgcatalog.RelationInfo{}, false
 	}
-	key, ok := s.Catalog.DefaultPartition(parent.Key())
+	key, ok := s.State.DefaultPartition(parent.Key())
 	if !ok {
 		return pgcatalog.RelationInfo{}, false
 	}
-	return s.Catalog.RelationByKey(key)
+	return s.State.RelationByKey(key)
 }
 
 // MovedPartition is the table an ATTACH or a DETACH moves: ACCESS EXCLUSIVE on its whole tree.
@@ -90,12 +90,12 @@ func (s Scope) PartitionAdded(parent pgcatalog.RelationInfo) []Touch {
 	if !parent.Exists() {
 		return touches
 	}
-	for _, key := range s.Catalog.ForeignKeysFrom(parent.Relation.OID) {
+	for _, key := range s.State.ForeignKeysFrom(parent.Relation.OID) {
 		if referenced, ok := s.RelationByOID(key.ForeignRelID); ok {
 			touches = append(touches, s.partner(referenced, pgcontract.LockShareRowExclusive, pgcontract.OpKindMetadata))
 		}
 	}
-	for _, key := range s.Catalog.ForeignKeysTo(parent.Relation.OID) {
+	for _, key := range s.State.ForeignKeysTo(parent.Relation.OID) {
 		if key.ParentID != 0 {
 			continue
 		}
@@ -113,7 +113,7 @@ func (s Scope) KeysLeaving(partition pgcatalog.RelationInfo) []Touch {
 		return nil
 	}
 	var touches []Touch
-	for _, key := range s.Catalog.ForeignKeysFrom(partition.Relation.OID) {
+	for _, key := range s.State.ForeignKeysFrom(partition.Relation.OID) {
 		if key.ParentID == 0 {
 			continue
 		}
@@ -131,7 +131,7 @@ func (s Scope) KeysInto(partition pgcatalog.RelationInfo) []Touch {
 		return nil
 	}
 	var touches []Touch
-	keys := s.Catalog.ForeignKeysTo(partition.Relation.OID)
+	keys := s.State.ForeignKeysTo(partition.Relation.OID)
 	if len(keys) > 0 {
 		touches = append(touches, Touch{Info: partition, Lock: pgcontract.LockAccessExclusive, Op: pgcontract.OpKindScan, Role: pgcontract.TargetRoleDirect})
 	}
@@ -155,8 +155,8 @@ func (s Scope) Ancestors(info pgcatalog.RelationInfo) []Touch {
 	for info.Exists() && !seen[info.Key()] {
 		seen[info.Key()] = true
 		var parent pgcatalog.RelationInfo
-		for _, link := range s.Catalog.Parents(info.Key()) {
-			if rel, ok := s.Catalog.RelationByKey(link.Parent); ok && link.ParentIsPartitioned {
+		for _, link := range s.State.Parents(info.Key()) {
+			if rel, ok := s.State.RelationByKey(link.Parent); ok && link.ParentIsPartitioned {
 				parent = rel
 			}
 		}
@@ -181,7 +181,7 @@ func (s Scope) ReferencingTables(info pgcatalog.RelationInfo) []Touch {
 		return nil
 	}
 	var targets []Touch
-	for _, key := range s.Catalog.ForeignKeysTo(info.Relation.OID) {
+	for _, key := range s.State.ForeignKeysTo(info.Relation.OID) {
 		if key.ParentID != 0 {
 			continue
 		}

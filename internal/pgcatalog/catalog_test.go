@@ -17,7 +17,7 @@ func name(relation string) helper.FullRelationName {
 }
 
 // newTestCatalog builds the lookups over one committed fixture.
-func newTestCatalog(t *testing.T, version int) *Catalog {
+func newTestCatalog(t *testing.T, version int) *State {
 	t.Helper()
 
 	catalog, err := NewCatalog(CatalogOptions{
@@ -25,11 +25,11 @@ func newTestCatalog(t *testing.T, version int) *Catalog {
 		Prod: loadFixture(t, version, snapshot.SourceProd),
 	})
 	require.NoError(t, err)
-	return catalog
+	return NewRecorder(catalog).State()
 }
 
 // eachVersion runs one check against every fixture, so anything version-dependent is caught.
-func eachVersion(t *testing.T, check func(t *testing.T, catalog *Catalog, version int)) {
+func eachVersion(t *testing.T, check func(t *testing.T, catalog *State, version int)) {
 	t.Helper()
 
 	for _, version := range fixtureVersions {
@@ -40,7 +40,7 @@ func eachVersion(t *testing.T, check func(t *testing.T, catalog *Catalog, versio
 	}
 }
 
-func findOID(t *testing.T, catalog *Catalog, relation string) snapshot.OID {
+func findOID(t *testing.T, catalog *State, relation string) snapshot.OID {
 	t.Helper()
 
 	info := catalog.Resolve(name(relation), nil)
@@ -49,7 +49,7 @@ func findOID(t *testing.T, catalog *Catalog, relation string) snapshot.OID {
 }
 
 // findKey is a relation's node in the partition and inheritance graph.
-func findKey(t *testing.T, catalog *Catalog, relation string) RelationKey {
+func findKey(t *testing.T, catalog *State, relation string) RelationKey {
 	t.Helper()
 
 	info := catalog.Resolve(name(relation), nil)
@@ -80,7 +80,7 @@ func TestNewCatalogRejectsWrongSnapshots(t *testing.T) {
 
 // P-01 + C-01
 func TestResolve(t *testing.T) {
-	eachVersion(t, func(t *testing.T, catalog *Catalog, _ int) {
+	eachVersion(t, func(t *testing.T, catalog *State, _ int) {
 		qualified := catalog.Resolve(name("users"), nil)
 		require.True(t, qualified.Exists())
 		assert.Equal(t, OriginExisting, qualified.Origin)
@@ -103,39 +103,39 @@ func TestResolve(t *testing.T) {
 	})
 }
 
-// P-01 + C-06: an object the migration creates resolves, and is empty whatever it holds.
+// P-01 + C-06: an object the migration creates resolves once a statement declares it, and is empty whatever it holds.
 func TestResolveCreatedByMigration(t *testing.T) {
 	t.Parallel()
 
 	pre := loadFixture(t, 17, snapshot.SourcePreview)
 	post := &snapshot.Snapshot{
-		Source: snapshot.SourcePreview,
-		PIT:    snapshot.PITPost,
-		// The post capture is what makes an object created by the migration resolvable; only
-		// the ones that do not survive it need the shadow catalog.
+		Source:    snapshot.SourcePreview,
+		PIT:       snapshot.PITPost,
 		Relations: []snapshot.Relation{{OID: 999001, Namespace: testSchema, Name: "created_here", Kind: "r", TotalBytes: 8192}},
 	}
 
-	catalog, err := NewCatalog(CatalogOptions{Pre: pre, Post: post})
+	catalog, err := buildState(CatalogOptions{Pre: pre, Post: post})
 	require.NoError(t, err)
 
-	created := catalog.Resolve(name("created_here"), nil)
-	require.True(t, created.Exists())
-	assert.Equal(t, OriginCreated, created.Origin)
-	assert.Zero(t, created.PreviewBytes, "A-03 floors severity on an object this migration created")
+	// The post capture explains nothing: a relation only it knows was created by DDL no statement spelled.
+	postOnly := catalog.Resolve(name("created_here"), nil)
+	assert.False(t, postOnly.Exists())
+	assert.Contains(t, catalog.Unresolved(), name("created_here"))
+	assert.False(t, catalog.CreatedByMigration(name("created_here")))
 
-	// A temporary object never reaches either snapshot, so the classifier declares it.
 	scratch := name("scratch")
 	assert.False(t, catalog.Resolve(scratch, nil).Exists())
 	assert.Contains(t, catalog.Unresolved(), scratch)
 
-	catalog.Declare(scratch, "r")
+	recorderOf(catalog).Declare(scratch, "r")
 	declared := catalog.Resolve(scratch, nil)
 	assert.Equal(t, OriginCreated, declared.Origin)
+	assert.Zero(t, declared.PreviewBytes, "A-03 floors severity on an object this migration created")
+	assert.True(t, catalog.CreatedByMigration(scratch))
 	assert.NotContains(t, catalog.Unresolved(), scratch, "declaring it clears the fail-safe count")
 
 	// Declaring an object that already exists changes nothing about it.
-	catalog.Declare(name("users"), "r")
+	recorderOf(catalog).Declare(name("users"), "r")
 	assert.Equal(t, OriginExisting, catalog.Resolve(name("users"), nil).Origin)
 }
 
@@ -146,7 +146,7 @@ func TestSizeSumsThePartitionTree(t *testing.T) {
 			t.Parallel()
 
 			// Without production the preview is all there is.
-			catalog, err := NewCatalog(CatalogOptions{Pre: loadFixture(t, version, snapshot.SourcePreview)})
+			catalog, err := buildState(CatalogOptions{Pre: loadFixture(t, version, snapshot.SourcePreview)})
 			require.NoError(t, err)
 
 			parent := catalog.Resolve(name("events"), nil)
@@ -184,10 +184,10 @@ func TestSizeKeepsBothMeasurements(t *testing.T) {
 		prod.TableStats[i].TotalBytes *= 1000
 	}
 
-	catalog, err := NewCatalog(CatalogOptions{Pre: pre, Prod: prod})
+	catalog, err := buildState(CatalogOptions{Pre: pre, Prod: prod})
 	require.NoError(t, err)
 
-	previewOnly, err := NewCatalog(CatalogOptions{Pre: loadFixture(t, 17, snapshot.SourcePreview)})
+	previewOnly, err := buildState(CatalogOptions{Pre: loadFixture(t, 17, snapshot.SourcePreview)})
 	require.NoError(t, err)
 
 	users := catalog.Resolve(name("users"), nil)
@@ -208,7 +208,7 @@ func TestSizeKeepsBothMeasurements(t *testing.T) {
 
 	// A relation production has never heard of leaves ProdBytes unknown rather than zero.
 	missingOnProd := &snapshot.Snapshot{Source: snapshot.SourceProd, PIT: snapshot.PITPre}
-	fallback, err := NewCatalog(CatalogOptions{Pre: loadFixture(t, 17, snapshot.SourcePreview), Prod: missingOnProd})
+	fallback, err := buildState(CatalogOptions{Pre: loadFixture(t, 17, snapshot.SourcePreview), Prod: missingOnProd})
 	require.NoError(t, err)
 	unknown := fallback.Resolve(name("users"), nil)
 	assert.Positive(t, unknown.PreviewBytes)
@@ -225,7 +225,7 @@ func TestSizeKeepsBothMeasurements(t *testing.T) {
 
 // P-02 and P-17
 func TestIndexLookups(t *testing.T) {
-	eachVersion(t, func(t *testing.T, catalog *Catalog, _ int) {
+	eachVersion(t, func(t *testing.T, catalog *State, _ int) {
 		orders := findOID(t, catalog, "orders")
 		partial := findOID(t, catalog, "orders_open_idx")
 
@@ -246,13 +246,13 @@ func TestIndexLookups(t *testing.T) {
 
 // P-03 and P-04
 func TestConstraintAndForeignKeyGraph(t *testing.T) {
-	eachVersion(t, func(t *testing.T, catalog *Catalog, _ int) {
+	eachVersion(t, func(t *testing.T, catalog *State, _ int) {
 		users := findOID(t, catalog, "users")
 		orders := findOID(t, catalog, "orders")
 
-		notValid, ok := catalog.ConstraintByName(orders, "orders_total_check")
+		notValid, ok := catalog.ConstraintByName(KeyFromOID(orders), "orders_total_check")
 		require.True(t, ok)
-		assert.Equal(t, "c", notValid.Type)
+		assert.Equal(t, "c", notValid.Kind)
 		assert.False(t, notValid.Validated)
 
 		// orders references users, so a statement naming only orders still locks users.
@@ -280,7 +280,7 @@ func TestConstraintAndForeignKeyGraph(t *testing.T) {
 
 // P-05
 func TestSequenceOwner(t *testing.T) {
-	eachVersion(t, func(t *testing.T, catalog *Catalog, _ int) {
+	eachVersion(t, func(t *testing.T, catalog *State, _ int) {
 		users := findOID(t, catalog, "users")
 
 		owner, attnum, ok := catalog.SequenceOwner(findOID(t, catalog, "users_id_seq"))
@@ -295,7 +295,7 @@ func TestSequenceOwner(t *testing.T) {
 
 // P-06
 func TestPartitionTree(t *testing.T) {
-	eachVersion(t, func(t *testing.T, catalog *Catalog, _ int) {
+	eachVersion(t, func(t *testing.T, catalog *State, _ int) {
 		events := findKey(t, catalog, "events")
 		defaultPart := findKey(t, catalog, "events_default")
 		legacyParent := findKey(t, catalog, "legacy_parent")
@@ -344,7 +344,7 @@ func TestPartitionTree(t *testing.T) {
 
 // P-01 for an index tree: a partitioned index has no storage, its leaves do.
 func TestPartitionedIndexSizeSumsItsLeaves(t *testing.T) {
-	eachVersion(t, func(t *testing.T, catalog *Catalog, _ int) {
+	eachVersion(t, func(t *testing.T, catalog *State, _ int) {
 		index := catalog.Resolve(name("metrics_at_idx"), nil)
 		require.True(t, index.Exists())
 		assert.Positive(t, index.PreviewBytes)
@@ -352,7 +352,7 @@ func TestPartitionedIndexSizeSumsItsLeaves(t *testing.T) {
 }
 
 func TestTriggerLookup(t *testing.T) {
-	eachVersion(t, func(t *testing.T, catalog *Catalog, _ int) {
+	eachVersion(t, func(t *testing.T, catalog *State, _ int) {
 		orders := findOID(t, catalog, "orders")
 
 		row, ok := catalog.TriggerByName(orders, "orders_bump")
@@ -369,44 +369,44 @@ func TestTriggerLookup(t *testing.T) {
 	})
 }
 
-// The shadow catalog: a relation the migration declares takes part in the links it draws, by name,
+// The shadow overlay: a relation the migration declares takes part in the links it draws, by its CreatedKey,
 // and never carries an OID a snapshot lookup could mistake for one of its own.
 func TestDeclaredLinks(t *testing.T) {
-	eachVersion(t, func(t *testing.T, catalog *Catalog, _ int) {
+	eachVersion(t, func(t *testing.T, catalog *State, _ int) {
 		events := findKey(t, catalog, "events")
 
-		catalog.Declare(name("events_2027"), "r")
+		key := recorderOf(catalog).Declare(name("events_2027"), "r")
 		declared := catalog.Resolve(name("events_2027"), nil)
 		require.Equal(t, OriginCreated, declared.Origin)
 		assert.Zero(t, declared.Relation.OID, "a declared relation has no OID")
-		key := declared.Key()
-		assert.Equal(t, DeclaredKey(name("events_2027")), key)
+		assert.Equal(t, key, declared.Key())
 		_, isSnapshot := key.OID()
 		assert.False(t, isSnapshot)
+		_, isCreated := key.Created()
+		assert.True(t, isCreated)
 
 		back, ok := catalog.RelationByKey(key)
 		require.True(t, ok)
 		assert.Equal(t, declared.Name, back.Name)
-		_, ok = catalog.RelationByKey(DeclaredKey(name("never_declared")))
+		_, ok = catalog.RelationByKey(KeyFromCreatedKey(9999))
 		assert.False(t, ok)
 
-		catalog.DeclareLink(Link{Parent: events, Child: key, ParentIsPartitioned: true})
+		recorderOf(catalog).Link(Link{Parent: events, Child: key, ParentIsPartitioned: true})
 		assert.Contains(t, catalog.PartitionDescendants(events), key)
 		require.Len(t, catalog.Parents(key), 1)
 		assert.Equal(t, events, catalog.Parents(key)[0].Parent)
 
 		// Declaring the same link twice keeps one.
-		catalog.DeclareLink(Link{Parent: events, Child: key, ParentIsPartitioned: true})
+		recorderOf(catalog).Link(Link{Parent: events, Child: key, ParentIsPartitioned: true})
 		assert.Len(t, catalog.Children(events), 3)
 
 		// A declared parent takes a snapshot child, and the two kinds of key never meet.
-		catalog.Declare(name("np"), "p")
-		parent := catalog.Resolve(name("np"), nil).Key()
+		parent := recorderOf(catalog).Declare(name("np"), "p")
 		orders := findKey(t, catalog, "orders")
-		catalog.DeclareLink(Link{Parent: parent, Child: orders, ParentIsPartitioned: true})
+		recorderOf(catalog).Link(Link{Parent: parent, Child: orders, ParentIsPartitioned: true})
 		assert.Equal(t, []RelationKey{orders}, catalog.PartitionDescendants(parent))
 
-		catalog.RemoveLink(events, key)
+		recorderOf(catalog).Unlink(events, key)
 		assert.NotContains(t, catalog.PartitionDescendants(events), key)
 		assert.Empty(t, catalog.Parents(key))
 	})
@@ -414,9 +414,9 @@ func TestDeclaredLinks(t *testing.T) {
 
 // P-07, P-08, P-09 and P-10
 func TestVolatility(t *testing.T) {
-	eachVersion(t, func(t *testing.T, catalog *Catalog, _ int) {
+	eachVersion(t, func(t *testing.T, catalog *State, _ int) {
 		var userFunc, now, textOut snapshot.OID
-		for _, proc := range catalog.pre.Procs {
+		for _, proc := range catalog.catalog.pre.Procs {
 			switch {
 			case proc.Namespace == testSchema && proc.Name == "next_code":
 				userFunc = proc.OID
@@ -439,7 +439,7 @@ func TestVolatility(t *testing.T) {
 
 		// An operator is exactly as volatile as the function behind it.
 		var equalsText snapshot.OID
-		for _, operator := range catalog.pre.Operators {
+		for _, operator := range catalog.catalog.pre.Operators {
 			if operator.Name == "=" && operator.Code != 0 {
 				if proc, ok := catalog.Proc(operator.Code); ok && proc.Name == "texteq" {
 					equalsText = operator.OID
@@ -457,10 +457,10 @@ func TestVolatility(t *testing.T) {
 	})
 }
 
-func builtinType(t *testing.T, catalog *Catalog, typeName string) snapshot.OID {
+func builtinType(t *testing.T, catalog *State, typeName string) snapshot.OID {
 	t.Helper()
 
-	for _, typ := range catalog.pre.Types {
+	for _, typ := range catalog.catalog.pre.Types {
 		if typ.Namespace == "pg_catalog" && typ.Name == typeName {
 			return typ.OID
 		}
@@ -469,10 +469,10 @@ func builtinType(t *testing.T, catalog *Catalog, typeName string) snapshot.OID {
 	return 0
 }
 
-func userType(t *testing.T, catalog *Catalog, typeName string) snapshot.OID {
+func userType(t *testing.T, catalog *State, typeName string) snapshot.OID {
 	t.Helper()
 
-	for _, typ := range catalog.pre.Types {
+	for _, typ := range catalog.catalog.pre.Types {
 		if typ.Namespace == testSchema && typ.Name == typeName {
 			return typ.OID
 		}
@@ -483,7 +483,7 @@ func userType(t *testing.T, catalog *Catalog, typeName string) snapshot.OID {
 
 // P-11 and P-12
 func TestTypeChangeRewrite(t *testing.T) {
-	eachVersion(t, func(t *testing.T, catalog *Catalog, _ int) {
+	eachVersion(t, func(t *testing.T, catalog *State, _ int) {
 		text := builtinType(t, catalog, "text")
 		varchar := builtinType(t, catalog, "varchar")
 		int4 := builtinType(t, catalog, "int4")
@@ -570,7 +570,7 @@ func TestTypmodRelaxation(t *testing.T) {
 		{"varchar array drops its limit", "_varchar", varcharMod(10), unlimitedTypmod, false},
 	}
 
-	eachVersion(t, func(t *testing.T, catalog *Catalog, _ int) {
+	eachVersion(t, func(t *testing.T, catalog *State, _ int) {
 		for _, c := range cases {
 			t.Run(c.what, func(t *testing.T) {
 				typeOID := builtinType(t, catalog, c.typ)
@@ -582,45 +582,45 @@ func TestTypmodRelaxation(t *testing.T) {
 
 // P-13
 func TestColumnMetadata(t *testing.T) {
-	eachVersion(t, func(t *testing.T, catalog *Catalog, _ int) {
+	eachVersion(t, func(t *testing.T, catalog *State, _ int) {
 		orders := findOID(t, catalog, "orders")
 
-		code, ok := catalog.Column(orders, "code")
+		code, ok := catalog.Column(KeyFromOID(orders), "code")
 		require.True(t, ok)
 		assert.True(t, code.HasDefault)
 		assert.Contains(t, code.Default.Expr, "next_code()")
 		require.Len(t, code.Default.ReferencedProcs, 1, "a user function is pinned by pg_depend")
 		assert.Equal(t, VolatilityVolatile, catalog.ProcVolatility(code.Default.ReferencedProcs[0]))
 
-		status, ok := catalog.Column(orders, "status")
+		status, ok := catalog.Column(KeyFromOID(orders), "status")
 		require.True(t, ok)
 		assert.False(t, status.HasDefault)
 		assert.EqualValues(t, 500, *status.StatsTarget)
 
 		// A collation resolves through S-19, and a non-collatable column carries none.
 		labels := findOID(t, catalog, "labels")
-		labelName, ok := catalog.Column(labels, "name")
+		labelName, ok := catalog.Column(KeyFromOID(labels), "name")
 		require.True(t, ok)
 		assert.Equal(t, "case_sensitive", labelName.Collation.Name)
 		assert.Equal(t, testSchema, labelName.Collation.Namespace)
 
-		weight, ok := catalog.Column(labels, "weight")
+		weight, ok := catalog.Column(KeyFromOID(labels), "weight")
 		require.True(t, ok)
 		assert.Zero(t, weight.Collation.OID)
 
-		_, ok = catalog.Column(orders, "no_such_column")
+		_, ok = catalog.Column(KeyFromOID(orders), "no_such_column")
 		assert.False(t, ok)
-		assert.NotEmpty(t, catalog.Columns(orders))
+		assert.NotEmpty(t, catalog.Columns(KeyFromOID(orders)))
 	})
 }
 
 // P-14
 func TestNotNullProof(t *testing.T) {
-	eachVersion(t, func(t *testing.T, catalog *Catalog, version int) {
+	eachVersion(t, func(t *testing.T, catalog *State, version int) {
 		users := findOID(t, catalog, "users")
 		orders := findOID(t, catalog, "orders")
 
-		proof := catalog.NotNullProof(users, "email")
+		proof := catalog.NotNullProof(KeyFromOID(users), "email")
 		assert.True(t, proof.Proven())
 		if version >= 18 {
 			// From 18 a NOT NULL is a constraint row, and the row is what proves it.
@@ -630,15 +630,15 @@ func TestNotNullProof(t *testing.T) {
 		}
 
 		// A validated CHECK that rules out NULL lets SET NOT NULL skip its own scan.
-		status, ok := catalog.Column(orders, "status")
+		status, ok := catalog.Column(KeyFromOID(orders), "status")
 		require.True(t, ok)
 		require.False(t, status.NotNull)
-		assert.Equal(t, NotNullCheck, catalog.NotNullProof(orders, "status"))
+		assert.Equal(t, NotNullCheck, catalog.NotNullProof(KeyFromOID(orders), "status"))
 
 		// Nothing proves it for a plain nullable column.
-		assert.Equal(t, NotNullUnproven, catalog.NotNullProof(orders, "total"))
-		assert.False(t, catalog.NotNullProof(orders, "total").Proven())
-		assert.Equal(t, NotNullUnproven, catalog.NotNullProof(orders, "no_such_column"))
+		assert.Equal(t, NotNullUnproven, catalog.NotNullProof(KeyFromOID(orders), "total"))
+		assert.False(t, catalog.NotNullProof(KeyFromOID(orders), "total").Proven())
+		assert.Equal(t, NotNullUnproven, catalog.NotNullProof(KeyFromOID(orders), "no_such_column"))
 	})
 }
 
@@ -677,14 +677,14 @@ func TestNotNullConstraintOverridesAttnotnull(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			catalog, err := NewCatalog(CatalogOptions{Pre: &snapshot.Snapshot{
+			catalog, err := buildState(CatalogOptions{Pre: &snapshot.Snapshot{
 				Source: snapshot.SourcePreview, PIT: snapshot.PITPre,
 				Relations:   []snapshot.Relation{{OID: 1, Namespace: "public", Name: "t", Kind: "r"}},
 				Columns:     []snapshot.Column{{RelID: 1, Num: 1, Name: "c", NotNull: true}, {RelID: 1, Num: 2, Name: "other"}},
 				Constraints: []snapshot.Constraint{test.constraint},
 			}})
 			require.NoError(t, err)
-			assert.Equal(t, test.expected, catalog.NotNullProof(1, "c"))
+			assert.Equal(t, test.expected, catalog.NotNullProof(KeyFromOID(1), "c"))
 		})
 	}
 }
@@ -719,7 +719,7 @@ func TestCheckProvesNotNull(t *testing.T) {
 
 // P-15
 func TestTypeDependents(t *testing.T) {
-	eachVersion(t, func(t *testing.T, catalog *Catalog, _ int) {
+	eachVersion(t, func(t *testing.T, catalog *State, _ int) {
 		profiles := findOID(t, catalog, "profiles")
 
 		columns, typed := catalog.TypeDependents(userType(t, catalog, "mood"))
@@ -746,7 +746,7 @@ func TestTypeDependents(t *testing.T) {
 
 // P-16
 func TestViewDependents(t *testing.T) {
-	eachVersion(t, func(t *testing.T, catalog *Catalog, _ int) {
+	eachVersion(t, func(t *testing.T, catalog *State, _ int) {
 		users := findOID(t, catalog, "users")
 		activeUsers := findOID(t, catalog, "active_users")
 
@@ -756,14 +756,14 @@ func TestViewDependents(t *testing.T) {
 			assert.Equal(t, users, dep.ReferencedRelID)
 		}
 
-		email, ok := catalog.Column(users, "email")
+		email, ok := catalog.Column(KeyFromOID(users), "email")
 		require.True(t, ok)
 		onColumn := catalog.ViewDependentsOfColumn(users, email.Num)
 		require.NotEmpty(t, onColumn, "a column-level edge is what makes DROP COLUMN decidable")
 		assert.Equal(t, activeUsers, onColumn[0].DependentRelID)
 
 		// created_at is in the table but in no view, so dropping it cascades to nothing.
-		createdAt, ok := catalog.Column(users, "created_at")
+		createdAt, ok := catalog.Column(KeyFromOID(users), "created_at")
 		require.True(t, ok)
 		assert.Empty(t, catalog.ViewDependentsOfColumn(users, createdAt.Num))
 	})
@@ -771,7 +771,7 @@ func TestViewDependents(t *testing.T) {
 
 // P-18
 func TestVersionGating(t *testing.T) {
-	eachVersion(t, func(t *testing.T, catalog *Catalog, version int) {
+	eachVersion(t, func(t *testing.T, catalog *State, version int) {
 		assert.EqualValues(t, version, catalog.Version())
 		assert.Equal(t, pgcontract.Exactly(pgcontract.Version(version)), catalog.VersionRange())
 		assert.EqualValues(t, version, catalog.PreviewVersion())
@@ -782,7 +782,7 @@ func TestVersionGating(t *testing.T) {
 func TestVersionRangeWithoutProduction(t *testing.T) {
 	t.Parallel()
 
-	catalog, err := NewCatalog(CatalogOptions{Pre: loadFixture(t, 16, snapshot.SourcePreview)})
+	catalog, err := buildState(CatalogOptions{Pre: loadFixture(t, 16, snapshot.SourcePreview)})
 	require.NoError(t, err)
 
 	assert.Equal(t, pgcontract.VersionUnknown, catalog.Version())
@@ -795,7 +795,7 @@ func TestVersionRangeWithoutProduction(t *testing.T) {
 
 // P-19
 func TestSessionDefaults(t *testing.T) {
-	eachVersion(t, func(t *testing.T, catalog *Catalog, _ int) {
+	eachVersion(t, func(t *testing.T, catalog *State, _ int) {
 		value, ok := catalog.Setting("search_path")
 		require.True(t, ok)
 		assert.NotEmpty(t, value)
@@ -832,7 +832,7 @@ func TestParseSearchPath(t *testing.T) {
 
 // P-20
 func TestTableHeat(t *testing.T) {
-	eachVersion(t, func(t *testing.T, catalog *Catalog, _ int) {
+	eachVersion(t, func(t *testing.T, catalog *State, _ int) {
 		assert.True(t, catalog.HasProdActivity())
 
 		// Activity is keyed by name: the production relids come from another database, where
@@ -851,7 +851,7 @@ func TestTableHeat(t *testing.T) {
 func TestTableHeatWithoutProduction(t *testing.T) {
 	t.Parallel()
 
-	catalog, err := NewCatalog(CatalogOptions{Pre: loadFixture(t, 17, snapshot.SourcePreview)})
+	catalog, err := buildState(CatalogOptions{Pre: loadFixture(t, 17, snapshot.SourcePreview)})
 	require.NoError(t, err)
 
 	assert.False(t, catalog.HasProdActivity())
@@ -874,7 +874,7 @@ func TestRelationContract(t *testing.T) {
 func TestExtension(t *testing.T) {
 	t.Parallel()
 
-	eachVersion(t, func(t *testing.T, catalog *Catalog, _ int) {
+	eachVersion(t, func(t *testing.T, catalog *State, _ int) {
 		plpgsql, ok := catalog.Extension("plpgsql")
 		require.True(t, ok, "every database ships plpgsql")
 		assert.Equal(t, "1.0", plpgsql.Version)
@@ -889,7 +889,7 @@ func TestExtensionPrefersProduction(t *testing.T) {
 
 	prod := loadFixture(t, 17, snapshot.SourceProd)
 	prod.Extensions = []snapshot.Extension{{Name: "pgcrypto", Version: "1.3"}}
-	catalog, err := NewCatalog(CatalogOptions{Pre: loadFixture(t, 17, snapshot.SourcePreview), Prod: prod})
+	catalog, err := buildState(CatalogOptions{Pre: loadFixture(t, 17, snapshot.SourcePreview), Prod: prod})
 	require.NoError(t, err)
 
 	pgcrypto, ok := catalog.Extension("pgcrypto")
@@ -898,7 +898,7 @@ func TestExtensionPrefersProduction(t *testing.T) {
 	_, ok = catalog.Extension("plpgsql")
 	assert.False(t, ok, "the preview's list is only the fallback")
 
-	fallback, err := NewCatalog(CatalogOptions{Pre: loadFixture(t, 17, snapshot.SourcePreview)})
+	fallback, err := buildState(CatalogOptions{Pre: loadFixture(t, 17, snapshot.SourcePreview)})
 	require.NoError(t, err)
 	_, ok = fallback.Extension("plpgsql")
 	assert.True(t, ok, "without production the preview's list stands")

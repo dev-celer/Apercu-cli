@@ -10,10 +10,10 @@ import (
 	"apercu-cli/internal/pgparse/ir"
 )
 
-// View is one statement as the rules see it: the catalog, the context it runs under, and the
+// View is one statement as the rules see it: the database state, the context it runs under, and the
 // relations it names, resolved.
 type View struct {
-	Catalog   *pgcatalog.Catalog
+	State     *pgcatalog.State
 	Context   session.Context
 	Statement ir.Statement
 	// version is production's. It is VersionUnknown when production was unreachable.
@@ -23,15 +23,15 @@ type View struct {
 }
 
 // New resolves the relations a statement names, through the search path in force.
-func New(catalog *pgcatalog.Catalog, context session.Context, statement ir.Statement) View {
+func New(state *pgcatalog.State, context session.Context, statement ir.Statement) View {
 	v := View{
-		Catalog:   catalog,
+		State:     state,
 		Context:   context,
 		Statement: statement,
-		Version:   catalog.Version(),
+		Version:   state.Version(),
 	}
 	for _, named := range statement.Relations {
-		v.Relations = append(v.Relations, catalog.Resolve(named.Name, context.SearchPath))
+		v.Relations = append(v.Relations, state.Resolve(named.Name, context.SearchPath))
 	}
 	return v
 }
@@ -61,7 +61,7 @@ func PartitionedInfo(info pgcatalog.RelationInfo) bool {
 
 // Resolve turns a name a subcommand wrote into a relation, through the search path in force.
 func (s View) Resolve(ref ir.RelationRef) pgcatalog.RelationInfo {
-	return s.Catalog.Resolve(ref.Name, s.Context.SearchPath)
+	return s.State.Resolve(ref.Name, s.Context.SearchPath)
 }
 
 func (s View) AtLeast18() bool {
@@ -86,7 +86,7 @@ func Contract(info pgcatalog.RelationInfo) pgcontract.Relation {
 // InfoOf is a relation the catalog handed out by OID, in the shape a touch carries.
 func (s View) InfoOf(rel snapshot.Relation) pgcatalog.RelationInfo {
 	// By OID, so a relation the migration renamed is found under its new name.
-	if info, ok := s.Catalog.RelationByKey(pgcatalog.SnapshotKey(rel.OID)); ok {
+	if info, ok := s.State.RelationByKey(pgcatalog.KeyFromOID(rel.OID)); ok {
 		return info
 	}
 	return pgcatalog.RelationInfo{Name: rel.RelationName(), ProdBytes: -1}
@@ -94,7 +94,7 @@ func (s View) InfoOf(rel snapshot.Relation) pgcatalog.RelationInfo {
 
 // RelationByOID is a relation the catalog knows by OID, in the shape a touch carries.
 func (s View) RelationByOID(oid snapshot.OID) (pgcatalog.RelationInfo, bool) {
-	rel, ok := s.Catalog.ByOID(oid)
+	rel, ok := s.State.ByOID(oid)
 	if !ok {
 		return pgcatalog.RelationInfo{}, false
 	}
@@ -103,7 +103,7 @@ func (s View) RelationByOID(oid snapshot.OID) (pgcatalog.RelationInfo, bool) {
 
 // ByName is a relation a lookup already answered with, back in the shape the rules pass around.
 func (s View) ByName(relation pgcontract.Relation) pgcatalog.RelationInfo {
-	return s.Catalog.Resolve(relation.Name, s.Context.SearchPath)
+	return s.State.Resolve(relation.Name, s.Context.SearchPath)
 }
 
 // Descendant is one relation below another, for the rules that list a tree rather than lock it:
@@ -120,12 +120,12 @@ func (s View) DescendantsOf(info pgcatalog.RelationInfo) []Descendant {
 		return nil
 	}
 	partitions := map[pgcatalog.RelationKey]bool{}
-	for _, key := range s.Catalog.PartitionDescendants(info.Key()) {
+	for _, key := range s.State.PartitionDescendants(info.Key()) {
 		partitions[key] = true
 	}
 	var out []Descendant
-	for _, key := range s.Catalog.Descendants(info.Key()) {
-		child, ok := s.Catalog.RelationByKey(key)
+	for _, key := range s.State.Descendants(info.Key()) {
+		child, ok := s.State.RelationByKey(key)
 		if !ok {
 			continue
 		}
@@ -139,7 +139,7 @@ func (s View) Column(name string) (pgcatalog.ColumnInfo, bool) {
 	if !s.Relation().Exists() || name == "" {
 		return pgcatalog.ColumnInfo{}, false
 	}
-	return s.Catalog.Column(s.Relation().Relation.OID, name)
+	return s.State.Column(s.Relation().Key(), name)
 }
 
 // TableOfIndex return, for an index, the table it belongs to.
@@ -147,7 +147,7 @@ func (s View) TableOfIndex(index pgcatalog.RelationInfo) (pgcontract.Relation, b
 	if !index.Exists() {
 		return pgcontract.Relation{}, false
 	}
-	table, ok := s.Catalog.TableOfIndex(index.Relation.OID)
+	table, ok := s.State.TableOfIndex(index.Relation.OID)
 	if !ok {
 		return pgcontract.Relation{}, false
 	}
@@ -160,7 +160,7 @@ func (s View) RowTrigger(name string) bool {
 	if name == "" || !s.Relation().Exists() {
 		return true
 	}
-	trigger, ok := s.Catalog.TriggerByName(s.Relation().Relation.OID, name)
+	trigger, ok := s.State.TriggerByName(s.Relation().Relation.OID, name)
 	return !ok || trigger.Row()
 }
 
