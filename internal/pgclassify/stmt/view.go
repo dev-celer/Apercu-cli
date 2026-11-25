@@ -134,6 +134,25 @@ func (s View) DescendantsOf(info pgcatalog.RelationInfo) []Descendant {
 	return out
 }
 
+// TypeOf resolves a type a statement names. A serial is the integer type behind it.
+func (s View) TypeOf(ref ir.TypeRef) (snapshot.Type, bool) {
+	schema, name := ref.Schema(), ref.Base()
+	if integer, ok := serialTypes[name]; ok && schema == "" {
+		schema, name = "pg_catalog", integer
+	}
+	base, ok := s.State.TypeByName(schema, name, s.Context.SearchPath)
+	if !ok || ref.ArrayBounds == 0 {
+		return base, ok
+	}
+	return s.State.ArrayOf(base.OID)
+}
+
+var serialTypes = map[string]string{
+	"smallserial": "int2", "serial2": "int2",
+	"serial": "int4", "serial4": "int4",
+	"bigserial": "int8", "serial8": "int8",
+}
+
 // Column resolves one column of the named table.
 func (s View) Column(name string) (pgcatalog.ColumnInfo, bool) {
 	if !s.Relation().Exists() || name == "" {

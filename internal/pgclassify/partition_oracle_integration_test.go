@@ -78,6 +78,12 @@ CREATE TABLE sc_p3_2 PARTITION OF sc_p3 FOR VALUES FROM (100) TO (200);
 CREATE TABLE sc_t4 (id bigint NOT NULL, k int NOT NULL, uid bigint);
 CREATE TABLE sc_p5 (id bigint, k int NOT NULL) PARTITION BY RANGE (k);
 CREATE TABLE sc_p5_1 PARTITION OF sc_p5 FOR VALUES FROM (0) TO (100);
+CREATE TABLE sc_c1 (id bigint, code text);
+CREATE TABLE sc_c2 (id bigint, code text);
+CREATE TABLE sc_c3 (id bigint, code text);
+CREATE TABLE sc_c4 (id bigint, code text);
+CREATE TABLE sc_c5 (id bigint, code text);
+CREATE TABLE sc_c6 (id bigint, code text);
 
 INSERT INTO m SELECT i, i % 200, CASE WHEN i % 3 = 0 THEN 'x' ELSE 'y' END, (i % 200) + 1 FROM generate_series(1, 400) i;
 -- The default partition holds rows outside every bound the scripts attach, so it is never in the way.
@@ -98,6 +104,12 @@ INSERT INTO sc_t2 VALUES (1, 150, 1);
 INSERT INTO sc_p3 VALUES (1, 10, 1), (2, 150, 2);
 INSERT INTO sc_t4 VALUES (1, 10, 1);
 INSERT INTO sc_p5 VALUES (1, 10);
+INSERT INTO sc_c1 VALUES (1, 'a');
+INSERT INTO sc_c2 VALUES (1, 'a');
+INSERT INTO sc_c3 VALUES (1, 'a');
+INSERT INTO sc_c4 VALUES (1, 'a');
+INSERT INTO sc_c5 VALUES (1, 'a');
+INSERT INTO sc_c6 VALUES (1, 'a');
 ANALYZE;
 `
 
@@ -227,6 +239,36 @@ type lockScenario struct {
 }
 
 var lockScenarios = []lockScenario{
+	// The column rules read the column as the setup left it: a second retype compares with the first's type, an
+	// added column has the type and NOT NULL it was added with.
+	{
+		setup: []string{"ALTER TABLE sc_c1 ALTER COLUMN code TYPE varchar(10)"},
+		sql:   "ALTER TABLE sc_c1 ALTER COLUMN code TYPE varchar(20)",
+	},
+	{
+		setup: []string{"ALTER TABLE sc_c2 ADD COLUMN ref varchar(10)"},
+		sql:   "ALTER TABLE sc_c2 ALTER COLUMN ref TYPE varchar(20)",
+	},
+	{
+		setup: []string{"ALTER TABLE sc_c3 ADD COLUMN ref int NOT NULL DEFAULT 0"},
+		sql:   "ALTER TABLE sc_c3 ALTER COLUMN ref SET NOT NULL",
+	},
+	// SET NOT NULL skips its scan on a CHECK the setup added or validated, not on one that proves nothing.
+	{
+		setup: []string{"ALTER TABLE sc_c4 ADD CONSTRAINT sc_c4_nn CHECK (code IS NOT NULL)"},
+		sql:   "ALTER TABLE sc_c4 ALTER COLUMN code SET NOT NULL",
+	},
+	{
+		setup: []string{"ALTER TABLE sc_c5 ADD CONSTRAINT sc_c5_nn CHECK (code IS NOT NULL OR id > 0)"},
+		sql:   "ALTER TABLE sc_c5 ALTER COLUMN code SET NOT NULL",
+	},
+	{
+		setup: []string{
+			"ALTER TABLE sc_c6 ADD CONSTRAINT sc_c6_nn CHECK (code IS NOT NULL) NOT VALID",
+			"ALTER TABLE sc_c6 VALIDATE CONSTRAINT sc_c6_nn",
+		},
+		sql: "ALTER TABLE sc_c6 ALTER COLUMN code SET NOT NULL",
+	},
 	{
 		// A partitioned parent is built around an existing table, then rewritten through the parent.
 		setup: []string{

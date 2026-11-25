@@ -51,11 +51,15 @@ type ColumnState struct {
 	// SnapshotNum is the attnum of the snapshot column going by this name, 0 for a column the migration added.
 	SnapshotNum int16
 	// gone marks a name no column goes by any more: dropped, or renamed away, the new name having its own entry.
-	gone    bool
+	gone bool
+	// TypeID and TypeMod are the column's type now, TypeID 0 for one the snapshot does not know. An entry always
+	// carries them, a snapshot column's starting from State.ColumnState.
 	TypeID  snapshot.OID
 	TypeMod int32
 	// if NotNull is nil, the lookup should be done in the catalog
 	NotNull *bool
+	// Generated is pg_attribute.attgenerated: '' none, 's' stored, 'v' virtual.
+	Generated string
 }
 
 // ConstraintState is a constraint the migration touched.

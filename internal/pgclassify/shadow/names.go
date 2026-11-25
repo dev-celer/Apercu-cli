@@ -23,7 +23,7 @@ func (m *Checks) hold(key pgcatalog.RelationKey, constraint held) {
 	m.recorder.SetConstraint(key, constraint.Name, constraint.ConstraintState)
 }
 
-// recordCreate claims the names of every constraint a CREATE TABLE brings with it.
+// recordCreate records the columns of a CREATE TABLE and claims the names of every constraint it brings with it.
 func (m *Checks) recordCreate(s Scope) {
 	if len(s.Statement.Relations) == 0 || s.Relation().Exists() || s.Statement.Flags.Persistence == ir.PersistenceTemporary {
 		return
@@ -32,12 +32,29 @@ func (m *Checks) recordCreate(s Scope) {
 	if !table.Exists() {
 		return
 	}
+	// The parents' columns come first, the table's own merge into them.
+	for _, sub := range s.Statement.Subcommands {
+		if (sub.Kind == ir.SubAttachPartition || sub.Kind == ir.SubAddInherit) && len(sub.Relations) > 0 {
+			m.inheritColumns(s, s.Resolve(sub.Relations[0]), table)
+		}
+	}
+	for _, sub := range s.Statement.Subcommands {
+		switch sub.Kind {
+		case ir.SubAddColumn:
+			m.addColumn(s, table, sub.Column)
+		case ir.SubLike:
+			if len(sub.Relations) > 0 {
+				m.copyColumns(s, s.Resolve(sub.Relations[0]), table, sub.Flags.LikeGenerated)
+			}
+		}
+	}
 	for _, sub := range s.Statement.Subcommands {
 		switch sub.Kind {
 		case ir.SubAddColumn:
 			m.claimColumn(s, table, sub.Column)
 		case ir.SubAddConstraint:
 			m.claim(s, table, sub.Constraint, "")
+			m.addConstraint(s, table, sub.Constraint)
 		case ir.SubLike:
 			if len(sub.Relations) > 0 {
 				m.like(s, table, s.Resolve(sub.Relations[0]), sub.Flags)

@@ -93,6 +93,8 @@ type Flags struct {
 	// LikeConstraints and LikeIndexes are the INCLUDING options of a LIKE clause that create constraints.
 	LikeConstraints bool
 	LikeIndexes     bool
+	// LikeGenerated is INCLUDING GENERATED: without it a LIKE copies a generated column as a plain one.
+	LikeGenerated bool
 }
 
 // Option is one entry of a parenthesised option list: a storage parameter, an attribute option, a VACUUM option.

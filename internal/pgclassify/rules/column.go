@@ -13,15 +13,6 @@ import (
 	"apercu-cli/internal/pgparse/ir"
 )
 
-// typeOf resolves a type as the statement spelled it, arrays included.
-func typeOf(s engine.Scope, ref ir.TypeRef) (snapshot.Type, bool) {
-	base, ok := s.State.TypeByName(ref.Schema(), ref.Base(), s.Context.SearchPath)
-	if !ok || ref.ArrayBounds == 0 {
-		return base, ok
-	}
-	return s.State.ArrayOf(base.OID)
-}
-
 // ruleAddColumn is R-AT-ADDCOL.
 func ruleAddColumn(s engine.Scope, sub ir.Subcommand) engine.Effect {
 	e := engine.NewEffect(s, "R-AT-ADDCOL", "")
@@ -58,7 +49,7 @@ func ruleAddColumn(s engine.Scope, sub ir.Subcommand) engine.Effect {
 
 // domainIsConstrained: A domain with constraints turns an added column into a rewrite.
 func domainIsConstrained(s engine.Scope, ref ir.TypeRef) bool {
-	typ, ok := typeOf(s, ref)
+	typ, ok := s.TypeOf(ref)
 	if !ok {
 		return false
 	}
@@ -96,7 +87,8 @@ func buildsIndex(constraints []ir.ConstraintDef) bool {
 func ruleDropColumn(s engine.Scope, sub ir.Subcommand) engine.Effect {
 	e := engine.NewEffect(s, "R-AT-DROPCOL", "the column is marked dropped in the catalog; existing rows keep their pages until something else rewrites them")
 	column, ok := s.Column(sub.Name)
-	if !ok {
+	if !ok || column.Num == 0 {
+		// A column the migration added has no view reading it yet.
 		return e
 	}
 	dependents := s.State.ViewDependentsOfColumn(s.Relation().Relation.OID, column.Num)
@@ -130,13 +122,13 @@ func ruleAlterColumnType(s engine.Scope, sub ir.Subcommand) engine.Effect {
 	}
 
 	old, hasOld := s.Column(def.Name)
-	target, hasTarget := typeOf(s, def.Type)
+	target, hasTarget := s.TypeOf(def.Type)
 	oldType, _ := s.State.Type(old.TypeID)
 
 	switch {
 	case def.Using != nil && !def.Using.IsColumnRef(def.Name):
 		e.Message = "the USING expression computes a new value for every row"
-	case !hasOld || !hasTarget:
+	case !hasOld || old.TypeID == 0 || !hasTarget:
 		e.Message = fmt.Sprintf("%q or %s is not in the snapshot, so a rewrite is assumed", def.Name, def.Type)
 	case isTimestampSwap(oldType.Name, target.Name):
 		if s.Context.TimeZoneIsUTC() {

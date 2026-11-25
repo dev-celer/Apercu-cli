@@ -67,7 +67,14 @@ func (m *Checks) Record(s Scope) {
 			m.claim(s, table, sub.Constraint, "")
 			m.addConstraint(s, table, sub.Constraint)
 		case ir.SubAddColumn:
+			for _, reached := range s.reached(table) {
+				m.addColumn(s, reached, sub.Column)
+			}
 			m.claimColumn(s, table, sub.Column)
+		case ir.SubAlterColumnType:
+			m.retype(s, table, sub.Column)
+		case ir.SubDropExpression:
+			m.dropExpression(s, table, sub.Name)
 		case ir.SubAttachPartition:
 			if len(sub.Relations) > 0 {
 				m.inherit(s, table, s.Resolve(sub.Relations[0]), true)

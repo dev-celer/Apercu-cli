@@ -468,3 +468,74 @@ func (c *Catalog) typeClosure(typeOID snapshot.OID) []snapshot.OID {
 	}
 	return closure
 }
+
+// formatType is format_type(oid, typmod) for the built-in types whose SQL name differs from their catalog name or
+// that carry a modifier, and the name, qualified outside pg_catalog, for any other. Empty for a type the snapshot does
+// not know.
+func (c *Catalog) formatType(oid snapshot.OID, mod int32) string {
+	typ, ok := c.types.types[oid]
+	if !ok {
+		return ""
+	}
+	if typ.ElemID != 0 && typ.Len == -1 && strings.HasPrefix(typ.Name, "_") {
+		return c.formatType(typ.ElemID, mod) + "[]"
+	}
+	if typ.Namespace != "pg_catalog" {
+		return typ.Namespace + "." + typ.Name
+	}
+	length := func(name string) string {
+		if mod < varHdrSz {
+			return name
+		}
+		return name + "(" + strconv.Itoa(int(mod-varHdrSz)) + ")"
+	}
+	precision := func(name, zone string) string {
+		if mod >= 0 {
+			name += "(" + strconv.Itoa(int(mod)) + ")"
+		}
+		return name + zone
+	}
+	switch typ.Name {
+	case "int2":
+		return "smallint"
+	case "int4":
+		return "integer"
+	case "int8":
+		return "bigint"
+	case "float4":
+		return "real"
+	case "float8":
+		return "double precision"
+	case "bool":
+		return "boolean"
+	case "varchar":
+		return length("character varying")
+	case "bpchar":
+		if mod < varHdrSz {
+			return "bpchar"
+		}
+		return length("character")
+	case "bit", "varbit":
+		name := map[string]string{"bit": "bit", "varbit": "bit varying"}[typ.Name]
+		if mod < 0 {
+			return name
+		}
+		return name + "(" + strconv.Itoa(int(mod)) + ")"
+	case "numeric":
+		if mod < varHdrSz {
+			return "numeric"
+		}
+		packed := mod - varHdrSz
+		scale := ((packed & 0x7ff) ^ 1024) - 1024
+		return "numeric(" + strconv.Itoa(int(packed>>16&0xffff)) + "," + strconv.Itoa(int(scale)) + ")"
+	case "timestamp":
+		return precision("timestamp", " without time zone")
+	case "timestamptz":
+		return precision("timestamp", " with time zone")
+	case "time":
+		return precision("time", " without time zone")
+	case "timetz":
+		return precision("time", " with time zone")
+	}
+	return typ.Name
+}

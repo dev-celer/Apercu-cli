@@ -935,3 +935,26 @@ func TestPartitionKeyColumns(t *testing.T) {
 		assert.Equal(t, testCase.columns, columns, testCase.key)
 	}
 }
+
+// formatType spells a pg_catalog type the way format_type does: every such column of the snapshots is checked
+// against the server's own spelling.
+func TestFormatTypeMatchesTheServer(t *testing.T) {
+	eachVersion(t, func(t *testing.T, state *State, _ int) {
+		checked := 0
+		for _, column := range state.catalog.pre.Columns {
+			typ, ok := state.catalog.Type(column.TypeID)
+			if !ok {
+				continue
+			}
+			if element, ok := state.catalog.Type(typ.ElemID); ok && typ.Len == -1 {
+				typ = element
+			}
+			if typ.Namespace != "pg_catalog" {
+				continue
+			}
+			checked++
+			assert.Equal(t, column.FormattedType, state.catalog.formatType(column.TypeID, column.TypeMod), "%s %d", typ.Name, column.TypeMod)
+		}
+		assert.NotZero(t, checked)
+	})
+}

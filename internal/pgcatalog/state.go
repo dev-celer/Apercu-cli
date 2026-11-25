@@ -243,13 +243,54 @@ func (s *State) PendingDetach(key RelationKey) []RelationKey {
 
 // Column resolves one column of a table by the name it goes by now.
 func (s *State) Column(key RelationKey, name string) (ColumnInfo, bool) {
+	state, touched := s.overlay.Columns[key][name]
+	if touched && !state.gone && state.SnapshotNum == 0 {
+		return ColumnInfo{Column: snapshot.Column{
+			Name:          name,
+			TypeID:        state.TypeID,
+			TypeMod:       state.TypeMod,
+			FormattedType: s.catalog.formatType(state.TypeID, state.TypeMod),
+			NotNull:       state.NotNull != nil && *state.NotNull,
+			Generated:     state.Generated,
+		}}, true
+	}
 	oid, snapshotName, ok := s.snapshotColumn(key, name)
 	if !ok {
 		return ColumnInfo{}, false
 	}
 	info, ok := s.catalog.column(oid, snapshotName)
+	if !ok {
+		return ColumnInfo{}, false
+	}
 	info.Name = name
-	return info, ok
+	if touched {
+		if state.TypeID != info.TypeID || state.TypeMod != info.TypeMod {
+			info.TypeID, info.TypeMod = state.TypeID, state.TypeMod
+			info.FormattedType = s.catalog.formatType(state.TypeID, state.TypeMod)
+		}
+		info.Generated = state.Generated
+		if state.NotNull != nil {
+			info.NotNull = *state.NotNull
+		}
+	}
+	return info, true
+}
+
+// ColumnNames lists the columns a table has now: the snapshot's still there in attnum order, then the migration's by
+// name.
+func (s *State) ColumnNames(key RelationKey) []string {
+	var out []string
+	for _, column := range s.Columns(key) {
+		out = append(out, column.Name)
+	}
+	var added []string
+	for name, state := range s.overlay.Columns[key] {
+		if !state.gone && state.SnapshotNum == 0 {
+			added = append(added, name)
+		}
+	}
+	slices.Sort(added)
+	return append(out, added...)
 }
 
 // snapshotColumn is the snapshot column going by a name now: its table's OID and the name the snapshot gives it.
@@ -287,7 +328,7 @@ func (s *State) ColumnState(key RelationKey, name string) (ColumnState, bool) {
 	if !ok {
 		return ColumnState{}, false
 	}
-	return ColumnState{SnapshotNum: column.Num, TypeID: column.TypeID, TypeMod: column.TypeMod}, true
+	return ColumnState{SnapshotNum: column.Num, TypeID: column.TypeID, TypeMod: column.TypeMod, Generated: column.Generated}, true
 }
 
 // Columns lists the snapshot columns of a table that are still there, under the names they go by now.
