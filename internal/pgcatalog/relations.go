@@ -3,8 +3,6 @@ package pgcatalog
 import (
 	"apercu-cli/helper"
 	"fmt"
-	"regexp"
-	"slices"
 	"strings"
 
 	"apercu-cli/internal/pgcatalog/snapshot"
@@ -313,60 +311,3 @@ func (p NotNullProof) String() string {
 
 // Proven reports whether the column is provably never null.
 func (p NotNullProof) Proven() bool { return p != NotNullUnproven }
-
-// notNullProof return the NotNullProof for a snapshot column, as the snapshot names it.
-func (c *Catalog) notNullProof(relID snapshot.OID, name string) NotNullProof {
-	column, ok := c.relations.columnByName[columnKey{relID, name}]
-	if !ok {
-		return NotNullUnproven
-	}
-
-	for _, constraint := range c.relations.constraints[relID] {
-		if constraint.Type != "n" || !constraintCovers(constraint, column.Num) {
-			continue
-		}
-		if constraint.Validated && constraint.Enforced {
-			return NotNullConstraint
-		}
-		// The column carries an unproven NOT NULL: attnotnull says nothing here.
-		return NotNullUnproven
-	}
-
-	if column.NotNull {
-		return NotNullAttribute
-	}
-
-	for _, constraint := range c.relations.constraints[relID] {
-		if constraint.Type != "c" || !constraint.Validated || !constraint.Enforced {
-			continue
-		}
-		if checkProvesNotNull(constraint.Def, name) {
-			return NotNullCheck
-		}
-	}
-	return NotNullUnproven
-}
-
-// constraintCovers reports whether a constraint's key includes the column.
-func constraintCovers(constraint snapshot.Constraint, num int16) bool {
-	return slices.Contains(constraint.Key, num)
-}
-
-// checkProvesNotNull reports whether a CHECK definition rules out NULL for the column on its own.
-func checkProvesNotNull(def, column string) bool {
-	if def == "" {
-		return false
-	}
-	name := regexp.QuoteMeta(column)
-	quoted := `(?:` + name + `|"` + name + `")`
-	patterns := []string{
-		`(?i)(?:^|[^\w"])` + quoted + `\s+is\s+not\s+null`,
-		`(?i)not\s*\(\s*` + quoted + `\s+is\s+null\s*\)`,
-	}
-	for _, pattern := range patterns {
-		if regexp.MustCompile(pattern).MatchString(def) {
-			return true
-		}
-	}
-	return false
-}

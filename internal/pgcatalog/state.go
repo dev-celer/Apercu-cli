@@ -360,19 +360,69 @@ func (s *State) renamedColumns(key RelationKey) map[string]string {
 	return names
 }
 
-// NotNullProof is why the column going by that name now is known never to be null.
+// NotNullProof is why the column going by that name now is known never to be null. It reads the constraints the
+// table holds now, the snapshot's the migration left standing and the migration's own.
 func (s *State) NotNullProof(key RelationKey, name string) NotNullProof {
-	if state, ok := s.overlay.Columns[key][name]; ok && state.NotNull != nil {
-		if *state.NotNull {
-			return NotNullAttribute
+	state, touched := s.overlay.Columns[key][name]
+	if touched && state.gone {
+		return NotNullUnproven
+	}
+	if touched && state.NotNull != nil && *state.NotNull {
+		return NotNullAttribute
+	}
+
+	constraints := s.Constraints(key)
+	for _, constraint := range constraints {
+		if constraint.Kind != "n" || !slices.Contains(constraint.Columns, name) {
+			continue
 		}
+		if constraint.Validated && constraint.Enforced {
+			return NotNullConstraint
+		}
+		// The column carries an unproven NOT NULL (PG 18): SET NOT NULL validates it, whatever else proves it.
 		return NotNullUnproven
 	}
-	oid, snapshotName, ok := s.snapshotColumn(key, name)
-	if !ok {
-		return NotNullUnproven
+
+	// attnotnull, unless the migration dropped it since.
+	if !touched || state.NotNull == nil {
+		if oid, snapshotName, ok := s.snapshotColumn(key, name); ok {
+			if column, ok := s.catalog.relations.columnByName[columnKey{oid, snapshotName}]; ok && column.NotNull {
+				return NotNullAttribute
+			}
+		}
 	}
-	return s.catalog.notNullProof(oid, snapshotName)
+
+	for _, constraint := range constraints {
+		if constraint.Kind == "c" && constraint.Validated && constraint.Enforced && provesNotNull(constraint.Expr, name) {
+			return NotNullCheck
+		}
+	}
+	return NotNullUnproven
+}
+
+// provesNotNull reports whether a CHECK rules out NULL for the column on its own: it is, or ANDs in, one of the two
+// forms PostgreSQL itself recognises, col IS NOT NULL and NOT (col IS NULL). Under an OR it proves nothing.
+func provesNotNull(expr *ir.Expr, column string) bool {
+	if expr == nil {
+		return false
+	}
+	isColumn := func(arg []ir.Expr) bool {
+		return len(arg) == 1 && arg[0].Kind == ir.ExprColumnRef && arg[0].Literal == column
+	}
+	switch {
+	case expr.Kind == ir.ExprBoolean && slices.Equal(expr.Name, []string{"AND"}):
+		for i := range expr.Args {
+			if provesNotNull(&expr.Args[i], column) {
+				return true
+			}
+		}
+	case expr.Kind == ir.ExprNullTest && slices.Equal(expr.Name, []string{"IS NOT NULL"}):
+		return isColumn(expr.Args)
+	case expr.Kind == ir.ExprBoolean && slices.Equal(expr.Name, []string{"NOT"}) && len(expr.Args) == 1:
+		test := expr.Args[0]
+		return test.Kind == ir.ExprNullTest && slices.Equal(test.Name, []string{"IS NULL"}) && isColumn(test.Args)
+	}
+	return false
 }
 
 // ConstraintInfo is one constraint a table holds at this point of the migration.

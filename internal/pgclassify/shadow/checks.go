@@ -102,7 +102,7 @@ func (m *Checks) Record(s Scope) {
 			}
 		case ir.SubSetNotNull:
 			m.markNotNull(s, key, sub.Name, true)
-			m.claimNotNull(s, table, sub.Name, "", false)
+			m.claimNotNull(s, table, sub.Name, "", false, true, true)
 		case ir.SubDropNotNull:
 			m.markNotNull(s, key, sub.Name, false)
 			for _, reached := range s.reached(table) {

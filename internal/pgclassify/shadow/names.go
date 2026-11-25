@@ -59,7 +59,7 @@ func (m *Checks) claimColumn(s Scope, table pgcatalog.RelationInfo, column *ir.C
 		m.claim(s, table, &column.Constraints[i], column.Name)
 	}
 	if column.Generated == ir.GeneratedIdentityAlways || column.Generated == ir.GeneratedIdentityByDefault || isSerial(column.Type) {
-		m.claimNotNull(s, table, column.Name, "", false)
+		m.claimNotNull(s, table, column.Name, "", false, true, true)
 	}
 }
 
@@ -119,7 +119,7 @@ func (m *Checks) claim(s Scope, table pgcatalog.RelationInfo, def *ir.Constraint
 	case ir.ConstraintNotNull:
 		name := ""
 		for _, target := range columns {
-			name = m.claimNotNull(s, table, target, def.Name, def.NoInherit)
+			name = m.claimNotNull(s, table, target, def.Name, def.NoInherit, !def.NotValid, !def.NotEnforced)
 		}
 		return name
 	default:
@@ -147,7 +147,7 @@ func (m *Checks) claim(s Scope, table pgcatalog.RelationInfo, def *ir.Constraint
 	if added.Kind == "p" {
 		// From 18 on a primary key's columns carry a NOT NULL constraint of their own.
 		for _, target := range columns {
-			m.claimNotNull(s, table, target, "", false)
+			m.claimNotNull(s, table, target, "", false, true, true)
 		}
 	}
 	return added.Name
@@ -204,7 +204,8 @@ func (m *Checks) mergeRedundantIndexes(subs []ir.Subcommand) {
 }
 
 // claimNotNull records the NOT NULL constraint PG 18 keeps in pg_constraint, unless the column already carries one.
-func (m *Checks) claimNotNull(s Scope, table pgcatalog.RelationInfo, column, name string, noInherit bool) string {
+// Only ADD CONSTRAINT … NOT NULL can leave it NOT VALID or NOT ENFORCED.
+func (m *Checks) claimNotNull(s Scope, table pgcatalog.RelationInfo, column, name string, noInherit, validated, enforced bool) string {
 	if !s.AtLeast18() || m.holdsNotNull(s, table, column) {
 		return ""
 	}
@@ -212,7 +213,7 @@ func (m *Checks) claimNotNull(s Scope, table pgcatalog.RelationInfo, column, nam
 		name = m.choose(s, table.Name, column, "not_null", false)
 	}
 	added := held{Name: name, ConstraintState: pgcatalog.ConstraintState{
-		Kind: "n", Columns: []string{column}, NoInherit: noInherit, Validated: true, Enforced: true,
+		Kind: "n", Columns: []string{column}, NoInherit: noInherit, Validated: validated, Enforced: enforced,
 	}}
 	m.hold(table.Key(), added)
 	m.clone(s, table, added, column, "not_null")

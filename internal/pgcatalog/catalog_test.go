@@ -4,6 +4,7 @@ import (
 	"apercu-cli/helper"
 	"apercu-cli/internal/pgcatalog/snapshot"
 	"apercu-cli/internal/pgcontract"
+	"apercu-cli/internal/pgparse/ir"
 	"fmt"
 	"testing"
 
@@ -689,7 +690,7 @@ func TestNotNullConstraintOverridesAttnotnull(t *testing.T) {
 	}
 }
 
-// P-14: only the two forms PostgreSQL itself recognises count as a proof.
+// P-14: only the two forms PostgreSQL itself recognises count as a proof, on their own or ANDed in.
 func TestCheckProvesNotNull(t *testing.T) {
 	t.Parallel()
 
@@ -702,6 +703,8 @@ func TestCheckProvesNotNull(t *testing.T) {
 		{def: "CHECK ((NOT (status IS NULL)))", column: "status", expected: true},
 		{def: `CHECK (("order status" IS NOT NULL))`, column: "order status", expected: true},
 		{def: "CHECK ((status is not null))", column: "status", expected: true},
+		{def: "CHECK (((status IS NOT NULL) AND (total >= (0)::numeric)))", column: "status", expected: true},
+		{def: "CHECK (((status IS NOT NULL) OR (total >= (0)::numeric)))", column: "status", expected: false},
 		{def: "CHECK ((status IS NOT NULL))", column: "status_code", expected: false},
 		{def: "CHECK ((order_status IS NOT NULL))", column: "status", expected: false},
 		{def: "CHECK ((status <> ''::text))", column: "status", expected: false},
@@ -709,10 +712,12 @@ func TestCheckProvesNotNull(t *testing.T) {
 		{def: "", column: "status", expected: false},
 	}
 
-	for _, test := range tests {
+	for i, test := range tests {
 		t.Run(fmt.Sprintf("%s/%s", test.column, test.def), func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, test.expected, checkProvesNotNull(test.def, test.column))
+			state := &State{checks: map[snapshot.OID]*ir.Expr{}}
+			expr := state.parsedCheck(snapshot.Constraint{OID: snapshot.OID(i + 1), Def: test.def})
+			assert.Equal(t, test.expected, provesNotNull(expr, test.column))
 		})
 	}
 }
