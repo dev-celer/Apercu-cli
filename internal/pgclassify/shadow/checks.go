@@ -89,7 +89,7 @@ func (m *Checks) Record(s Scope) {
 				targets = s.reached(table)
 			}
 			for _, reached := range targets {
-				m.renameConstraint(s, reached, sub.Name, sub.NewName)
+				m.recorder.RenameConstraint(reached.Key(), sub.Name, sub.NewName)
 			}
 		case ir.SubDropColumn:
 			for _, reached := range s.reached(table) {
@@ -146,18 +146,6 @@ func (m *Checks) dropConstraint(s Scope, table pgcatalog.RelationInfo, name stri
 		}
 	}
 	m.recorder.DeleteConstraint(key, name)
-}
-
-// renameConstraint moves a constraint to its new name, keeping what is known of it.
-func (m *Checks) renameConstraint(s Scope, table pgcatalog.RelationInfo, from, to string) {
-	key := table.Key()
-	constraint, ok := s.State.ConstraintByName(key, from)
-	if !ok {
-		return
-	}
-	constraint.Name, constraint.GeneratedPrefix = to, ""
-	m.hold(key, constraint)
-	m.recorder.DeleteConstraint(key, from)
 }
 
 func (m *Checks) isCheck(s Scope, table pgcatalog.RelationInfo, name string) bool {

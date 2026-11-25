@@ -472,7 +472,7 @@ func (m *Checks) renameIndex(s Scope, to string) {
 		}
 		for _, constraint := range s.State.Constraints(info.Key()) {
 			if constraint.Snapshot.OID != 0 && constraint.Snapshot.IndexID == index.Relation.OID {
-				m.renameConstraint(s, info, constraint.Name, to)
+				m.recorder.RenameConstraint(info.Key(), constraint.Name, to)
 			}
 		}
 		return
@@ -486,7 +486,7 @@ func (m *Checks) renameIndex(s Scope, to string) {
 		if !ok || (named.Schema != "" && named.Schema != info.Name.Schema) || (named.Schema == "" && !slices.Contains(s.Context.SearchPath, info.Name.Schema)) {
 			continue
 		}
-		m.renameConstraint(s, info, named.Table, to)
+		m.recorder.RenameConstraint(info.Key(), named.Table, to)
 		return
 	}
 }

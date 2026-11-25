@@ -90,6 +90,29 @@ func (r *Recorder) DeleteConstraint(key RelationKey, name string) {
 	r.state.overlay.deleteConstraint(key, name)
 }
 
+// RenameConstraint moves a constraint of one table to its new name. The copies cloned from it under a name of their
+// own, on its partitions and, for a FOREIGN KEY, on the table itself, are rewritten to name it under the new one.
+func (r *Recorder) RenameConstraint(key RelationKey, from, to string) {
+	constraint, ok := r.state.ConstraintByName(key, from)
+	if !ok {
+		return
+	}
+	overlay := r.state.overlay
+	for _, holder := range append([]RelationKey{key}, r.state.Descendants(key)...) {
+		for name, state := range overlay.Constraints[holder] {
+			if !state.gone && state.ParentName == from {
+				state.ParentName = to
+				overlay.Constraints[holder][name] = state
+			}
+		}
+	}
+
+	// The new name is the user's, no longer one the server derived.
+	constraint.GeneratedPrefix = ""
+	overlay.setConstraint(key, to, constraint.ConstraintState)
+	overlay.deleteConstraint(key, from)
+}
+
 // RenameColumn moves a column of one table to its new name. The overlay's constraints are rewritten to read the new
 // name, the table's own and the FOREIGN KEYs pointing at it; the snapshot's are read under it by State.
 func (r *Recorder) RenameColumn(key RelationKey, from, to string) {

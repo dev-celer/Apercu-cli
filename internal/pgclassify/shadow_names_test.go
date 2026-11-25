@@ -80,3 +80,55 @@ func TestSnapshotCheckFollowsAColumnSwap(t *testing.T) {
 	assert.Equal(t, []string{"total"}, notNull.Columns)
 	assert.Equal(t, pgcatalog.NotNullCheck, state.NotNullProof(orders.Key(), "total"))
 }
+
+// A copy cloned from a parent's constraint keeps its link to it through a rename of the parent's: a DROP of the
+// parent's under its new name still takes the copy with it.
+func TestClonesFollowTheirParentThroughARename(t *testing.T) {
+	t.Parallel()
+
+	const setup = "CREATE TABLE p (id int) PARTITION BY RANGE (id); " +
+		"CREATE TABLE c PARTITION OF p FOR VALUES FROM (0) TO (10); " +
+		"ALTER TABLE p ADD CONSTRAINT p_key PRIMARY KEY (id); " +
+		"CREATE TABLE r (pid int); " +
+		"ALTER TABLE r ADD CONSTRAINT r_fk FOREIGN KEY (pid) REFERENCES p (id); "
+	cases := []struct {
+		// owner holds the parent's constraint, table its copy.
+		name, rename, owner, table, parent string
+	}{
+		{"an index-backed constraint's copy on a partition", "ALTER TABLE p RENAME CONSTRAINT p_key TO p_id", "p", "c", "p_id"},
+		{"an index-backed constraint renamed through its index", "ALTER INDEX p_key RENAME TO p_id", "p", "c", "p_id"},
+		{"a FOREIGN KEY's row for a referenced partition", "ALTER TABLE r RENAME CONSTRAINT r_fk TO r_ref", "r", "r", "r_ref"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			name := func(table string) helper.FullRelationName {
+				return helper.FullRelationName{Schema: "apercu_snapshot_test", Table: table}
+			}
+			parentOf := func(state *pgcatalog.State) map[string]string {
+				copies := map[string]string{}
+				owner := state.Resolve(name(testCase.table), nil)
+				require.True(t, owner.Exists())
+				for _, constraint := range state.Constraints(owner.Key()) {
+					if constraint.ParentName != "" {
+						copies[constraint.Name] = constraint.ParentName
+					}
+				}
+				return copies
+			}
+
+			classifier := pgclassify.NewClassifier(classifytest.Catalog(t))
+			classifier.Analyze(pgparse.Parse(setup + testCase.rename))
+			copies := parentOf(classifier.State())
+			require.Len(t, copies, 1)
+			for _, parent := range copies {
+				assert.Equal(t, testCase.parent, parent)
+			}
+
+			dropped := pgclassify.NewClassifier(classifytest.Catalog(t))
+			dropped.Analyze(pgparse.Parse(setup + testCase.rename + "; ALTER TABLE " + testCase.owner + " DROP CONSTRAINT " + testCase.parent))
+			assert.Empty(t, parentOf(dropped.State()), "the copy goes with the constraint it was cloned from")
+		})
+	}
+}
