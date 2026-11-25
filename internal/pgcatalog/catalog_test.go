@@ -236,11 +236,11 @@ func TestIndexLookups(t *testing.T) {
 		assert.NotEmpty(t, index.Predicate, "the seeded index is partial")
 
 		// An index names its table nowhere, which is what P-02 is for.
-		table, ok := catalog.TableOfIndex(partial)
+		table, ok := catalog.TableOfIndex(KeyFromOID(partial))
 		require.True(t, ok)
-		assert.Equal(t, "orders", table.Name)
+		assert.Equal(t, "orders", table.Name.Table)
 
-		assert.Len(t, catalog.IndexesOf(orders), 2, "the primary key and the partial index")
+		assert.Len(t, catalog.IndexesOf(KeyFromOID(orders)), 2, "the primary key and the partial index")
 		assert.Empty(t, catalog.InvalidIndexes(orders), "nothing in the fixture is left over from a failed CIC")
 	})
 }
@@ -335,9 +335,7 @@ func TestPartitionTree(t *testing.T) {
 		leafIndexes := catalog.PartitionDescendants(index)
 		assert.Len(t, leafIndexes, 5)
 		for _, key := range leafIndexes {
-			oid, ok := key.OID()
-			require.True(t, ok, "a snapshot relation is keyed by its OID")
-			_, ok = catalog.TableOfIndex(oid)
+			_, ok := catalog.TableOfIndex(key)
 			assert.True(t, ok, "every index of the tree belongs to one partition")
 		}
 	})

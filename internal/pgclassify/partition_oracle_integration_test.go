@@ -84,6 +84,19 @@ CREATE TABLE sc_c3 (id bigint, code text);
 CREATE TABLE sc_c4 (id bigint, code text);
 CREATE TABLE sc_c5 (id bigint, code text);
 CREATE TABLE sc_c6 (id bigint, code text);
+CREATE TABLE sc_i1 (id bigint, code text);
+CREATE TABLE sc_i2 (id bigint, code text);
+CREATE INDEX sc_i2_code_idx ON sc_i2 (code);
+CREATE TABLE sc_ip1 (id bigint, k int NOT NULL) PARTITION BY RANGE (k);
+CREATE TABLE sc_ip1_1 PARTITION OF sc_ip1 FOR VALUES FROM (0) TO (100);
+CREATE TABLE sc_ip2 (id bigint, k int NOT NULL) PARTITION BY RANGE (k);
+CREATE TABLE sc_ip2_1 PARTITION OF sc_ip2 FOR VALUES FROM (0) TO (100);
+CREATE INDEX sc_ip2_id_idx ON sc_ip2 (id);
+CREATE TABLE sc_it2 (id bigint, k int NOT NULL);
+CREATE TABLE sc_ip3 (id bigint, k int NOT NULL) PARTITION BY RANGE (k);
+CREATE TABLE sc_ip3_1 PARTITION OF sc_ip3 FOR VALUES FROM (0) TO (100);
+CREATE TABLE sc_ip3_2 PARTITION OF sc_ip3 FOR VALUES FROM (100) TO (200);
+CREATE INDEX sc_ip3_id_idx ON sc_ip3 (id);
 
 INSERT INTO m SELECT i, i % 200, CASE WHEN i % 3 = 0 THEN 'x' ELSE 'y' END, (i % 200) + 1 FROM generate_series(1, 400) i;
 -- The default partition holds rows outside every bound the scripts attach, so it is never in the way.
@@ -110,6 +123,12 @@ INSERT INTO sc_c3 VALUES (1, 'a');
 INSERT INTO sc_c4 VALUES (1, 'a');
 INSERT INTO sc_c5 VALUES (1, 'a');
 INSERT INTO sc_c6 VALUES (1, 'a');
+INSERT INTO sc_i1 VALUES (1, 'a');
+INSERT INTO sc_i2 VALUES (1, 'a');
+INSERT INTO sc_ip1 VALUES (1, 10);
+INSERT INTO sc_ip2 VALUES (1, 10);
+INSERT INTO sc_it2 VALUES (1, 150);
+INSERT INTO sc_ip3 VALUES (1, 10), (2, 150);
 ANALYZE;
 `
 
@@ -239,6 +258,30 @@ type lockScenario struct {
 }
 
 var lockScenarios = []lockScenario{
+	// An index the setup created belongs to its table, and one it dropped is gone: a table left without an index has
+	// nothing for REINDEX to read.
+	{
+		setup: []string{"CREATE INDEX sc_i1_code_idx ON sc_i1 (code)"},
+		sql:   "REINDEX INDEX sc_i1_code_idx",
+	},
+	{
+		setup: []string{"DROP INDEX sc_i2_code_idx"},
+		sql:   "REINDEX TABLE sc_i2",
+	},
+	// An index built through a partitioned table, or one a partition joined, is a tree: dropping its root reaches the
+	// partitions' indexes and their tables, and no longer a partition the setup detached.
+	{
+		setup: []string{"CREATE INDEX sc_ip1_id_idx ON sc_ip1 (id)"},
+		sql:   "DROP INDEX sc_ip1_id_idx",
+	},
+	{
+		setup: []string{"ALTER TABLE sc_ip2 ATTACH PARTITION sc_it2 FOR VALUES FROM (100) TO (200)"},
+		sql:   "DROP INDEX sc_ip2_id_idx",
+	},
+	{
+		setup: []string{"ALTER TABLE sc_ip3 DETACH PARTITION sc_ip3_2"},
+		sql:   "DROP INDEX sc_ip3_id_idx",
+	},
 	// The column rules read the column as the setup left it: a second retype compares with the first's type, an
 	// added column has the type and NOT NULL it was added with.
 	{

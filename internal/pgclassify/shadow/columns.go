@@ -117,24 +117,24 @@ func (m *Checks) retype(s Scope, table pgcatalog.RelationInfo, def *ir.ColumnDef
 		return
 	}
 	typeID, typeMod := columnType(s, def.Type)
-	for _, reached := range s.reached(table) {
-		state, ok := s.State.ColumnState(reached.Key(), def.Name)
-		if !ok {
-			continue
-		}
+	m.updateReached(s, table, def.Name, func(state *pgcatalog.ColumnState) {
 		state.TypeID, state.TypeMod = typeID, typeMod
-		m.recorder.SetColumn(reached.Key(), def.Name, state)
-	}
+	})
 }
 
 // dropExpression records a generated column turned into a plain one, on every table the clause reaches.
 func (m *Checks) dropExpression(s Scope, table pgcatalog.RelationInfo, column string) {
+	m.updateReached(s, table, column, func(state *pgcatalog.ColumnState) { state.Generated = "" })
+}
+
+// updateReached applies a change to a column on every table a clause reaches that has it.
+func (m *Checks) updateReached(s Scope, table pgcatalog.RelationInfo, column string, update func(*pgcatalog.ColumnState)) {
 	for _, reached := range s.reached(table) {
 		state, ok := s.State.ColumnState(reached.Key(), column)
 		if !ok {
 			continue
 		}
-		state.Generated = ""
+		update(&state)
 		m.recorder.SetColumn(reached.Key(), column, state)
 	}
 }

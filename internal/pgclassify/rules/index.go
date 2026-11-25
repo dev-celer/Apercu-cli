@@ -117,8 +117,19 @@ func ruleReindex(s engine.Scope) engine.Effect {
 		return e
 	}
 
-	// REINDEX TABLE reads the table, and its partitions, to rebuild every index hanging off them.
+	// REINDEX TABLE reads the table, and its partitions, to rebuild every index hanging off them. One with no index
+	// of its own is not read: only its TOAST table's index is rebuilt.
 	e.Below = engine.ToPartitions
+	reads := e.Op
+	e.LeafOp = func(leaf pgcatalog.RelationInfo) pgcontract.OpKind {
+		if len(s.State.IndexesOf(leaf.Key())) == 0 {
+			return pgcontract.OpKindMetadata
+		}
+		return reads
+	}
+	if named.Exists() {
+		e.Op = e.LeafOp(named)
+	}
 	e.Touches = append(e.Touches, indexesOf(s, named, shape.indexLock, shape.indexOp)...)
 	for _, child := range s.DescendantsOf(named) {
 		e.Touches = append(e.Touches, indexesOf(s, s.ByName(child.Relation), shape.indexLock, shape.indexOp)...)
@@ -144,13 +155,13 @@ func indexesOf(s engine.Scope, table pgcatalog.RelationInfo, lock pgcontract.Loc
 		return nil
 	}
 	var targets []engine.Touch
-	for _, index := range s.State.IndexesOf(table.Relation.OID) {
-		rel, ok := s.State.ByOID(index.IndexRelID)
+	for _, index := range s.State.IndexesOf(table.Key()) {
+		info, ok := s.State.RelationByKey(index.Key)
 		if !ok {
 			continue
 		}
 		targets = append(targets, engine.Touch{
-			Info: s.InfoOf(rel),
+			Info: info,
 			Lock: lock,
 			Op:   op,
 			Role: pgcontract.TargetRoleResolved,

@@ -168,8 +168,8 @@ func builtOn(constraint held, column string) bool {
 	return constraint.Kind == "c" && constraint.Expr != nil && stmt.Mentions(constraint.Expr, column)
 }
 
-// dropColumn follows a column the migration drops: the server drops every constraint built on it with it, and, under
-// CASCADE, the foreign keys that point at it.
+// dropColumn follows a column the migration drops: the server drops every constraint and index built on it with it,
+// and, under CASCADE, the foreign keys that point at it.
 func (m *Checks) dropColumn(s Scope, table pgcatalog.RelationInfo, column string) {
 	key := table.Key()
 	for _, constraint := range s.State.Constraints(key) {
@@ -181,6 +181,9 @@ func (m *Checks) dropColumn(s Scope, table pgcatalog.RelationInfo, column string
 		if slices.Contains(reference.Constraint.ReferencedColumns, column) {
 			m.recorder.DeleteConstraint(reference.Table, reference.Constraint.Name)
 		}
+	}
+	for _, index := range s.State.IndexesOn(key, column) {
+		m.recorder.Drop(index.Key)
 	}
 	m.recorder.DeleteColumn(key, column)
 }

@@ -14,13 +14,13 @@ func ruleOwner(s engine.Scope, sub ir.Subcommand) engine.Effect {
 	if !s.Relation().Exists() {
 		return e
 	}
-	for _, index := range s.State.IndexesOf(s.Relation().Relation.OID) {
-		rel, ok := s.State.ByOID(index.IndexRelID)
+	for _, index := range s.State.IndexesOf(s.Relation().Key()) {
+		info, ok := s.State.RelationByKey(index.Key)
 		if !ok {
 			continue
 		}
 		e.Touches = append(e.Touches, engine.Touch{
-			Info: s.InfoOf(rel),
+			Info: info,
 			Lock: pgcontract.LockAccessExclusive,
 			Op:   pgcontract.OpKindMetadata,
 			Role: pgcontract.TargetRoleImplicit,

@@ -1,6 +1,7 @@
 package ir
 
 import (
+	"slices"
 	"strings"
 )
 
@@ -133,4 +134,19 @@ func (e *Expr) IsColumnRef(column string) bool {
 		return false
 	}
 	return strings.EqualFold(e.Literal, column)
+}
+
+// Columns lists the distinct columns an expression reads, in the order it first reads them.
+func (e *Expr) Columns() []string {
+	var columns []string
+	e.Walk(func(node *Expr) bool {
+		if node.Kind == ExprColumnRef {
+			parts := strings.Split(node.Literal, ".")
+			if column := parts[len(parts)-1]; !slices.Contains(columns, column) {
+				columns = append(columns, column)
+			}
+		}
+		return true
+	})
+	return columns
 }

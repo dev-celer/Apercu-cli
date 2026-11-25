@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"apercu-cli/internal/pgcatalog"
-	"apercu-cli/internal/pgcatalog/snapshot"
 	"apercu-cli/internal/pgclassify/prove"
 	"apercu-cli/internal/pgclassify/rules/engine"
 	"apercu-cli/internal/pgcontract"
@@ -152,12 +151,12 @@ func ruleAlterColumnType(s engine.Scope, sub ir.Subcommand) engine.Effect {
 
 	// Check 2 — the indexes over the column are dropped and rebuilt whatever happens to the heap.
 	for _, index := range indexesOn(s, old) {
-		rel, ok := s.State.ByOID(index.IndexRelID)
+		info, ok := s.State.RelationByKey(index.Key)
 		if !ok {
 			continue
 		}
 		e.Touches = append(e.Touches, engine.Touch{
-			Info: s.InfoOf(rel),
+			Info: info,
 			Lock: pgcontract.LockAccessExclusive,
 			Op:   pgcontract.OpKindRewrite,
 			Role: pgcontract.TargetRoleResolved,
@@ -169,18 +168,12 @@ func ruleAlterColumnType(s engine.Scope, sub ir.Subcommand) engine.Effect {
 	return e
 }
 
-// indexesOn lists the indexes that carry a column.
-func indexesOn(s engine.Scope, column pgcatalog.ColumnInfo) []snapshot.Index {
-	if !s.Relation().Exists() || column.Num == 0 {
+// indexesOn lists the indexes that depend on a column.
+func indexesOn(s engine.Scope, column pgcatalog.ColumnInfo) []pgcatalog.IndexInfo {
+	if !s.Relation().Exists() || column.Name == "" {
 		return nil
 	}
-	var out []snapshot.Index
-	for _, index := range s.State.IndexesOf(s.Relation().Relation.OID) {
-		if slices.Contains(index.Columns, column.Num) {
-			out = append(out, index)
-		}
-	}
-	return out
+	return s.State.IndexesOn(s.Relation().Key(), column.Name)
 }
 
 // isTimestampSwap reports the one type change whose cost is a session setting rather than a

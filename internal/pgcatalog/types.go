@@ -515,19 +515,16 @@ func (c *Catalog) formatType(oid snapshot.OID, mod int32) string {
 			return "bpchar"
 		}
 		return length("character")
-	case "bit", "varbit":
-		name := map[string]string{"bit": "bit", "varbit": "bit varying"}[typ.Name]
-		if mod < 0 {
-			return name
-		}
-		return name + "(" + strconv.Itoa(int(mod)) + ")"
+	case "bit":
+		return precision("bit", "")
+	case "varbit":
+		return precision("bit varying", "")
 	case "numeric":
 		if mod < varHdrSz {
 			return "numeric"
 		}
-		packed := mod - varHdrSz
-		scale := ((packed & 0x7ff) ^ 1024) - 1024
-		return "numeric(" + strconv.Itoa(int(packed>>16&0xffff)) + "," + strconv.Itoa(int(scale)) + ")"
+		digits, scale := numericTypmod(mod)
+		return "numeric(" + strconv.Itoa(int(digits)) + "," + strconv.Itoa(int(scale)) + ")"
 	case "timestamp":
 		return precision("timestamp", " without time zone")
 	case "timestamptz":

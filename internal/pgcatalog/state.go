@@ -20,6 +20,9 @@ type State struct {
 
 	// checks caches the snapshot CHECKs parsed back into the IR, keyed on the constraint OID.
 	checks map[snapshot.OID]*ir.Expr
+	// indexDefs caches the snapshot indexes parsed back from their definition, under the snapshot's column names,
+	// keyed on their OID. nil for one that does not parse.
+	indexDefs map[snapshot.OID]*IndexState
 }
 
 // Resolve turns a name from a statement into a relation.
@@ -685,18 +688,138 @@ func (s *State) Index(indexRelID snapshot.OID) (snapshot.Index, bool) {
 	return s.catalog.index(indexRelID)
 }
 
-// TableOfIndex return the table an index is defined on.
-func (s *State) TableOfIndex(indexRelID snapshot.OID) (snapshot.Relation, bool) {
-	index, ok := s.catalog.index(indexRelID)
-	if !ok {
-		return snapshot.Relation{}, false
-	}
-	return s.ByOID(index.RelID)
+// IndexInfo is an index a table has at this point of the migration.
+type IndexInfo struct {
+	Key RelationKey
+	// Snapshot is the snapshot's row for it, zero for an index the migration created.
+	Snapshot snapshot.Index
 }
 
-// IndexesOf lists the indexes on a table.
-func (s *State) IndexesOf(relID snapshot.OID) []snapshot.Index {
-	return s.catalog.indexesOf(relID)
+// TableOfIndex is the table an index is defined on.
+func (s *State) TableOfIndex(index RelationKey) (RelationInfo, bool) {
+	if state, ok := s.overlay.Indexes[index]; ok {
+		return s.RelationByKey(state.Table)
+	}
+	oid, ok := index.OID()
+	if !ok {
+		return RelationInfo{}, false
+	}
+	if _, dropped := s.overlay.DroppedRelations[oid]; dropped {
+		return RelationInfo{}, false
+	}
+	row, ok := s.catalog.index(oid)
+	if !ok {
+		return RelationInfo{}, false
+	}
+	return s.RelationByKey(KeyFromOID(row.RelID))
+}
+
+// IndexesOf lists the indexes a table has at this point of the migration: the snapshot's it did not drop, in snapshot
+// order, then the migration's.
+func (s *State) IndexesOf(table RelationKey) []IndexInfo {
+	var out []IndexInfo
+	if oid, ok := table.OID(); ok {
+		for _, row := range s.catalog.indexesOf(oid) {
+			if _, dropped := s.overlay.DroppedRelations[row.IndexRelID]; dropped {
+				continue
+			}
+			out = append(out, IndexInfo{Key: KeyFromOID(row.IndexRelID), Snapshot: row})
+		}
+	}
+	var created []IndexInfo
+	for key, state := range s.overlay.Indexes {
+		if state.Table == table {
+			created = append(created, IndexInfo{Key: key})
+		}
+	}
+	slices.SortFunc(created, func(a, b IndexInfo) int { return compareKeys(a.Key, b.Key) })
+	return append(out, created...)
+}
+
+// IndexesOn lists the indexes of a table that depend on one of its columns, by the name it goes by now: through their
+// key or INCLUDE columns, or what their expressions and predicate read.
+func (s *State) IndexesOn(table RelationKey, column string) []IndexInfo {
+	var out []IndexInfo
+	for _, index := range s.IndexesOf(table) {
+		if state, ok := s.IndexState(index.Key); ok && slices.Contains(state.Columns, column) {
+			out = append(out, index)
+		}
+	}
+	return out
+}
+
+// IndexState is an index as it stands at this point of the migration, its columns under their current names. A
+// snapshot index is read back from its definition, or from its attnums when that does not parse, which leaves it not
+// Comparable.
+func (s *State) IndexState(index RelationKey) (IndexState, bool) {
+	if state, ok := s.overlay.Indexes[index]; ok {
+		return state.clone(), true
+	}
+	oid, ok := index.OID()
+	if !ok {
+		return IndexState{}, false
+	}
+	if _, dropped := s.overlay.DroppedRelations[oid]; dropped {
+		return IndexState{}, false
+	}
+	row, ok := s.catalog.index(oid)
+	if !ok {
+		return IndexState{}, false
+	}
+	table := KeyFromOID(row.RelID)
+	def, ok := s.indexDefs[oid]
+	if !ok {
+		def = parseIndexDef(row.Def)
+		s.indexDefs[oid] = def
+	}
+	if def == nil {
+		var nums []int16
+		for _, num := range row.Columns {
+			if num != 0 {
+				nums = append(nums, num)
+			}
+		}
+		return IndexState{Table: table, Columns: s.columnNames(table, nums)}, true
+	}
+
+	// The definition names the snapshot's columns: each is read under the name it goes by now.
+	state := def.clone()
+	state.Table, state.Columns = table, nil
+	current := func(name string) (string, bool) {
+		column, ok := s.catalog.relations.columnByName[columnKey{row.RelID, name}]
+		if !ok {
+			return "", false
+		}
+		return s.currentColumn(table, column.Num)
+	}
+	for _, name := range def.Columns {
+		if column, ok := current(name); ok {
+			state.Columns = append(state.Columns, column)
+		}
+	}
+	translate := func(names []string) []string {
+		out := make([]string, 0, len(names))
+		for _, name := range names {
+			column, ok := current(name)
+			if name != "" && !ok {
+				state.Comparable = false
+			}
+			out = append(out, column)
+		}
+		return out
+	}
+	state.Keys, state.Including = translate(def.Keys), translate(def.Including)
+	return state, true
+}
+
+// parseIndexDef reads a snapshot index's definition back, nil when it does not parse.
+func parseIndexDef(def string) *IndexState {
+	statement := pgparse.ParseOne(def)
+	if !statement.Parsed() || len(statement.Subcommands) == 0 || statement.Subcommands[0].Index == nil {
+		return nil
+	}
+	state := NewIndexState(RelationKey{}, statement)
+	return &state
 }
 
 // InvalidIndexes lists the indexes on a table left behind by a failed CREATE INDEX CONCURRENTLY.

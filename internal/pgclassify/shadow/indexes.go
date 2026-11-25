@@ -1,0 +1,144 @@
+package shadow
+
+import (
+	"apercu-cli/helper"
+	"apercu-cli/internal/pgcatalog"
+	"apercu-cli/internal/pgcatalog/snapshot"
+	"apercu-cli/internal/pgclassify/stmt"
+	"apercu-cli/internal/pgcontract"
+	"apercu-cli/internal/pgparse/ir"
+)
+
+// declareIndex records the index a CREATE INDEX builds on a table, under the name it was given or the one the server
+// generates, and, unless ONLY stops it, the index it builds or adopts on each partition.
+func (s *Relations) declareIndex(statement ir.Statement, table pgcatalog.RelationInfo) {
+	sub := statement.Subcommands[0]
+	if sub.Index == nil {
+		return
+	}
+	state := s.recorder.State()
+	var name helper.FullRelationName
+	if len(statement.Relations) > 1 {
+		name = helper.FullRelationName{Schema: table.Name.Schema, Table: statement.Relations[1].Name.Table}
+		if state.Holds(name) {
+			return
+		}
+	} else {
+		name = s.indexName(table.Name, sub.Index.ColumnNames())
+	}
+
+	index := s.recorder.Declare(name, indexRelkind(table))
+	shape := pgcatalog.NewIndexState(table.Key(), statement)
+	s.recorder.SetIndex(index, shape)
+	if statement.Relations[0].Only {
+		return
+	}
+	for _, partition := range s.partitions(table) {
+		s.attachIndex(index, shape, partition)
+	}
+}
+
+// cloneIndexes gives a new partition an index for each index of its parent. The constraints' indexes are left to
+// the constraints, which hold their names.
+func (s *Relations) cloneIndexes(parent, partition pgcatalog.RelationInfo) {
+	state := s.recorder.State()
+	backing := map[snapshot.OID]bool{}
+	for _, constraint := range state.Constraints(parent.Key()) {
+		if constraint.Snapshot.IndexID != 0 {
+			backing[constraint.Snapshot.IndexID] = true
+		}
+	}
+	for _, index := range state.IndexesOf(parent.Key()) {
+		if oid, ok := index.Key.OID(); ok && backing[oid] {
+			continue
+		}
+		shape, ok := state.IndexState(index.Key)
+		if !ok {
+			continue
+		}
+		s.attachIndex(index.Key, shape, partition)
+	}
+}
+
+// attachIndex gives one partition its index in a tree: the one it already has in it, an index of its own that
+// matches and is in no tree yet, or a new one named after the parent index's columns. Its own partitions follow.
+func (s *Relations) attachIndex(parent pgcatalog.RelationKey, shape pgcatalog.IndexState, table pgcatalog.RelationInfo) {
+	state := s.recorder.State()
+	attached := map[pgcatalog.RelationKey]bool{}
+	for _, link := range state.Children(parent) {
+		attached[link.Child] = true
+	}
+	var index pgcatalog.RelationKey
+	found := false
+	for _, candidate := range state.IndexesOf(table.Key()) {
+		if attached[candidate.Key] {
+			return
+		}
+		if found || !shape.Comparable || len(state.Parents(candidate.Key)) > 0 {
+			continue
+		}
+		if own, ok := state.IndexState(candidate.Key); ok && shape.Matches(own) {
+			index, found = candidate.Key, true
+		}
+	}
+	if !found {
+		index = s.recorder.Declare(s.indexName(table.Name, shape.IndexNameSources), indexRelkind(table))
+		shape.Table = table.Key()
+		s.recorder.SetIndex(index, shape)
+	}
+	s.recorder.Link(pgcatalog.Link{Parent: parent, Child: index, ParentIsPartitioned: true})
+	for _, partition := range s.partitions(table) {
+		s.attachIndex(index, shape, partition)
+	}
+}
+
+// detachIndexes takes a detached partition's indexes out of its former parent's trees. They stay on the table.
+func (s *Relations) detachIndexes(parent, partition pgcatalog.RelationInfo) {
+	state := s.recorder.State()
+	for _, index := range state.IndexesOf(partition.Key()) {
+		for _, link := range state.Parents(index.Key) {
+			if owner, ok := state.TableOfIndex(link.Parent); ok && owner.Key() == parent.Key() {
+				s.recorder.Unlink(link.Parent, index.Key)
+			}
+		}
+	}
+}
+
+// partitions is the partitions directly below a table.
+func (s *Relations) partitions(table pgcatalog.RelationInfo) []pgcatalog.RelationInfo {
+	state := s.recorder.State()
+	var out []pgcatalog.RelationInfo
+	for _, link := range state.Children(table.Key()) {
+		if partition, ok := state.RelationByKey(link.Child); ok && link.ParentIsPartitioned {
+			out = append(out, partition)
+		}
+	}
+	return out
+}
+
+// indexRelkind is the relkind of an index on a table: partitioned exactly when the table is.
+func indexRelkind(table pgcatalog.RelationInfo) string {
+	if stmt.PartitionedInfo(table) {
+		return pgcontract.RelationKindPartitionedIndex.Relkind()
+	}
+	return pgcontract.RelationKindIndex.Relkind()
+}
+
+// indexName is the server's ChooseIndexName for a plain index: <table>_<columns>_idx, numbered until no relation of
+// the schema goes by it.
+func (s *Relations) indexName(table helper.FullRelationName, columns []string) helper.FullRelationName {
+	state := s.recorder.State()
+	taken := func(name string) bool {
+		if state.Holds(helper.FullRelationName{Schema: table.Schema, Table: name}) {
+			return true
+		}
+		// The index of a constraint the migration added is not a relation of the overlay: its constraint holds its name.
+		for _, holder := range state.ConstraintsHoldingIndexName(name) {
+			if info, ok := state.RelationByKey(holder.Table); ok && info.Name.Schema == table.Schema {
+				return true
+			}
+		}
+		return false
+	}
+	return helper.FullRelationName{Schema: table.Schema, Table: chooseName(table.Table, nameAddition(columns), "idx", taken)}
+}

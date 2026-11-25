@@ -5,7 +5,6 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"apercu-cli/internal/pgclassify/stmt"
 	"apercu-cli/internal/pgparse"
 
 	"github.com/stretchr/testify/assert"
@@ -31,7 +30,7 @@ func TestGeneratedCheckName(t *testing.T) {
 	columns := func(sql string) []string {
 		statement := pgparse.ParseOne("ALTER TABLE t ADD CHECK (" + sql + ")")
 		require.Len(t, statement.Subcommands, 1, sql)
-		return stmt.ColumnsOf(statement.Subcommands[0].Constraint.Expr)
+		return statement.Subcommands[0].Constraint.Expr.Columns()
 	}
 	assert.Equal(t, []string{"at"}, columns("at IS NOT NULL AND t.at > 0"))
 	assert.Equal(t, []string{"a", "b"}, columns("a < b"))

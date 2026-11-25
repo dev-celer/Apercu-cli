@@ -81,11 +81,8 @@ func (m *Checks) claimColumn(s Scope, table pgcatalog.RelationInfo, column *ir.C
 }
 
 func isSerial(t ir.TypeRef) bool {
-	switch t.Base() {
-	case "serial", "serial2", "serial4", "serial8", "smallserial", "bigserial":
-		return true
-	}
-	return false
+	_, ok := stmt.SerialTypes[t.Base()]
+	return ok
 }
 
 // claim records a constraint the statement adds and returns its name: the one written, or the one the server
@@ -112,7 +109,7 @@ func (m *Checks) claim(s Scope, table pgcatalog.RelationInfo, def *ir.Constraint
 		added.Expr = pgcatalog.Unqualified(def.Expr)
 		added.Columns = nil
 		if added.Expr != nil {
-			added.Columns = stmt.ColumnsOf(added.Expr)
+			added.Columns = added.Expr.Columns()
 		}
 		if len(added.Columns) == 1 {
 			addition = added.Columns[0]
@@ -132,7 +129,7 @@ func (m *Checks) claim(s Scope, table pgcatalog.RelationInfo, def *ir.Constraint
 		addition = nameAddition(append(slices.Clone(columns), def.Including...))
 	case ir.ConstraintExclusion:
 		added.Kind, label = "x", "excl"
-		addition = nameAddition(distinctColumnNames(def.KeyNames))
+		addition = nameAddition(ir.DistinctNames(def.KeyNames))
 	case ir.ConstraintNotNull:
 		name := ""
 		for _, target := range columns {
@@ -406,17 +403,18 @@ func (m *Checks) primaryKeyOf(s Scope, table pgcatalog.RelationInfo) []string {
 // choose is the server's ChooseConstraintName, or ChooseRelationName for a constraint backed by an index, whose name
 // also has to be free among the schema's relations.
 func (m *Checks) choose(s Scope, table helper.FullRelationName, addition, label string, relation bool) string {
-	taken := s.State.ConstraintNamesInSchema(table.Schema)
-	free := func(name string) bool {
-		if taken[name] {
-			return false
-		}
-		return !relation || !s.State.Holds(helper.FullRelationName{Schema: table.Schema, Table: name})
-	}
+	constraints := s.State.ConstraintNamesInSchema(table.Schema)
+	return chooseName(table.Table, addition, label, func(name string) bool {
+		return constraints[name] || (relation && s.State.Holds(helper.FullRelationName{Schema: table.Schema, Table: name}))
+	})
+}
 
-	name := objectName(table.Table, addition, label)
-	for pass := 1; !free(name); pass++ {
-		name = objectName(table.Table, addition, label+strconv.Itoa(pass))
+// chooseName is the numbering of the server's ChooseRelationName: table_addition_label, the label numbered until the
+// name is not taken.
+func chooseName(table, addition, label string, taken func(string) bool) string {
+	name := objectName(table, addition, label)
+	for pass := 1; taken(name); pass++ {
+		name = objectName(table, addition, label+strconv.Itoa(pass))
 	}
 	return name
 }
@@ -434,19 +432,6 @@ func nameAddition(columns []string) string {
 		if len(out) >= maxName {
 			break
 		}
-	}
-	return out
-}
-
-// distinctColumnNames is the end of ChooseIndexColumnNames: a repeated column name gets a number.
-func distinctColumnNames(names []string) []string {
-	out := make([]string, 0, len(names))
-	for _, name := range names {
-		candidate := name
-		for pass := 1; slices.Contains(out, candidate); pass++ {
-			candidate = name + strconv.Itoa(pass)
-		}
-		out = append(out, candidate)
 	}
 	return out
 }
@@ -479,11 +464,7 @@ func (m *Checks) renameIndex(s Scope, to string) {
 	}
 	index := s.Relation()
 	if index.Origin == pgcatalog.OriginExisting {
-		table, ok := s.State.TableOfIndex(index.Relation.OID)
-		if !ok {
-			return
-		}
-		info, ok := s.State.RelationByKey(pgcatalog.KeyFromOID(table.OID))
+		info, ok := s.State.TableOfIndex(index.Key())
 		if !ok {
 			return
 		}

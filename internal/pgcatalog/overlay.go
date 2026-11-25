@@ -90,11 +90,47 @@ func (c ConstraintState) BackedByIndex() bool {
 	return c.Kind == "p" || c.Kind == "u" || c.Kind == "x"
 }
 
-// IndexState is an index the migration created.
+// IndexState is an index the migration created, keyed by its own relation key.
 type IndexState struct {
 	Table RelationKey
-	// Columns are by name, so ALTER TYPE can match.
+	// Columns are the columns it depends on, by their current names so ALTER TYPE and DROP COLUMN can match: its key
+	// and INCLUDE columns, and those its expressions and predicate read.
 	Columns []string
+	// Keys are its key elements in order, the column each names under its current name, empty for an expression, and
+	// Including its INCLUDE columns.
+	Keys, Including []string
+	// IndexNameSources are the names of the index's attributes used to generate a name, column or expressions.
+	IndexNameSources []string
+	Method           string
+	Unique           bool
+	// Comparable says Keys, Including, Method and Unique are the whole definition: no expression, no predicate. Only
+	// such an index is matched against another, the way ATTACH looks for one a partition already has.
+	Comparable bool
+}
+
+// NewIndexState is the index a CREATE INDEX statement builds on a table. The statement holds its index clause.
+func NewIndexState(table RelationKey, statement ir.Statement) IndexState {
+	sub := statement.Subcommands[0]
+	method := sub.Value
+	if method == "" {
+		method = "btree"
+	}
+	return IndexState{
+		Table:            table,
+		Columns:          sub.IndexColumns(),
+		Keys:             sub.Index.Keys,
+		Including:        sub.Index.Including,
+		IndexNameSources: sub.Index.ColumnNames(),
+		Method:           method,
+		Unique:           statement.Flags.Unique,
+		Comparable:       !slices.Contains(sub.Index.Keys, "") && sub.Expr == nil,
+	}
+}
+
+// Matches reports whether two indexes have the same definition, as far as both are Comparable.
+func (i IndexState) Matches(other IndexState) bool {
+	return i.Comparable && other.Comparable && i.Method == other.Method && i.Unique == other.Unique &&
+		slices.Equal(i.Keys, other.Keys) && slices.Equal(i.Including, other.Including)
 }
 
 // TriggerState is a trigger the migration created or dropped.
@@ -178,6 +214,7 @@ func (o *shadowOverlay) drop(key RelationKey) {
 	}
 	delete(o.Columns, key)
 	delete(o.Constraints, key)
+	delete(o.Indexes, key)
 }
 
 // rename moves a relation to its new name.
@@ -232,6 +269,11 @@ func (o *shadowOverlay) setConstraint(key RelationKey, name string, state Constr
 	o.Constraints[key][name] = state.clone()
 }
 
+// setIndex records the table and columns of an index the migration creates.
+func (o *shadowOverlay) setIndex(key RelationKey, state IndexState) {
+	o.Indexes[key] = state.clone()
+}
+
 func (o *shadowOverlay) deleteColumn(key RelationKey, name string) {
 	o.setColumn(key, name, ColumnState{gone: true})
 }
@@ -252,4 +294,12 @@ func (c ConstraintState) clone() ConstraintState {
 	c.Columns = slices.Clone(c.Columns)
 	c.ReferencedColumns = slices.Clone(c.ReferencedColumns)
 	return c
+}
+
+func (i IndexState) clone() IndexState {
+	i.Columns = slices.Clone(i.Columns)
+	i.Keys = slices.Clone(i.Keys)
+	i.Including = slices.Clone(i.Including)
+	i.IndexNameSources = slices.Clone(i.IndexNameSources)
+	return i
 }

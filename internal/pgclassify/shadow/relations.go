@@ -34,24 +34,22 @@ func (s *Relations) declare(statement ir.Statement, context session.Context) {
 	}
 
 	position, creates := creations[statement.Command]
-	if !creates || position >= len(statement.Relations) {
+	if !creates {
+		return
+	}
+	if statement.Command == "CREATE INDEX" && len(statement.Relations) > 0 && len(statement.Subcommands) > 0 {
+		// An index lands in its table's schema, not in the first schema of the search path.
+		if table := s.recorder.State().Resolve(statement.Relations[0].Name, context.SearchPath); table.Exists() {
+			s.declareIndex(statement, table)
+			return
+		}
+	}
+	if position >= len(statement.Relations) {
 		return
 	}
 
 	created := statement.Relations[position]
 	name := created.Name
-	kind := created.Kind
-
-	if statement.Command == "CREATE INDEX" {
-		// An index lands in its table's schema, not in the first schema of the search path,
-		// and it is partitioned exactly when its table is.
-		table := s.recorder.State().Resolve(statement.Relations[0].Name, context.SearchPath)
-		name.Schema = table.Name.Schema
-		if pgcontract.RelationKindFromRelkind(table.Relation.Kind).IsPartitioned() {
-			kind = pgcontract.RelationKindPartitionedIndex
-		}
-	}
-
 	if name.Schema == "" {
 		// An unqualified CREATE lands in the first schema of the search path.
 		name.Schema = context.CreationSchema()
@@ -59,13 +57,16 @@ func (s *Relations) declare(statement ir.Statement, context session.Context) {
 			return
 		}
 	}
-	if relkind := kind.Relkind(); relkind != "" {
-		s.recorder.Declare(helper.FullRelationName{Schema: name.Schema, Table: name.Table}, relkind)
+	relkind := created.Kind.Relkind()
+	if relkind == "" {
+		return
 	}
+	s.recorder.Declare(helper.FullRelationName{Schema: name.Schema, Table: name.Table}, relkind)
 }
 
-// link updates the shadow overlay's parent-child links for the ones a statement draws or breaks,
-// so the statements after it expand through the tree the migration has built so far.
+// link updates the shadow overlay's parent-child links for the ones a statement draws or breaks, and the index trees
+// that follow a partition coming or going, so the statements after it expand through the tree the migration has
+// built so far.
 // The server never combines ATTACH or DETACH with another clause, so the statement's own expansion
 // is the tree before it, and the next one's is the tree after it.
 func (s *Relations) link(statement ir.Statement, context session.Context) {
@@ -90,12 +91,18 @@ func (s *Relations) link(statement ir.Statement, context session.Context) {
 			// CREATE TABLE … PARTITION OF names the new table first and its parent in the clause.
 			s.recorder.Link(pgcatalog.Link{Parent: other.Key(), Child: named.Key(),
 				ParentIsPartitioned: true, IsDefaultPartition: sub.Value == "DEFAULT"})
+			s.cloneIndexes(other, named)
 		case sub.Kind == ir.SubAttachPartition:
-			// ALTER TABLE … ATTACH PARTITION, and ALTER INDEX … ATTACH PARTITION for an index tree.
+			// ALTER TABLE … ATTACH PARTITION, and ALTER INDEX … ATTACH PARTITION for an index tree, which draws its
+			// one edge.
 			s.recorder.Link(pgcatalog.Link{Parent: named.Key(), Child: other.Key(),
 				ParentIsPartitioned: true, IsDefaultPartition: sub.Value == "DEFAULT"})
+			if !pgcontract.RelationKindFromRelkind(named.Relation.Kind).IsIndex() {
+				s.cloneIndexes(named, other)
+			}
 		case sub.Kind == ir.SubDetachPartition:
 			s.recorder.Unlink(named.Key(), other.Key())
+			s.detachIndexes(named, other)
 		case sub.Kind == ir.SubAddInherit:
 			// INHERITS and ALTER TABLE … INHERIT both name the child first.
 			s.recorder.Link(pgcatalog.Link{Parent: other.Key(), Child: named.Key()})
@@ -145,8 +152,8 @@ func (s *Relations) retire(statement ir.Statement, context session.Context) {
 		s.recorder.Rename(info.Key(), helper.FullRelationName{Schema: sub.Value, Table: info.Name.Table})
 		// A table's indexes follow it into the new schema.
 		state := s.recorder.State()
-		for _, index := range state.IndexesOf(info.Relation.OID) {
-			if indexInfo, ok := state.RelationByKey(pgcatalog.KeyFromOID(index.IndexRelID)); ok {
+		for _, index := range state.IndexesOf(info.Key()) {
+			if indexInfo, ok := state.RelationByKey(index.Key); ok {
 				s.recorder.Rename(indexInfo.Key(), helper.FullRelationName{Schema: sub.Value, Table: indexInfo.Name.Table})
 			}
 		}
@@ -180,12 +187,12 @@ func (s *Relations) drop(key pgcatalog.RelationKey, cascade bool) {
 	}
 	for _, key := range dropped {
 		add(key)
+		for _, index := range state.IndexesOf(key) {
+			add(index.Key)
+		}
 		oid, ok := key.OID()
 		if !ok {
 			continue
-		}
-		for _, index := range state.IndexesOf(oid) {
-			add(pgcatalog.KeyFromOID(index.IndexRelID))
 		}
 		if cascade {
 			for _, view := range state.ViewDependents(oid) {
@@ -203,7 +210,8 @@ func (s *Relations) Declare(statement ir.Statement, context session.Context) {
 	s.declare(statement, context)
 }
 
-// Link records the partition and inheritance edges a statement that ran draws or breaks.
+// Link records the partition and inheritance edges a statement that ran draws or breaks, and the index trees that
+// follow them.
 func (s *Relations) Link(statement ir.Statement, context session.Context) {
 	s.link(statement, context)
 }

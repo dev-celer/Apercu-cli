@@ -33,11 +33,38 @@ func normalizeCreateIndex(stmt *pg_query.IndexStmt, s ir.Statement) ir.Statement
 		Options: options(stmt.Options),
 	}
 	sub.Expr = convertExpr(stmt.WhereClause)
+	sub.Index = &ir.IndexDef{Including: indexColumnNames(stmt.IndexIncludingParams)}
+	for _, item := range stmt.IndexParams {
+		elem, ok := item.GetNode().(*pg_query.Node_IndexElem)
+		switch {
+		case !ok:
+		case elem.IndexElem.Name != "":
+			sub.Index.Keys = append(sub.Index.Keys, elem.IndexElem.Name)
+			sub.Index.Names = append(sub.Index.Names, elem.IndexElem.Name)
+		default:
+			sub.Index.Keys = append(sub.Index.Keys, "")
+			sub.Index.Names = append(sub.Index.Names, figureColname(elem.IndexElem.Expr))
+			if expr := convertExpr(elem.IndexElem.Expr); expr != nil {
+				sub.Index.Exprs = append(sub.Index.Exprs, expr)
+			}
+		}
+	}
 	if stmt.TableSpace != "" {
 		sub.Options = append(sub.Options, ir.Option{Name: "tablespace", Value: stmt.TableSpace})
 	}
 	s.Subcommands = []ir.Subcommand{sub}
 	return s
+}
+
+// indexColumnNames is the column names of an INCLUDE list.
+func indexColumnNames(items []*pg_query.Node) []string {
+	var names []string
+	for _, item := range items {
+		if elem, ok := item.GetNode().(*pg_query.Node_IndexElem); ok && elem.IndexElem.Name != "" {
+			names = append(names, elem.IndexElem.Name)
+		}
+	}
+	return names
 }
 
 func normalizeReindex(stmt *pg_query.ReindexStmt, s ir.Statement) ir.Statement {

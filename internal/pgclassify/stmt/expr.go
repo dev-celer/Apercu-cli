@@ -1,7 +1,6 @@
 package stmt
 
 import (
-	"slices"
 	"strings"
 
 	"apercu-cli/internal/pgparse/ir"
@@ -30,21 +29,6 @@ func Mentions(expr *ir.Expr, column string) bool {
 		return !found
 	})
 	return found
-}
-
-// ColumnsOf lists the distinct columns an expression reads, in the order it first reads them.
-func ColumnsOf(expr *ir.Expr) []string {
-	var columns []string
-	expr.Walk(func(node *ir.Expr) bool {
-		if node.Kind == ir.ExprColumnRef {
-			parts := strings.Split(node.Literal, ".")
-			if column := parts[len(parts)-1]; !slices.Contains(columns, column) {
-				columns = append(columns, column)
-			}
-		}
-		return true
-	})
-	return columns
 }
 
 // refersTo reports whether the node is a reference to the column, qualified by its table or not.

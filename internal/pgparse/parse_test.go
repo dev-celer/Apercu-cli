@@ -336,6 +336,39 @@ func TestExclusionKeepsExpressionElements(t *testing.T) {
 	assert.Len(t, mixed.KeyExprs, 1)
 }
 
+// TestIndexKeepsItsKeyInOrder checks that CREATE INDEX keeps each key element in place, a column or an expression, with
+// the name the server would build a generated index name from.
+func TestIndexKeepsItsKeyInOrder(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		sql         string
+		keys, names []string
+	}{
+		{sql: "CREATE INDEX i ON t (a, lower(b), c)", keys: []string{"a", "", "c"}, names: []string{"a", "lower", "c"}},
+		{sql: "CREATE INDEX i ON t ((a::text))", keys: []string{""}, names: []string{"a"}},
+		{sql: "CREATE INDEX i ON t ((1::text))", keys: []string{""}, names: []string{"text"}},
+		{sql: "CREATE INDEX i ON t ((a + b))", keys: []string{""}, names: []string{""}},
+		{sql: "CREATE INDEX i ON t ((CASE WHEN a THEN 1 END))", keys: []string{""}, names: []string{"case"}},
+		{sql: "CREATE INDEX i ON t ((s.f(a)), (ROW(a, b)))", keys: []string{"", ""}, names: []string{"f", "row"}},
+	}
+	for _, testCase := range cases {
+		statement := ParseOne(testCase.sql)
+		require.Len(t, statement.Subcommands, 1)
+		index := statement.Subcommands[0].Index
+		require.NotNil(t, index, testCase.sql)
+		assert.Equal(t, testCase.keys, index.Keys, testCase.sql)
+		assert.Equal(t, testCase.names, index.Names, testCase.sql)
+		expressions := 0
+		for _, key := range testCase.keys {
+			if key == "" {
+				expressions++
+			}
+		}
+		assert.Len(t, index.Exprs, expressions, testCase.sql)
+	}
+}
+
 func TestPartitionByMakesTheNewTablePartitioned(t *testing.T) {
 	t.Parallel()
 

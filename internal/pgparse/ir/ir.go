@@ -2,6 +2,8 @@
 package ir
 
 import (
+	"slices"
+	"strconv"
 	"strings"
 
 	"apercu-cli/helper"
@@ -120,6 +122,8 @@ type Subcommand struct {
 	Column *ColumnDef
 	// Constraint carries the definition of ADD CONSTRAINT and the attributes of ALTER CONSTRAINT.
 	Constraint *ConstraintDef
+	// Index carries the key of CREATE INDEX.
+	Index *IndexDef
 	// Relations are the extra relations the clause names.
 	Relations []RelationRef
 	// Options is the parenthesized list of a SET/RESET clause, empty otherwise.
@@ -135,6 +139,73 @@ type Subcommand struct {
 	Bound *PartitionBound
 	// Flags are the clause's own modifiers.
 	Flags Flags
+}
+
+// IndexDef is the key of a CREATE INDEX. Its predicate is the clause's Expr.
+type IndexDef struct {
+	// Keys are the key elements in order: the column each one names, empty for an expression. Exprs are the
+	// expressions, in the same order.
+	Keys  []string
+	Exprs []*Expr
+	// Names are the name each key element lends to a generated index name: its column, or the one the server figures
+	// for the expression, empty when it figures none.
+	Names []string
+	// Including are the INCLUDE columns.
+	Including []string
+}
+
+// ColumnNames is the server's ChooseIndexColumnNames: the names the index's own columns go by, which a generated
+// index name is built from and its partitions' indexes inherit. Each key element lends its name, "expr" when it lends
+// none, then come the INCLUDE columns; a repeated name gets a number.
+func (d *IndexDef) ColumnNames() []string {
+	names := make([]string, 0, len(d.Names)+len(d.Including))
+	for _, name := range d.Names {
+		if name == "" {
+			name = "expr"
+		}
+		names = append(names, name)
+	}
+	return DistinctNames(append(names, d.Including...))
+}
+
+// DistinctNames numbers each name already taken earlier in the list, the way the server keeps an index's column
+// names apart.
+func DistinctNames(names []string) []string {
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		candidate := name
+		for pass := 1; slices.Contains(out, candidate); pass++ {
+			candidate = name + strconv.Itoa(pass)
+		}
+		out = append(out, candidate)
+	}
+	return out
+}
+
+// IndexColumns is the columns a CREATE INDEX depends on: its key and INCLUDE columns, and those its expressions and
+// predicate read. Nil for a clause that is not one.
+func (s Subcommand) IndexColumns() []string {
+	if s.Index == nil {
+		return nil
+	}
+	columns := []string{}
+	add := func(names ...string) {
+		for _, name := range names {
+			if !slices.Contains(columns, name) {
+				columns = append(columns, name)
+			}
+		}
+	}
+	for _, key := range s.Index.Keys {
+		if key != "" {
+			add(key)
+		}
+	}
+	add(s.Index.Including...)
+	for _, expr := range append(slices.Clone(s.Index.Exprs), s.Expr) {
+		add(expr.Columns()...)
+	}
+	return columns
 }
 
 // PartitionBound is a FOR VALUES clause or DEFAULT, as written.

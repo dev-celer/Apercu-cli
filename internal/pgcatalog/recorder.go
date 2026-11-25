@@ -17,7 +17,7 @@ type Recorder struct {
 }
 
 func NewRecorder(catalog *Catalog) *Recorder {
-	return &Recorder{state: &State{catalog: catalog, overlay: newShadowOverlay(), checks: map[snapshot.OID]*ir.Expr{}}}
+	return &Recorder{state: &State{catalog: catalog, overlay: newShadowOverlay(), checks: map[snapshot.OID]*ir.Expr{}, indexDefs: map[snapshot.OID]*IndexState{}}}
 }
 
 func (r *Recorder) State() *State { return r.state }
@@ -90,6 +90,11 @@ func (r *Recorder) DeleteConstraint(key RelationKey, name string) {
 	r.state.overlay.deleteConstraint(key, name)
 }
 
+// SetIndex records the table and the columns of an index the migration creates.
+func (r *Recorder) SetIndex(key RelationKey, state IndexState) {
+	r.state.overlay.setIndex(key, state)
+}
+
 // RenameConstraint moves a constraint of one table to its new name. The copies cloned from it under a name of their
 // own, on its partitions and, for a FOREIGN KEY, on the table itself, are rewritten to name it under the new one.
 func (r *Recorder) RenameConstraint(key RelationKey, from, to string) {
@@ -114,7 +119,8 @@ func (r *Recorder) RenameConstraint(key RelationKey, from, to string) {
 }
 
 // RenameColumn moves a column of one table to its new name. The overlay's constraints are rewritten to read the new
-// name, the table's own and the FOREIGN KEYs pointing at it; the snapshot's are read under it by State.
+// name, the table's own and the FOREIGN KEYs pointing at it, and so are its indexes; the snapshot's are read under it
+// by State.
 func (r *Recorder) RenameColumn(key RelationKey, from, to string) {
 	overlay := r.state.overlay
 	names := map[string]string{from: to}
@@ -136,19 +142,31 @@ func (r *Recorder) RenameColumn(key RelationKey, from, to string) {
 		}
 	}
 
+	for index, state := range overlay.Indexes {
+		if state.Table == key {
+			state.Columns = renameColumns(state.Columns, from, to)
+			state.Keys = renameColumns(state.Keys, from, to)
+			state.Including = renameColumns(state.Including, from, to)
+			overlay.Indexes[index] = state
+		}
+	}
+
 	column, _ := r.state.ColumnState(key, from)
 	overlay.setColumn(key, to, column)
 	overlay.deleteColumn(key, from)
 }
 
-// renameColumns copies a column list with one column renamed.
+// renameColumns copies a column list with one column renamed, wherever it appears.
 func renameColumns(columns []string, from, to string) []string {
-	i := slices.Index(columns, from)
-	if i < 0 {
+	if !slices.Contains(columns, from) {
 		return columns
 	}
 	columns = slices.Clone(columns)
-	columns[i] = to
+	for i, column := range columns {
+		if column == from {
+			columns[i] = to
+		}
+	}
 	return columns
 }
 

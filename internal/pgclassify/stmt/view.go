@@ -137,7 +137,7 @@ func (s View) DescendantsOf(info pgcatalog.RelationInfo) []Descendant {
 // TypeOf resolves a type a statement names. A serial is the integer type behind it.
 func (s View) TypeOf(ref ir.TypeRef) (snapshot.Type, bool) {
 	schema, name := ref.Schema(), ref.Base()
-	if integer, ok := serialTypes[name]; ok && schema == "" {
+	if integer, ok := SerialTypes[name]; ok && schema == "" {
 		schema, name = "pg_catalog", integer
 	}
 	base, ok := s.State.TypeByName(schema, name, s.Context.SearchPath)
@@ -147,7 +147,8 @@ func (s View) TypeOf(ref ir.TypeRef) (snapshot.Type, bool) {
 	return s.State.ArrayOf(base.OID)
 }
 
-var serialTypes = map[string]string{
+// SerialTypes maps each serial spelling to the integer type behind it.
+var SerialTypes = map[string]string{
 	"smallserial": "int2", "serial2": "int2",
 	"serial": "int4", "serial4": "int4",
 	"bigserial": "int8", "serial8": "int8",
@@ -166,11 +167,11 @@ func (s View) TableOfIndex(index pgcatalog.RelationInfo) (pgcontract.Relation, b
 	if !index.Exists() {
 		return pgcontract.Relation{}, false
 	}
-	table, ok := s.State.TableOfIndex(index.Relation.OID)
+	table, ok := s.State.TableOfIndex(index.Key())
 	if !ok {
 		return pgcontract.Relation{}, false
 	}
-	return table.Contract(), true
+	return Contract(table), true
 }
 
 // RowTrigger reports whether a trigger of the named table fires per row, which is what clones it

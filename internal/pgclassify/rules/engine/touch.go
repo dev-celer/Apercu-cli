@@ -109,12 +109,12 @@ func (s Scope) owningTable(t Touch, index pgcatalog.RelationInfo, role pgcontrac
 	if !pgcontract.RelationKindFromRelkind(index.Relation.Kind).IsIndex() {
 		return nil
 	}
-	table, ok := s.State.TableOfIndex(index.Relation.OID)
+	table, ok := s.State.TableOfIndex(index.Key())
 	if !ok {
 		return nil
 	}
 	return []pgcontract.Target{{
-		Relation: table.Contract(),
+		Relation: stmt.Contract(table),
 		Lock:     t.TableLock,
 		OpKind:   pgcontract.OpKindMetadata,
 		Role:     role,
