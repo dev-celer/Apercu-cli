@@ -175,13 +175,13 @@ func (s View) TableOfIndex(index pgcatalog.RelationInfo) (pgcontract.Relation, b
 }
 
 // RowTrigger reports whether a trigger of the named table fires per row, which is what clones it
-// onto the partitions. A trigger the snapshot does not know, or a clause naming them all, reads as one that does.
+// onto the partitions. A trigger the migration does not know, or a clause naming them all, reads as one that does.
 func (s View) RowTrigger(name string) bool {
 	if name == "" || !s.Relation().Exists() {
 		return true
 	}
-	trigger, ok := s.State.TriggerByName(s.Relation().Relation.OID, name)
-	return !ok || trigger.Row()
+	trigger, ok := s.State.TriggerByName(s.Relation().Key(), name)
+	return !ok || trigger.Row
 }
 
 // Sources is every relation the CREATE TABLE / CREATE VIEW statement names after the one it creates.

@@ -113,6 +113,13 @@ CREATE TABLE sc_kp1_1a PARTITION OF sc_kp1_1 FOR VALUES FROM (0) TO (50);
 CREATE TABLE sc_kp2 (id bigint NOT NULL, k int NOT NULL, PRIMARY KEY (id, k)) PARTITION BY RANGE (k);
 CREATE TABLE sc_kp2_1 PARTITION OF sc_kp2 FOR VALUES FROM (0) TO (100);
 CREATE TABLE sc_kt2 (id bigint NOT NULL, k int NOT NULL);
+CREATE TABLE sc_tg1 (id bigint, k int NOT NULL) PARTITION BY RANGE (k);
+CREATE TABLE sc_tg1_1 PARTITION OF sc_tg1 FOR VALUES FROM (0) TO (100);
+CREATE TABLE sc_tg2 (id bigint, k int NOT NULL) PARTITION BY RANGE (k);
+CREATE TABLE sc_tg2_1 PARTITION OF sc_tg2 FOR VALUES FROM (0) TO (100);
+CREATE TABLE sc_tg3 (id bigint, k int NOT NULL) PARTITION BY RANGE (k);
+CREATE TABLE sc_tg3_1 PARTITION OF sc_tg3 FOR VALUES FROM (0) TO (100);
+CREATE TRIGGER sc_tg3_t AFTER UPDATE ON sc_tg3 FOR EACH STATEMENT EXECUTE FUNCTION bump();
 
 INSERT INTO m SELECT i, i % 200, CASE WHEN i % 3 = 0 THEN 'x' ELSE 'y' END, (i % 200) + 1 FROM generate_series(1, 400) i;
 -- The default partition holds rows outside every bound the scripts attach, so it is never in the way.
@@ -157,6 +164,9 @@ INSERT INTO sc_k9 VALUES (1, 'a');
 INSERT INTO sc_kp1 VALUES (1, 10);
 INSERT INTO sc_kp2 VALUES (1, 10);
 INSERT INTO sc_kt2 VALUES (1, 150);
+INSERT INTO sc_tg1 VALUES (1, 10);
+INSERT INTO sc_tg2 VALUES (1, 10);
+INSERT INTO sc_tg3 VALUES (1, 10);
 ANALYZE;
 `
 
@@ -366,6 +376,26 @@ var lockScenarios = []lockScenario{
 	{
 		setup: []string{"ALTER TABLE sc_kp2 ATTACH PARTITION sc_kt2 FOR VALUES FROM (100) TO (200)"},
 		sql:   "REINDEX TABLE sc_kt2",
+	},
+	// A trigger reaches the partitions when it fires per row, as the setup left it: a statement trigger it created,
+	// or created and renamed, has no clone to reach, and one it turned into a row trigger has.
+	{
+		setup: []string{"CREATE TRIGGER sc_tg1_s AFTER UPDATE ON sc_tg1 FOR EACH STATEMENT EXECUTE FUNCTION bump()"},
+		sql:   "DROP TRIGGER sc_tg1_s ON sc_tg1",
+	},
+	{
+		setup: []string{
+			"CREATE TRIGGER sc_tg2_s AFTER UPDATE ON sc_tg2 FOR EACH STATEMENT EXECUTE FUNCTION bump()",
+			"ALTER TRIGGER sc_tg2_s ON sc_tg2 RENAME TO sc_tg2_s2",
+		},
+		sql: "ALTER TABLE sc_tg2 DISABLE TRIGGER sc_tg2_s2",
+	},
+	{
+		setup: []string{
+			"DROP TRIGGER sc_tg3_t ON sc_tg3",
+			"CREATE TRIGGER sc_tg3_t BEFORE UPDATE ON sc_tg3 FOR EACH ROW EXECUTE FUNCTION bump()",
+		},
+		sql: "ALTER TABLE sc_tg3 DISABLE TRIGGER sc_tg3_t",
 	},
 	// The column rules read the column as the setup left it: a second retype compares with the first's type, an
 	// added column has the type and NOT NULL it was added with.

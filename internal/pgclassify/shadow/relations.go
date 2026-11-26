@@ -65,8 +65,8 @@ func (s *Relations) declare(statement ir.Statement, context session.Context) {
 }
 
 // link updates the shadow overlay's parent-child links for the ones a statement draws or breaks, and the index trees
-// that follow a partition coming or going, so the statements after it expand through the tree the migration has
-// built so far.
+// and trigger clones that follow a partition coming or going, so the statements after it expand through the tree the
+// migration has built so far. It also records the triggers a statement creates, renames or drops.
 // The server never combines ATTACH or DETACH with another clause, so the statement's own expansion
 // is the tree before it, and the next one's is the tree after it.
 func (s *Relations) link(statement ir.Statement, context session.Context) {
@@ -77,6 +77,7 @@ func (s *Relations) link(statement ir.Statement, context session.Context) {
 	if !ok {
 		return
 	}
+	s.triggers(statement, named)
 
 	for _, sub := range statement.Subcommands {
 		if len(sub.Relations) == 0 {
@@ -92,6 +93,7 @@ func (s *Relations) link(statement ir.Statement, context session.Context) {
 			s.recorder.Link(pgcatalog.Link{Parent: other.Key(), Child: named.Key(),
 				ParentIsPartitioned: true, IsDefaultPartition: sub.Value == "DEFAULT"})
 			s.cloneIndexes(other, named)
+			s.cloneTriggers(other, named)
 		case sub.Kind == ir.SubAttachPartition:
 			// ALTER TABLE … ATTACH PARTITION, and ALTER INDEX … ATTACH PARTITION for an index tree, which draws its
 			// one edge.
@@ -99,8 +101,10 @@ func (s *Relations) link(statement ir.Statement, context session.Context) {
 				ParentIsPartitioned: true, IsDefaultPartition: sub.Value == "DEFAULT"})
 			if !pgcontract.RelationKindFromRelkind(named.Relation.Kind).IsIndex() {
 				s.cloneIndexes(named, other)
+				s.cloneTriggers(named, other)
 			}
 		case sub.Kind == ir.SubDetachPartition:
+			s.detachTriggers(named, other)
 			s.recorder.Unlink(named.Key(), other.Key())
 			s.detachIndexes(named, other)
 		case sub.Kind == ir.SubAddInherit:
@@ -210,8 +214,8 @@ func (s *Relations) Declare(statement ir.Statement, context session.Context) {
 	s.declare(statement, context)
 }
 
-// Link records the partition and inheritance edges a statement that ran draws or breaks, and the index trees that
-// follow them.
+// Link records the partition and inheritance edges a statement that ran draws or breaks, and the index trees and
+// trigger clones that follow them, and the triggers it creates, renames or drops.
 func (s *Relations) Link(statement ir.Statement, context session.Context) {
 	s.link(statement, context)
 }

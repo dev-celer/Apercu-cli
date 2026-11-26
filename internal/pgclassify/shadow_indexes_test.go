@@ -128,19 +128,25 @@ func TestRulesReadTheMigrationsIndexes(t *testing.T) {
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
-
-			analyses := classifytest.Analyze(t, classifytest.Catalog(t), testCase.script)
-			last := analyses[len(analyses)-1]
-			assert.Empty(t, last.Errors)
-			finding := classifytest.FindingOf(t, last, testCase.code)
-			names := classifytest.TargetNames(&finding)
-			for _, index := range testCase.named {
-				assert.Contains(t, names, "apercu_snapshot_test."+index, finding.Message)
-			}
-			for _, index := range testCase.absent {
-				assert.NotContains(t, names, "apercu_snapshot_test."+index, finding.Message)
-			}
+			assertLastTargets(t, testCase.script, testCase.code, testCase.named, testCase.absent)
 		})
+	}
+}
+
+// assertLastTargets checks that the script's last statement raises code naming the named objects of the schema, and
+// none of the absent ones.
+func assertLastTargets(t *testing.T, script string, code pgcontract.Code, named, absent []string) {
+	t.Helper()
+	analyses := classifytest.Analyze(t, classifytest.Catalog(t), script)
+	last := analyses[len(analyses)-1]
+	assert.Empty(t, last.Errors)
+	finding := classifytest.FindingOf(t, last, code)
+	names := classifytest.TargetNames(&finding)
+	for _, name := range named {
+		assert.Contains(t, names, "apercu_snapshot_test."+name, finding.Message)
+	}
+	for _, name := range absent {
+		assert.NotContains(t, names, "apercu_snapshot_test."+name, finding.Message)
 	}
 }
 

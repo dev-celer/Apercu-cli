@@ -90,6 +90,26 @@ func (r *Recorder) DeleteConstraint(key RelationKey, name string) {
 	r.state.overlay.deleteConstraint(key, name)
 }
 
+// SetTrigger records the state of a trigger under the name it goes by now.
+func (r *Recorder) SetTrigger(key RelationKey, name string, state TriggerState) {
+	r.state.overlay.setTrigger(key, name, state)
+}
+
+// DeleteTrigger records that no trigger of the table goes by this name any more: dropped, or renamed away.
+func (r *Recorder) DeleteTrigger(key RelationKey, name string) {
+	r.state.overlay.deleteTrigger(key, name)
+}
+
+// RenameTrigger moves a trigger of one table to its new name.
+func (r *Recorder) RenameTrigger(key RelationKey, from, to string) {
+	trigger, ok := r.state.TriggerByName(key, from)
+	if !ok {
+		return
+	}
+	r.state.overlay.setTrigger(key, to, trigger.TriggerState)
+	r.state.overlay.deleteTrigger(key, from)
+}
+
 // SetIndex records the table and the columns of an index the migration creates.
 func (r *Recorder) SetIndex(key RelationKey, state IndexState) {
 	r.state.overlay.setIndex(key, state)

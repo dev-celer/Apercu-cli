@@ -286,13 +286,7 @@ func (s *State) ColumnNames(key RelationKey) []string {
 	for _, column := range s.Columns(key) {
 		out = append(out, column.Name)
 	}
-	var added []string
-	for name, state := range s.overlay.Columns[key] {
-		if !state.gone && state.SnapshotNum == 0 {
-			added = append(added, name)
-		}
-	}
-	slices.Sort(added)
+	added := liveNames(s.overlay.Columns[key], func(state ColumnState) bool { return !state.gone && state.SnapshotNum == 0 })
 	return append(out, added...)
 }
 
@@ -509,17 +503,23 @@ func (s *State) Constraints(key RelationKey) []ConstraintInfo {
 		}
 	}
 	held := s.overlay.Constraints[key]
-	names := make([]string, 0, len(held))
+	for _, name := range liveNames(held, func(state ConstraintState) bool { return !state.gone }) {
+		out = append(out, s.fromOverlay(key, name, held[name]))
+	}
+	return out
+}
+
+// liveNames lists by name the overlay entries of a table that keep accepts, the ones a listing gives after the
+// snapshot's.
+func liveNames[T any](held map[string]T, keep func(T) bool) []string {
+	var names []string
 	for name, state := range held {
-		if !state.gone {
+		if keep(state) {
 			names = append(names, name)
 		}
 	}
 	slices.Sort(names)
-	for _, name := range names {
-		out = append(out, s.fromOverlay(key, name, held[name]))
-	}
-	return out
+	return names
 }
 
 // Reference is a FOREIGN KEY, and the table that holds it.
@@ -861,19 +861,49 @@ func (s *State) SequencesOwnedBy(relID snapshot.OID) []snapshot.Sequence {
 	return s.catalog.relations.sequencesOwned[relID]
 }
 
-// TriggerByName resolves a user trigger by its table and name.
-func (s *State) TriggerByName(relID snapshot.OID, name string) (snapshot.Trigger, bool) {
-	for _, trigger := range s.catalog.relations.triggers[relID] {
-		if trigger.Name == name {
-			return trigger, true
-		}
-	}
-	return snapshot.Trigger{}, false
+// TriggerInfo is a user trigger of a table at this point of the migration.
+type TriggerInfo struct {
+	Name string
+	TriggerState
 }
 
-// TriggersOf lists the user triggers of a relation.
-func (s *State) TriggersOf(relID snapshot.OID) []snapshot.Trigger {
-	return s.catalog.relations.triggers[relID]
+// TriggerByName resolves a user trigger by its table and name.
+func (s *State) TriggerByName(key RelationKey, name string) (TriggerInfo, bool) {
+	if state, ok := s.overlay.Triggers[key][name]; ok {
+		return TriggerInfo{Name: name, TriggerState: state}, !state.gone
+	}
+	oid, ok := key.OID()
+	if !ok {
+		return TriggerInfo{}, false
+	}
+	for _, trigger := range s.catalog.relations.triggers[oid] {
+		if trigger.Name == name {
+			return fromSnapshotTrigger(trigger), true
+		}
+	}
+	return TriggerInfo{}, false
+}
+
+// TriggersOf lists the user triggers a table holds at this point of the migration: the snapshot's the overlay holds
+// nothing about, in snapshot order, then the overlay's by name.
+func (s *State) TriggersOf(key RelationKey) []TriggerInfo {
+	var out []TriggerInfo
+	held := s.overlay.Triggers[key]
+	if oid, ok := key.OID(); ok {
+		for _, trigger := range s.catalog.relations.triggers[oid] {
+			if _, ok := held[trigger.Name]; !ok {
+				out = append(out, fromSnapshotTrigger(trigger))
+			}
+		}
+	}
+	for _, name := range liveNames(held, func(state TriggerState) bool { return !state.gone }) {
+		out = append(out, TriggerInfo{Name: name, TriggerState: held[name]})
+	}
+	return out
+}
+
+func fromSnapshotTrigger(trigger snapshot.Trigger) TriggerInfo {
+	return TriggerInfo{Name: trigger.Name, TriggerState: TriggerState{Row: trigger.Row()}}
 }
 
 // ViewDependents lists the views and matviews built on a relation.

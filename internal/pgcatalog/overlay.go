@@ -133,8 +133,13 @@ func (i IndexState) Matches(other IndexState) bool {
 		slices.Equal(i.Keys, other.Keys) && slices.Equal(i.Including, other.Including)
 }
 
-// TriggerState is a trigger the migration created or dropped.
-type TriggerState struct{}
+// TriggerState is a trigger the migration touched.
+type TriggerState struct {
+	// gone marks a name no trigger goes by any more: dropped, or renamed away, the new name having its own entry.
+	gone bool
+	// Row is FOR EACH ROW, the only kind a partitioned table clones onto its partitions.
+	Row bool
+}
 
 // SequenceOwner is the column a sequence the migration touched belongs to.
 type SequenceOwner struct{}
@@ -215,6 +220,7 @@ func (o *shadowOverlay) drop(key RelationKey) {
 	delete(o.Columns, key)
 	delete(o.Constraints, key)
 	delete(o.Indexes, key)
+	delete(o.Triggers, key)
 }
 
 // rename moves a relation to its new name.
@@ -272,6 +278,18 @@ func (o *shadowOverlay) setConstraint(key RelationKey, name string, state Constr
 // setIndex records the table and columns of an index the migration creates.
 func (o *shadowOverlay) setIndex(key RelationKey, state IndexState) {
 	o.Indexes[key] = state.clone()
+}
+
+// setTrigger records a change to a trigger.
+func (o *shadowOverlay) setTrigger(key RelationKey, name string, state TriggerState) {
+	if o.Triggers[key] == nil {
+		o.Triggers[key] = map[string]TriggerState{}
+	}
+	o.Triggers[key][name] = state
+}
+
+func (o *shadowOverlay) deleteTrigger(key RelationKey, name string) {
+	o.setTrigger(key, name, TriggerState{gone: true})
 }
 
 func (o *shadowOverlay) deleteColumn(key RelationKey, name string) {

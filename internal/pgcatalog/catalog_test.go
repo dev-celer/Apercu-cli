@@ -352,15 +352,15 @@ func TestPartitionedIndexSizeSumsItsLeaves(t *testing.T) {
 
 func TestTriggerLookup(t *testing.T) {
 	eachVersion(t, func(t *testing.T, catalog *State, _ int) {
-		orders := findOID(t, catalog, "orders")
+		orders := findKey(t, catalog, "orders")
 
 		row, ok := catalog.TriggerByName(orders, "orders_bump")
 		require.True(t, ok)
-		assert.True(t, row.Row())
+		assert.True(t, row.Row)
 
 		statement, ok := catalog.TriggerByName(orders, "orders_audit")
 		require.True(t, ok)
-		assert.False(t, statement.Row(), "a statement trigger is never cloned onto partitions")
+		assert.False(t, statement.Row, "a statement trigger is never cloned onto partitions")
 
 		_, ok = catalog.TriggerByName(orders, "missing")
 		assert.False(t, ok)
