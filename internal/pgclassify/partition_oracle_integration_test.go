@@ -97,6 +97,22 @@ CREATE TABLE sc_ip3 (id bigint, k int NOT NULL) PARTITION BY RANGE (k);
 CREATE TABLE sc_ip3_1 PARTITION OF sc_ip3 FOR VALUES FROM (0) TO (100);
 CREATE TABLE sc_ip3_2 PARTITION OF sc_ip3 FOR VALUES FROM (100) TO (200);
 CREATE INDEX sc_ip3_id_idx ON sc_ip3 (id);
+CREATE TABLE sc_k1 (id bigint, code text);
+CREATE TABLE sc_k2 (id bigint, code text);
+CREATE TABLE sc_k3 (id bigint PRIMARY KEY, code text);
+CREATE TABLE sc_k4 (id bigint, code text);
+CREATE TABLE sc_k5 (id bigint, code text);
+CREATE TABLE sc_k6 (id bigint, code text);
+CREATE UNIQUE INDEX sc_k6_code_idx ON sc_k6 (code);
+CREATE TABLE sc_k7 (id bigint PRIMARY KEY, code text);
+CREATE TABLE sc_k8 (id bigint PRIMARY KEY, code text);
+CREATE TABLE sc_k9 (id bigint, code text UNIQUE);
+CREATE TABLE sc_kp1 (id bigint NOT NULL, k int NOT NULL) PARTITION BY RANGE (k);
+CREATE TABLE sc_kp1_1 PARTITION OF sc_kp1 FOR VALUES FROM (0) TO (100) PARTITION BY RANGE (k);
+CREATE TABLE sc_kp1_1a PARTITION OF sc_kp1_1 FOR VALUES FROM (0) TO (50);
+CREATE TABLE sc_kp2 (id bigint NOT NULL, k int NOT NULL, PRIMARY KEY (id, k)) PARTITION BY RANGE (k);
+CREATE TABLE sc_kp2_1 PARTITION OF sc_kp2 FOR VALUES FROM (0) TO (100);
+CREATE TABLE sc_kt2 (id bigint NOT NULL, k int NOT NULL);
 
 INSERT INTO m SELECT i, i % 200, CASE WHEN i % 3 = 0 THEN 'x' ELSE 'y' END, (i % 200) + 1 FROM generate_series(1, 400) i;
 -- The default partition holds rows outside every bound the scripts attach, so it is never in the way.
@@ -129,6 +145,18 @@ INSERT INTO sc_ip1 VALUES (1, 10);
 INSERT INTO sc_ip2 VALUES (1, 10);
 INSERT INTO sc_it2 VALUES (1, 150);
 INSERT INTO sc_ip3 VALUES (1, 10), (2, 150);
+INSERT INTO sc_k1 VALUES (1, 'a');
+INSERT INTO sc_k2 VALUES (1, 'a');
+INSERT INTO sc_k3 VALUES (1, 'a');
+INSERT INTO sc_k4 VALUES (1, 'a');
+INSERT INTO sc_k5 VALUES (1, 'a');
+INSERT INTO sc_k6 VALUES (1, 'a');
+INSERT INTO sc_k7 VALUES (1, 'a');
+INSERT INTO sc_k8 VALUES (1, 'a');
+INSERT INTO sc_k9 VALUES (1, 'a');
+INSERT INTO sc_kp1 VALUES (1, 10);
+INSERT INTO sc_kp2 VALUES (1, 10);
+INSERT INTO sc_kt2 VALUES (1, 150);
 ANALYZE;
 `
 
@@ -281,6 +309,63 @@ var lockScenarios = []lockScenario{
 	{
 		setup: []string{"ALTER TABLE sc_ip3 DETACH PARTITION sc_ip3_2"},
 		sql:   "DROP INDEX sc_ip3_id_idx",
+	},
+	// The index behind a constraint the setup added is a relation of its table, under the constraint's name, and goes
+	// with the constraint: a table left without one has nothing for REINDEX to read.
+	{
+		setup: []string{"ALTER TABLE sc_k1 ADD CONSTRAINT sc_k1_code_key UNIQUE (code)"},
+		sql:   "REINDEX INDEX sc_k1_code_key",
+	},
+	{
+		setup: []string{
+			"ALTER TABLE sc_k2 ADD CONSTRAINT sc_k2_k UNIQUE (code)",
+			"ALTER TABLE sc_k2 RENAME CONSTRAINT sc_k2_k TO sc_k2_k2",
+		},
+		sql: "REINDEX INDEX sc_k2_k2",
+	},
+	{
+		setup: []string{"ALTER TABLE sc_k3 DROP CONSTRAINT sc_k3_pkey"},
+		sql:   "REINDEX TABLE sc_k3",
+	},
+	// The server names the index of a key it generates a name for, for each kind of key.
+	{
+		setup: []string{"ALTER TABLE sc_k4 ADD PRIMARY KEY (id)"},
+		sql:   "REINDEX INDEX sc_k4_pkey",
+	},
+	{
+		setup: []string{"ALTER TABLE sc_k5 ADD EXCLUDE USING btree (code WITH =)"},
+		sql:   "REINDEX INDEX sc_k5_code_excl",
+	},
+	// USING INDEX hands an existing index the constraint's name.
+	{
+		setup: []string{"ALTER TABLE sc_k6 ADD CONSTRAINT sc_k6_code_key UNIQUE USING INDEX sc_k6_code_idx"},
+		sql:   "REINDEX INDEX sc_k6_code_key",
+	},
+	// Renaming the index renames its constraint, and renaming a snapshot constraint renames its index.
+	{
+		setup: []string{
+			"ALTER INDEX sc_k7_pkey RENAME TO sc_k7_pk",
+			"ALTER TABLE sc_k7 DROP CONSTRAINT sc_k7_pk",
+		},
+		sql: "REINDEX TABLE sc_k7",
+	},
+	{
+		setup: []string{"ALTER TABLE sc_k8 RENAME CONSTRAINT sc_k8_pkey TO sc_k8_pk"},
+		sql:   "REINDEX INDEX sc_k8_pk",
+	},
+	// Dropping a key's column drops the key, with its index.
+	{
+		setup: []string{"ALTER TABLE sc_k9 DROP COLUMN code"},
+		sql:   "REINDEX TABLE sc_k9",
+	},
+	// A key on a partitioned table builds an index on every partition below it, a partition attached later included.
+	{
+		setup: []string{"ALTER TABLE sc_kp1 ADD PRIMARY KEY (id, k)"},
+		sql:   "REINDEX TABLE sc_kp1_1a",
+	},
+	{
+		setup: []string{"ALTER TABLE sc_kp2 ATTACH PARTITION sc_kt2 FOR VALUES FROM (100) TO (200)"},
+		sql:   "REINDEX TABLE sc_kt2",
 	},
 	// The column rules read the column as the setup left it: a second retype compares with the first's type, an
 	// added column has the type and NOT NULL it was added with.

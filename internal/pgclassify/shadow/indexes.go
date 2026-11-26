@@ -1,9 +1,10 @@
 package shadow
 
 import (
+	"iter"
+
 	"apercu-cli/helper"
 	"apercu-cli/internal/pgcatalog"
-	"apercu-cli/internal/pgcatalog/snapshot"
 	"apercu-cli/internal/pgclassify/stmt"
 	"apercu-cli/internal/pgcontract"
 	"apercu-cli/internal/pgparse/ir"
@@ -24,7 +25,7 @@ func (s *Relations) declareIndex(statement ir.Statement, table pgcatalog.Relatio
 			return
 		}
 	} else {
-		name = s.indexName(table.Name, sub.Index.ColumnNames())
+		name = indexName(state, table.Name, sub.Index.ColumnNames())
 	}
 
 	index := s.recorder.Declare(name, indexRelkind(table))
@@ -41,22 +42,8 @@ func (s *Relations) declareIndex(statement ir.Statement, table pgcatalog.Relatio
 // cloneIndexes gives a new partition an index for each index of its parent. The constraints' indexes are left to
 // the constraints, which hold their names.
 func (s *Relations) cloneIndexes(parent, partition pgcatalog.RelationInfo) {
-	state := s.recorder.State()
-	backing := map[snapshot.OID]bool{}
-	for _, constraint := range state.Constraints(parent.Key()) {
-		if constraint.Snapshot.IndexID != 0 {
-			backing[constraint.Snapshot.IndexID] = true
-		}
-	}
-	for _, index := range state.IndexesOf(parent.Key()) {
-		if oid, ok := index.Key.OID(); ok && backing[oid] {
-			continue
-		}
-		shape, ok := state.IndexState(index.Key)
-		if !ok {
-			continue
-		}
-		s.attachIndex(index.Key, shape, partition)
+	for index, shape := range plainIndexes(s.recorder.State(), parent) {
+		s.attachIndex(index, shape, partition)
 	}
 }
 
@@ -82,9 +69,7 @@ func (s *Relations) attachIndex(parent pgcatalog.RelationKey, shape pgcatalog.In
 		}
 	}
 	if !found {
-		index = s.recorder.Declare(s.indexName(table.Name, shape.IndexNameSources), indexRelkind(table))
-		shape.Table = table.Key()
-		s.recorder.SetIndex(index, shape)
+		index = declareIndexOn(s.recorder, table, indexName(state, table.Name, shape.IndexNameSources), shape)
 	}
 	s.recorder.Link(pgcatalog.Link{Parent: parent, Child: index, ParentIsPartitioned: true})
 	for _, partition := range s.partitions(table) {
@@ -126,19 +111,43 @@ func indexRelkind(table pgcatalog.RelationInfo) string {
 
 // indexName is the server's ChooseIndexName for a plain index: <table>_<columns>_idx, numbered until no relation of
 // the schema goes by it.
-func (s *Relations) indexName(table helper.FullRelationName, columns []string) helper.FullRelationName {
-	state := s.recorder.State()
+func indexName(state *pgcatalog.State, table helper.FullRelationName, columns []string) helper.FullRelationName {
 	taken := func(name string) bool {
-		if state.Holds(helper.FullRelationName{Schema: table.Schema, Table: name}) {
-			return true
-		}
-		// The index of a constraint the migration added is not a relation of the overlay: its constraint holds its name.
-		for _, holder := range state.ConstraintsHoldingIndexName(name) {
-			if info, ok := state.RelationByKey(holder.Table); ok && info.Name.Schema == table.Schema {
-				return true
-			}
-		}
-		return false
+		return state.Holds(helper.FullRelationName{Schema: table.Schema, Table: name})
 	}
 	return helper.FullRelationName{Schema: table.Schema, Table: chooseName(table.Table, nameAddition(columns), "idx", taken)}
+}
+
+// declareIndexOn records an index of a table under a name, of the kind the table calls for, and returns its key.
+func declareIndexOn(recorder *pgcatalog.Recorder, table pgcatalog.RelationInfo, name helper.FullRelationName, shape pgcatalog.IndexState) pgcatalog.RelationKey {
+	index := recorder.Declare(name, indexRelkind(table))
+	shape.Table = table.Key()
+	recorder.SetIndex(index, shape)
+	return index
+}
+
+// plainIndexes is the indexes of a table that back no constraint, with their shape: the ones a copy of the table
+// gets under names of its own.
+func plainIndexes(state *pgcatalog.State, table pgcatalog.RelationInfo) iter.Seq2[pgcatalog.RelationKey, pgcatalog.IndexState] {
+	return func(yield func(pgcatalog.RelationKey, pgcatalog.IndexState) bool) {
+		for _, index := range state.IndexesOf(table.Key()) {
+			if backsConstraint(state, table, index) {
+				continue
+			}
+			if shape, ok := state.IndexState(index.Key); ok && !yield(index.Key, shape) {
+				return
+			}
+		}
+	}
+}
+
+// backsConstraint reports whether an index enforces one of its table's PRIMARY KEY, UNIQUE or EXCLUDE: the server
+// keeps the two under the same name.
+func backsConstraint(state *pgcatalog.State, table pgcatalog.RelationInfo, index pgcatalog.IndexInfo) bool {
+	info, ok := state.RelationByKey(index.Key)
+	if !ok {
+		return false
+	}
+	constraint, ok := state.ConstraintByName(table.Key(), info.Name.Table)
+	return ok && constraint.BackedByIndex()
 }

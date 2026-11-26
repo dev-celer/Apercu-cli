@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 
+	"apercu-cli/helper"
 	"apercu-cli/internal/pgcatalog"
 	"apercu-cli/internal/pgclassify/stmt"
 	"apercu-cli/internal/pgcontract"
@@ -90,6 +91,12 @@ func (m *Checks) Record(s Scope) {
 				m.dropConstraint(s, reached, sub.Name)
 			}
 		case ir.SubRenameConstraint:
+			// The index behind a PRIMARY KEY, UNIQUE or EXCLUDE takes the new name too.
+			if constraint, ok := s.State.ConstraintByName(key, sub.Name); ok {
+				if index, ok := indexBehind(s, key, constraint); ok {
+					m.recorder.Rename(index, helper.FullRelationName{Schema: table.Name.Schema, Table: sub.NewName})
+				}
+			}
 			// Only a CHECK has copies on the children under the same name for the rename to reach.
 			targets := []pgcatalog.RelationInfo{table}
 			if m.isCheck(s, table, sub.Name) {
@@ -136,23 +143,27 @@ func (m *Checks) addConstraint(s Scope, table pgcatalog.RelationInfo, constraint
 func (m *Checks) dropConstraint(s Scope, table pgcatalog.RelationInfo, name string) {
 	key := table.Key()
 	constraint, known := s.State.ConstraintByName(key, name)
-	if known && constraint.Kind == "n" {
+	if !known {
+		if s.State.Blind() {
+			// DDL this file cannot read can have taken a name in the schema and moved the server's suffix: no unnamed
+			// CHECK the dropped name could be proves anything any more, though its name stays taken.
+			for _, held := range s.State.Constraints(key) {
+				if held.GeneratedPrefix != "" && strings.HasPrefix(name, held.GeneratedPrefix) {
+					held.Expr = nil
+					m.hold(key, held)
+				}
+			}
+		}
+		m.recorder.DeleteConstraint(key, name)
+		return
+	}
+	if constraint.Kind == "n" {
 		// A PG 18 NOT NULL constraint: the column goes back to nullable.
 		for _, column := range constraint.Columns {
 			m.markNotNull(s, key, column, false)
 		}
 	}
-	if !known && s.State.Blind() {
-		// DDL this file cannot read can have taken a name in the schema and moved the server's suffix: no unnamed
-		// CHECK the dropped name could be proves anything any more, though its name stays taken.
-		for _, held := range s.State.Constraints(key) {
-			if held.GeneratedPrefix != "" && strings.HasPrefix(name, held.GeneratedPrefix) {
-				held.Expr = nil
-				m.hold(key, held)
-			}
-		}
-	}
-	m.recorder.DeleteConstraint(key, name)
+	m.deleteConstraint(s, key, constraint)
 }
 
 func (m *Checks) isCheck(s Scope, table pgcatalog.RelationInfo, name string) bool {
@@ -174,7 +185,7 @@ func (m *Checks) dropColumn(s Scope, table pgcatalog.RelationInfo, column string
 	key := table.Key()
 	for _, constraint := range s.State.Constraints(key) {
 		if builtOn(constraint, column) {
-			m.recorder.DeleteConstraint(key, constraint.Name)
+			m.deleteConstraint(s, key, constraint)
 		}
 	}
 	for _, reference := range s.State.ReferencesTo(key) {

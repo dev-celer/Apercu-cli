@@ -555,19 +555,6 @@ func (s *State) ReferencesTo(key RelationKey) []Reference {
 	return out
 }
 
-// ConstraintsHoldingIndexName lists the constraints the migration built whose index goes by a name, ordered by table.
-// Such an index is not a relation of the overlay: only its constraint holds the name.
-func (s *State) ConstraintsHoldingIndexName(name string) []Reference {
-	var out []Reference
-	for table, held := range s.overlay.Constraints {
-		if state, ok := held[name]; ok && !state.gone && state.BackedByIndex() {
-			out = append(out, Reference{Table: table, Constraint: s.fromOverlay(table, name, state)})
-		}
-	}
-	slices.SortFunc(out, func(a, b Reference) int { return compareKeys(a.Table, b.Table) })
-	return out
-}
-
 // ConstraintNamesInSchema lists the constraint names a schema holds at this point of the migration, those of its
 // relations and those of its domains: the namespace the server keeps generated constraint names unique in.
 func (s *State) ConstraintNamesInSchema(schema string) map[string]bool {
@@ -734,6 +721,22 @@ func (s *State) IndexesOf(table RelationKey) []IndexInfo {
 	}
 	slices.SortFunc(created, func(a, b IndexInfo) int { return compareKeys(a.Key, b.Key) })
 	return append(out, created...)
+}
+
+// IndexByName return an index on a table by its name, which it holds in the table's schema.
+func (s *State) IndexByName(table RelationKey, name string) (RelationKey, bool) {
+	owner, ok := s.RelationByKey(table)
+	if !ok {
+		return RelationKey{}, false
+	}
+	index, ok := s.find(helper.FullRelationName{Schema: owner.Name.Schema, Table: name})
+	if !ok {
+		return RelationKey{}, false
+	}
+	if of, ok := s.TableOfIndex(index.Key()); !ok || of.Key() != table {
+		return RelationKey{}, false
+	}
+	return index.Key(), true
 }
 
 // IndexesOn lists the indexes of a table that depend on one of its columns, by the name it goes by now: through their

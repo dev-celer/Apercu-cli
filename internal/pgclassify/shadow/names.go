@@ -153,6 +153,9 @@ func (m *Checks) claim(s Scope, table pgcatalog.RelationInfo, def *ir.Constraint
 		}
 	}
 	m.hold(table.Key(), added)
+	if added.BackedByIndex() {
+		m.declareConstraintIndex(s, table, def, added.Name, columns)
+	}
 	m.clone(s, table, added, addition, label)
 	if added.Kind == "f" {
 		m.cloneReferenced(s, table, added, addition)
@@ -257,12 +260,21 @@ func (m *Checks) clone(s Scope, table pgcatalog.RelationInfo, parent held, addit
 	default:
 		below = s.State.PartitionDescendants(table.Key())
 	}
+	shape := m.indexShape(s, table, parent)
+	names := map[pgcatalog.RelationKey]string{table.Key(): parent.Name}
+	var targets []pgcatalog.RelationInfo
 	for _, key := range below {
 		child, ok := s.State.RelationByKey(key)
 		if !ok {
 			continue
 		}
-		m.copyTo(s, child, parent, addition, label)
+		if name := m.copyTo(s, child, parent, shape, addition, label); name != "" {
+			names[key] = name
+			targets = append(targets, child)
+		}
+	}
+	if parent.BackedByIndex() {
+		m.linkIndexes(s, targets, names)
 	}
 }
 
@@ -291,18 +303,21 @@ func (m *Checks) numbered(s Scope, schema, name string) string {
 	}
 }
 
-// copyTo gives one table its copy of a parent's constraint. The copy is the migration's, whatever the parent's is.
-func (m *Checks) copyTo(s Scope, child pgcatalog.RelationInfo, parent held, addition, label string) {
+// copyTo gives one table its copy of a parent's constraint and returns its name, empty when the table needs none.
+// The copy is the migration's, whatever the parent's is; an index-backed one gets an index built like shape.
+func (m *Checks) copyTo(s Scope, child pgcatalog.RelationInfo, parent held, shape pgcatalog.IndexState, addition, label string) string {
 	if parent.Kind == "n" && m.holdsNotNull(s, child, parent.Columns[0]) {
-		return
+		return ""
 	}
 	copied := parent
 	copied.SnapshotOID, copied.Snapshot = 0, snapshot.Constraint{}
 	if parent.BackedByIndex() {
 		copied.ParentName = parent.Name
 		copied.Name = m.choose(s, child.Name, addition, label, true)
+		m.buildIndex(s, child, copied.Name, shape)
 	}
 	m.hold(child.Key(), copied)
+	return copied.Name
 }
 
 // inherit gives a new child the copies of what its parent holds, for CREATE TABLE … PARTITION OF, INHERITS and ATTACH.
@@ -322,17 +337,26 @@ func (m *Checks) inherit(s Scope, parent, child pgcatalog.RelationInfo, partitio
 			continue
 		}
 		label, addition := nameParts(constraint)
+		shape := m.indexShape(s, parent, constraint)
+		names := map[pgcatalog.RelationKey]string{parent.Key(): constraint.Name}
 		for _, target := range targets {
-			if !m.holdsEquivalent(s, target, constraint) {
-				m.copyTo(s, target, constraint, addition, label)
+			name, adopted := m.equivalentOn(s, target, constraint)
+			if !adopted {
+				name = m.copyTo(s, target, constraint, shape, addition, label)
 			}
+			if name != "" {
+				names[target.Key()] = name
+			}
+		}
+		if constraint.BackedByIndex() {
+			m.linkIndexes(s, targets, names)
 		}
 	}
 }
 
-// holdsEquivalent reports whether a table already has what a parent's constraint would give it, which is what an
-// ATTACH adopts instead of creating another.
-func (m *Checks) holdsEquivalent(s Scope, table pgcatalog.RelationInfo, parent held) bool {
+// equivalentOn is the constraint a table already has that gives it what a parent's constraint would, which is what
+// an ATTACH adopts instead of creating another.
+func (m *Checks) equivalentOn(s Scope, table pgcatalog.RelationInfo, parent held) (string, bool) {
 	// Before 17 the server matched on the index alone, so a UNIQUE could stand in for a PRIMARY KEY and the other way round.
 	matches := func(kind string) bool {
 		if kind == parent.Kind {
@@ -346,14 +370,15 @@ func (m *Checks) holdsEquivalent(s Scope, table pgcatalog.RelationInfo, parent h
 			continue
 		}
 		if constraint.Name == parent.Name || (constraint.Kind != "c" && slices.Equal(constraint.Columns, parent.Columns)) {
-			return true
+			return constraint.Name, true
 		}
 	}
-	return false
+	return "", false
 }
 
 // like copies what CREATE TABLE … LIKE takes from its source: CHECKs keep their names, index-backed constraints get
-// new ones from the new table, and PG 18 carries the NOT NULL constraints whatever the options.
+// new ones from the new table, and PG 18 carries the NOT NULL constraints whatever the options. INCLUDING INDEXES
+// also copies the plain indexes, under names generated from the new table.
 func (m *Checks) like(s Scope, table, source pgcatalog.RelationInfo, flags ir.Flags) {
 	if !source.Exists() {
 		return
@@ -366,11 +391,19 @@ func (m *Checks) like(s Scope, table, source pgcatalog.RelationInfo, flags ir.Fl
 			constraint.References = pgcatalog.RelationKey{}
 			m.hold(table.Key(), constraint)
 		case constraint.BackedByIndex() && flags.LikeIndexes:
+			shape := m.indexShape(s, source, constraint)
 			constraint.Name = m.choose(s, table.Name, addition, label, true)
 			m.hold(table.Key(), constraint)
+			m.buildIndex(s, table, constraint.Name, shape)
 		case constraint.Kind == "n":
 			m.hold(table.Key(), constraint)
 		}
+	}
+	if !flags.LikeIndexes {
+		return
+	}
+	for _, shape := range plainIndexes(s.State, source) {
+		declareIndexOn(m.recorder, table, indexName(s.State, table.Name, shape.IndexNameSources), shape)
 	}
 }
 
@@ -448,10 +481,10 @@ func (m *Checks) dropClones(s Scope, table pgcatalog.RelationInfo, name string) 
 		for _, constraint := range s.State.Constraints(key) {
 			switch {
 			case constraint.ParentName == name:
-				m.recorder.DeleteConstraint(key, constraint.Name)
+				m.deleteConstraint(s, key, constraint)
 			case constraint.Snapshot.OID != 0 && parents[constraint.Snapshot.ParentID]:
 				parents[constraint.Snapshot.OID] = true
-				m.recorder.DeleteConstraint(key, constraint.Name)
+				m.deleteConstraint(s, key, constraint)
 			}
 		}
 	}
@@ -459,33 +492,16 @@ func (m *Checks) dropClones(s Scope, table pgcatalog.RelationInfo, name string) 
 
 // renameIndex follows a rename of an index that backs a constraint: the constraint takes the index's new name.
 func (m *Checks) renameIndex(s Scope, to string) {
-	if len(s.Statement.Relations) == 0 {
-		return
-	}
 	index := s.Relation()
-	if index.Origin == pgcatalog.OriginExisting {
-		info, ok := s.State.TableOfIndex(index.Key())
-		if !ok {
-			return
-		}
-		for _, constraint := range s.State.Constraints(info.Key()) {
-			if constraint.Snapshot.OID != 0 && constraint.Snapshot.IndexID == index.Relation.OID {
-				m.recorder.RenameConstraint(info.Key(), constraint.Name, to)
-			}
-		}
+	if !index.Exists() {
 		return
 	}
-
-	// An index the migration's own constraint built is not a relation of the shadow overlay, its name is only held
-	// by the constraint.
-	named := s.Statement.Relations[0].Name
-	for _, holder := range s.State.ConstraintsHoldingIndexName(named.Table) {
-		info, ok := s.State.RelationByKey(holder.Table)
-		if !ok || (named.Schema != "" && named.Schema != info.Name.Schema) || (named.Schema == "" && !slices.Contains(s.Context.SearchPath, info.Name.Schema)) {
-			continue
-		}
-		m.recorder.RenameConstraint(info.Key(), named.Table, to)
+	table, ok := s.State.TableOfIndex(index.Key())
+	if !ok {
 		return
+	}
+	if constraint, ok := s.State.ConstraintByName(table.Key(), index.Name.Table); ok && constraint.BackedByIndex() {
+		m.recorder.RenameConstraint(table.Key(), constraint.Name, to)
 	}
 }
 
