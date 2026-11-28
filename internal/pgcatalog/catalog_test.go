@@ -282,14 +282,15 @@ func TestConstraintAndForeignKeyGraph(t *testing.T) {
 // P-05
 func TestSequenceOwner(t *testing.T) {
 	eachVersion(t, func(t *testing.T, catalog *State, _ int) {
-		users := findOID(t, catalog, "users")
+		users := findKey(t, catalog, "users")
+		sequence := findKey(t, catalog, "users_id_seq")
 
-		owner, attnum, ok := catalog.SequenceOwner(findOID(t, catalog, "users_id_seq"))
+		owner, ok := catalog.SequenceOwner(sequence)
 		require.True(t, ok)
-		assert.Equal(t, users, owner)
-		assert.EqualValues(t, 1, attnum)
+		assert.Equal(t, SequenceOwner{Table: users, Column: "id"}, owner, "a serial's sequence, not an identity's")
+		assert.Equal(t, []RelationKey{sequence}, catalog.SequencesOwnedBy(users))
 
-		_, _, ok = catalog.SequenceOwner(findOID(t, catalog, "standalone_seq"))
+		_, ok = catalog.SequenceOwner(findKey(t, catalog, "standalone_seq"))
 		assert.False(t, ok, "a standalone sequence has no owner")
 	})
 }

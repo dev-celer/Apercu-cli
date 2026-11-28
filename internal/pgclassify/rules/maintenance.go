@@ -128,13 +128,13 @@ func ownedSequenceTargets(s engine.Scope, info pgcatalog.RelationInfo) []engine.
 		return nil
 	}
 	var targets []engine.Touch
-	for _, sequence := range s.State.SequencesOwnedBy(info.Relation.OID) {
-		rel, ok := s.State.ByOID(sequence.SeqRelID)
+	for _, key := range s.State.SequencesOwnedBy(info.Key()) {
+		sequence, ok := s.State.RelationByKey(key)
 		if !ok {
 			continue
 		}
 		targets = append(targets, engine.Touch{
-			Info: s.InfoOf(rel),
+			Info: sequence,
 			Lock: pgcontract.LockAccessExclusive,
 			Op:   pgcontract.OpKindMetadata,
 			Role: pgcontract.TargetRoleImplicit,

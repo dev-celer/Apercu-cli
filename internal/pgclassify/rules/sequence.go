@@ -21,20 +21,15 @@ func sequenceOwner(s engine.Scope, info pgcatalog.RelationInfo) (string, string,
 	if !info.Exists() {
 		return "", "", false
 	}
-	relID, num, owned := s.State.SequenceOwner(info.Relation.OID)
+	owner, owned := s.State.SequenceOwner(info.Key())
 	if !owned {
 		return "", "", false
 	}
-	table, ok := s.State.ByOID(relID)
+	table, ok := s.State.RelationByKey(owner.Table)
 	if !ok {
 		return "", "", false
 	}
-	for _, column := range s.State.Columns(pgcatalog.KeyFromOID(relID)) {
-		if column.Num == num {
-			return table.RelationName().String(), column.Name, true
-		}
-	}
-	return table.RelationName().String(), "", true
+	return table.Name.String(), owner.Column, true
 }
 
 // ruleCreateSequence is R-OB-CREATESEQ.

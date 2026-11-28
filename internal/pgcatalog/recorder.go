@@ -110,6 +110,11 @@ func (r *Recorder) RenameTrigger(key RelationKey, from, to string) {
 	r.state.overlay.deleteTrigger(key, from)
 }
 
+// SetSequenceOwner records the column a sequence belongs to, none for a standalone one.
+func (r *Recorder) SetSequenceOwner(sequence RelationKey, owner SequenceOwner) {
+	r.state.overlay.OwnedSequences[sequence] = owner
+}
+
 // SetIndex records the table and the columns of an index the migration creates.
 func (r *Recorder) SetIndex(key RelationKey, state IndexState) {
 	r.state.overlay.setIndex(key, state)
@@ -139,8 +144,8 @@ func (r *Recorder) RenameConstraint(key RelationKey, from, to string) {
 }
 
 // RenameColumn moves a column of one table to its new name. The overlay's constraints are rewritten to read the new
-// name, the table's own and the FOREIGN KEYs pointing at it, and so are its indexes; the snapshot's are read under it
-// by State.
+// name, the table's own and the FOREIGN KEYs pointing at it, and so are its indexes and the sequences it owns; the
+// snapshot's are read under it by State.
 func (r *Recorder) RenameColumn(key RelationKey, from, to string) {
 	overlay := r.state.overlay
 	names := map[string]string{from: to}
@@ -168,6 +173,13 @@ func (r *Recorder) RenameColumn(key RelationKey, from, to string) {
 			state.Keys = renameColumns(state.Keys, from, to)
 			state.Including = renameColumns(state.Including, from, to)
 			overlay.Indexes[index] = state
+		}
+	}
+
+	for sequence, owner := range overlay.OwnedSequences {
+		if owner.Table == key && owner.Column == from {
+			owner.Column = to
+			overlay.OwnedSequences[sequence] = owner
 		}
 	}
 

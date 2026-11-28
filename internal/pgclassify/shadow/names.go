@@ -52,10 +52,14 @@ func (m *Checks) recordCreate(s Scope) {
 		switch sub.Kind {
 		case ir.SubAddColumn:
 			m.claimColumn(s, table, sub.Column)
+			m.addSequence(s, table, sub.Column)
 		case ir.SubAddConstraint:
 			m.claim(s, table, sub.Constraint, "")
 			m.addConstraint(s, table, sub.Constraint)
 		case ir.SubLike:
+			if len(sub.Relations) > 0 && sub.Flags.LikeIdentity {
+				m.likeIdentities(s, table, s.Resolve(sub.Relations[0]))
+			}
 			if len(sub.Relations) > 0 {
 				m.like(s, table, s.Resolve(sub.Relations[0]), sub.Flags)
 			}

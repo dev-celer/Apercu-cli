@@ -154,11 +154,15 @@ func (s *Relations) retire(statement ir.Statement, context session.Context) {
 		s.recorder.Rename(info.Key(), helper.FullRelationName{Schema: info.Name.Schema, Table: sub.NewName})
 	case moves && sub.Kind == ir.SubSetSchema:
 		s.recorder.Rename(info.Key(), helper.FullRelationName{Schema: sub.Value, Table: info.Name.Table})
-		// A table's indexes follow it into the new schema.
+		// A table's indexes and the sequences it owns follow it into the new schema.
 		state := s.recorder.State()
+		followers := state.SequencesOwnedBy(info.Key())
 		for _, index := range state.IndexesOf(info.Key()) {
-			if indexInfo, ok := state.RelationByKey(index.Key); ok {
-				s.recorder.Rename(indexInfo.Key(), helper.FullRelationName{Schema: sub.Value, Table: indexInfo.Name.Table})
+			followers = append(followers, index.Key)
+		}
+		for _, key := range followers {
+			if follower, ok := state.RelationByKey(key); ok {
+				s.recorder.Rename(key, helper.FullRelationName{Schema: sub.Value, Table: follower.Name.Table})
 			}
 		}
 	}
@@ -171,7 +175,7 @@ func (s *Relations) resolve(ref ir.RelationRef, context session.Context) (pgcata
 }
 
 // drop removes a relation from the shadow overlay with what goes with it: its partitions, which the server
-// always drops along, its indexes, and with CASCADE its inheritance children and the views built on it.
+// always drops along, its indexes and the sequences its columns own, and with CASCADE its inheritance children and the views built on it.
 func (s *Relations) drop(key pgcatalog.RelationKey, cascade bool) {
 	state := s.recorder.State()
 	dropped := []pgcatalog.RelationKey{key}
@@ -193,6 +197,9 @@ func (s *Relations) drop(key pgcatalog.RelationKey, cascade bool) {
 		add(key)
 		for _, index := range state.IndexesOf(key) {
 			add(index.Key)
+		}
+		for _, sequence := range state.SequencesOwnedBy(key) {
+			add(sequence)
 		}
 		oid, ok := key.OID()
 		if !ok {

@@ -48,6 +48,7 @@ func columnDef(node *pg_query.Node) *ir.ColumnDef {
 			if generatedWhen(item) == "a" {
 				column.Generated = ir.GeneratedIdentityAlways
 			}
+			column.SequenceName, _ = findOption(constraint.Options, "sequence_name")
 		}
 		switch constraint.Type {
 		case ir.ConstraintDefault, ir.ConstraintGenerated, ir.ConstraintIdentity:

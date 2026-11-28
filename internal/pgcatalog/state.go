@@ -1,6 +1,7 @@
 package pgcatalog
 
 import (
+	"cmp"
 	"slices"
 	"sort"
 	"strings"
@@ -846,19 +847,54 @@ func (s *State) ForeignKeysTo(relID snapshot.OID) []snapshot.Constraint {
 	return s.catalog.relations.fkTo[relID]
 }
 
-// SequenceOwner return the table and column a sequence belongs to, if it isn't a standalone sequence
-// return value (Table OID, Column Num, isLinkedToATable)
-func (s *State) SequenceOwner(seqRelID snapshot.OID) (snapshot.OID, int16, bool) {
-	sequence, ok := s.catalog.relations.sequences[seqRelID]
-	if !ok || sequence.OwnerTable == 0 {
-		return 0, 0, false
+// SequenceOwner is the column a sequence belongs to at this point of the migration, false for a standalone one.
+func (s *State) SequenceOwner(sequence RelationKey) (SequenceOwner, bool) {
+	if owner, ok := s.overlay.OwnedSequences[sequence]; ok {
+		return owner, owner.Owned()
 	}
-	return sequence.OwnerTable, sequence.OwnerAttNum, true
+	oid, ok := sequence.OID()
+	if !ok {
+		return SequenceOwner{}, false
+	}
+	return s.snapshotSequenceOwner(s.catalog.relations.sequences[oid])
 }
 
-// SequencesOwnedBy lists the sequences a table's identity and serial columns draw from.
-func (s *State) SequencesOwnedBy(relID snapshot.OID) []snapshot.Sequence {
-	return s.catalog.relations.sequencesOwned[relID]
+// snapshotSequenceOwner is the column a snapshot sequence belongs to, under its current name.
+func (s *State) snapshotSequenceOwner(sequence snapshot.Sequence) (SequenceOwner, bool) {
+	if sequence.OwnerTable == 0 {
+		return SequenceOwner{}, false
+	}
+	table := KeyFromOID(sequence.OwnerTable)
+	column, ok := s.currentColumn(table, sequence.OwnerAttNum)
+	if !ok {
+		return SequenceOwner{}, false
+	}
+	return SequenceOwner{Table: table, Column: column, Identity: sequence.DepType == "i"}, true
+}
+
+// SequencesOwnedBy lists the sequences a table's columns own at this point of the migration: its identity and serial
+// columns', and those OWNED BY one of them. The snapshot's come first, in snapshot order, then the migration's.
+func (s *State) SequencesOwnedBy(table RelationKey) []RelationKey {
+	var out []RelationKey
+	if oid, ok := table.OID(); ok {
+		for _, sequence := range s.catalog.relations.sequencesOwned[oid] {
+			key := KeyFromOID(sequence.SeqRelID)
+			if _, held := s.overlay.OwnedSequences[key]; held {
+				continue
+			}
+			if _, live := s.RelationByKey(key); live {
+				out = append(out, key)
+			}
+		}
+	}
+	var added []RelationKey
+	for sequence, owner := range s.overlay.OwnedSequences {
+		if _, live := s.RelationByKey(sequence); live && owner.Table == table {
+			added = append(added, sequence)
+		}
+	}
+	slices.SortFunc(added, func(a, b RelationKey) int { return cmp.Compare(a.String(), b.String()) })
+	return append(out, added...)
 }
 
 // TriggerInfo is a user trigger of a table at this point of the migration.

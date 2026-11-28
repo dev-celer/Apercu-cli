@@ -47,6 +47,9 @@ func (m *Checks) Record(s Scope) {
 			m.renameIndex(s, s.Statement.Subcommands[0].NewName)
 		}
 		return
+	case "CREATE SEQUENCE", "ALTER SEQUENCE":
+		m.ownedBy(s)
+		return
 	case "ALTER TABLE", "ALTER TABLE RENAME":
 	default:
 		return
@@ -72,6 +75,12 @@ func (m *Checks) Record(s Scope) {
 				m.addColumn(s, reached, sub.Column)
 			}
 			m.claimColumn(s, table, sub.Column)
+			m.addSequence(s, table, sub.Column)
+		case ir.SubAddIdentity:
+			name, _ := optionValue(sub.Options, "sequence_name")
+			m.ownSequence(s, table, sub.Name, name, true)
+		case ir.SubDropIdentity:
+			m.dropSequences(s, table, sub.Name, true)
 		case ir.SubAlterColumnType:
 			m.retype(s, table, sub.Column)
 		case ir.SubDropExpression:
@@ -179,8 +188,8 @@ func builtOn(constraint held, column string) bool {
 	return constraint.Kind == "c" && constraint.Expr != nil && stmt.Mentions(constraint.Expr, column)
 }
 
-// dropColumn follows a column the migration drops: the server drops every constraint and index built on it with it,
-// and, under CASCADE, the foreign keys that point at it.
+// dropColumn follows a column the migration drops: the server drops every constraint and index built on it and the
+// sequences it owns with it, and, under CASCADE, the foreign keys that point at it.
 func (m *Checks) dropColumn(s Scope, table pgcatalog.RelationInfo, column string) {
 	key := table.Key()
 	for _, constraint := range s.State.Constraints(key) {
@@ -196,6 +205,7 @@ func (m *Checks) dropColumn(s Scope, table pgcatalog.RelationInfo, column string
 	for _, index := range s.State.IndexesOn(key, column) {
 		m.recorder.Drop(index.Key)
 	}
+	m.dropSequences(s, table, column, false)
 	m.recorder.DeleteColumn(key, column)
 }
 

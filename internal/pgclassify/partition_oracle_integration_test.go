@@ -120,6 +120,11 @@ CREATE TABLE sc_tg2_1 PARTITION OF sc_tg2 FOR VALUES FROM (0) TO (100);
 CREATE TABLE sc_tg3 (id bigint, k int NOT NULL) PARTITION BY RANGE (k);
 CREATE TABLE sc_tg3_1 PARTITION OF sc_tg3 FOR VALUES FROM (0) TO (100);
 CREATE TRIGGER sc_tg3_t AFTER UPDATE ON sc_tg3 FOR EACH STATEMENT EXECUTE FUNCTION bump();
+CREATE TABLE sc_s1 (id serial, v text);
+CREATE TABLE sc_s2 (id int GENERATED ALWAYS AS IDENTITY, v text);
+CREATE TABLE sc_s3 (id serial, v text);
+CREATE TABLE sc_s4 (id int, v text);
+CREATE SEQUENCE sc_s4_seq;
 
 INSERT INTO m SELECT i, i % 200, CASE WHEN i % 3 = 0 THEN 'x' ELSE 'y' END, (i % 200) + 1 FROM generate_series(1, 400) i;
 -- The default partition holds rows outside every bound the scripts attach, so it is never in the way.
@@ -167,6 +172,10 @@ INSERT INTO sc_kt2 VALUES (1, 150);
 INSERT INTO sc_tg1 VALUES (1, 10);
 INSERT INTO sc_tg2 VALUES (1, 10);
 INSERT INTO sc_tg3 VALUES (1, 10);
+INSERT INTO sc_s1 (v) VALUES ('a');
+INSERT INTO sc_s2 (v) VALUES ('a');
+INSERT INTO sc_s3 (v) VALUES ('a');
+INSERT INTO sc_s4 VALUES (1, 'a');
 ANALYZE;
 `
 
@@ -396,6 +405,24 @@ var lockScenarios = []lockScenario{
 			"CREATE TRIGGER sc_tg3_t BEFORE UPDATE ON sc_tg3 FOR EACH ROW EXECUTE FUNCTION bump()",
 		},
 		sql: "ALTER TABLE sc_tg3 DISABLE TRIGGER sc_tg3_t",
+	},
+	// RESTART IDENTITY resets the sequences the table's columns own as the setup left them: none once OWNED BY NONE,
+	// DROP IDENTITY or DROP COLUMN took them away, and one OWNED BY gave it.
+	{
+		setup: []string{"ALTER SEQUENCE sc_s1_id_seq OWNED BY NONE"},
+		sql:   "TRUNCATE sc_s1 RESTART IDENTITY",
+	},
+	{
+		setup: []string{"ALTER TABLE sc_s2 ALTER COLUMN id DROP IDENTITY"},
+		sql:   "TRUNCATE sc_s2 RESTART IDENTITY",
+	},
+	{
+		setup: []string{"ALTER TABLE sc_s3 DROP COLUMN id"},
+		sql:   "TRUNCATE sc_s3 RESTART IDENTITY",
+	},
+	{
+		setup: []string{"ALTER SEQUENCE sc_s4_seq OWNED BY sc_s4.id"},
+		sql:   "TRUNCATE sc_s4 RESTART IDENTITY",
 	},
 	// The column rules read the column as the setup left it: a second retype compares with the first's type, an
 	// added column has the type and NOT NULL it was added with.

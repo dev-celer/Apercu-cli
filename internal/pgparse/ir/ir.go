@@ -97,6 +97,8 @@ type Flags struct {
 	LikeIndexes     bool
 	// LikeGenerated is INCLUDING GENERATED: without it a LIKE copies a generated column as a plain one.
 	LikeGenerated bool
+	// LikeIdentity is INCLUDING IDENTITY: without it a LIKE copies an identity column as a plain one.
+	LikeIdentity bool
 }
 
 // Option is one entry of a parenthesised option list: a storage parameter, an attribute option, a VACUUM option.
@@ -269,6 +271,8 @@ type ColumnDef struct {
 	Generated Generated
 	// GeneratedExpr is the body of GENERATED … AS (…), nil for an identity or plain column.
 	GeneratedExpr *Expr
+	// SequenceName is an identity's SEQUENCE NAME option, as written, empty when the server picks the name.
+	SequenceName string
 	// Default is the DEFAULT expression, nil when the column has none.
 	Default *Expr
 	// Using is the USING expression of ALTER COLUMN TYPE, nil when the statement omitted it.

@@ -94,6 +94,7 @@ func normalizeReindex(stmt *pg_query.ReindexStmt, s ir.Statement) ir.Statement {
 const (
 	likeConstraints = 1 << 2
 	likeGenerated   = 1 << 4
+	likeIdentity    = 1 << 5
 	likeIndexes     = 1 << 6
 )
 
@@ -139,6 +140,7 @@ func normalizeCreateTable(stmt *pg_query.CreateStmt, s ir.Statement) ir.Statemen
 				LikeConstraints: like.Options&likeConstraints != 0,
 				LikeIndexes:     like.Options&likeIndexes != 0,
 				LikeGenerated:   like.Options&likeGenerated != 0,
+				LikeIdentity:    like.Options&likeIdentity != 0,
 			}})
 			s.Relations = append(s.Relations, ref)
 		}

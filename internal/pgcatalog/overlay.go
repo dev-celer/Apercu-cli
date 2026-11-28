@@ -26,8 +26,9 @@ type shadowOverlay struct {
 	Columns     map[RelationKey]map[string]ColumnState
 	Constraints map[RelationKey]map[string]ConstraintState
 
-	Indexes        map[RelationKey]IndexState
-	Triggers       map[RelationKey]map[string]TriggerState
+	Indexes  map[RelationKey]IndexState
+	Triggers map[RelationKey]map[string]TriggerState
+	// OwnedSequences are keyed by the sequence.
 	OwnedSequences map[RelationKey]SequenceOwner
 
 	// Blind says DDL this file cannot read ran (DO, CALL, CREATE EXTENSION), so an object can hold a name nothing recorded.
@@ -141,8 +142,20 @@ type TriggerState struct {
 	Row bool
 }
 
-// SequenceOwner is the column a sequence the migration touched belongs to.
-type SequenceOwner struct{}
+// SequenceOwner is the column a sequence the migration touched belongs to, the way pg_depend ties them. A sequence
+// the migration made standalone, OWNED BY NONE, has no Table.
+type SequenceOwner struct {
+	Table RelationKey
+	// Column is the owning column under its current name.
+	Column string
+	// Identity is an identity column's sequence, deptype 'i', against a serial's or an OWNED BY's 'a'.
+	Identity bool
+}
+
+// Owned reports whether the sequence belongs to a column.
+func (o SequenceOwner) Owned() bool {
+	return o.Table != RelationKey{}
+}
 
 func newShadowOverlay() *shadowOverlay {
 	return &shadowOverlay{
@@ -221,6 +234,7 @@ func (o *shadowOverlay) drop(key RelationKey) {
 	delete(o.Constraints, key)
 	delete(o.Indexes, key)
 	delete(o.Triggers, key)
+	delete(o.OwnedSequences, key)
 }
 
 // rename moves a relation to its new name.
